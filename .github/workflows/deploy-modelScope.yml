@@ -24,21 +24,22 @@ jobs:
         run: |
           REPO_URL="https://oauth2:${MODELSCOPE_TOKEN}@www.modelscope.cn/studios/Pisces43/Dev-partner.git"
           
-          echo "克隆 ModelScope 仓库..."
-          git clone "${REPO_URL}" modelscope-temp
-          cd modelscope-temp
+          # 克隆到 workspace 外的临时目录，避免 cp 递归自身
+          TEMP_DIR=$(mktemp -d)
+          echo "克隆 ModelScope 仓库 → ${TEMP_DIR}..."
+          git clone "${REPO_URL}" "${TEMP_DIR}/repo"
+          cd "${TEMP_DIR}/repo"
           
-          echo "清空 ModelScope 仓库内容（保留 .git）..."
+          echo "清空仓库内容（保留 .git）..."
           find . -maxdepth 1 -not -name '.git' -not -name '.' -exec rm -rf {} +
           
           echo "复制 GitHub 最新代码..."
           shopt -s dotglob
-          cp -r ../* .  2>/dev/null || true
-          # 确保不覆盖 ModelScope 的 .git
-          cp -r ../.* . 2>/dev/null || true
-          
-          # 删除可能复制过来的 GitHub .git
-          rm -rf .github/workflows/deploy-modelScope.yml.bak 2>/dev/null || true
+          for item in "${GITHUB_WORKSPACE}"/* "${GITHUB_WORKSPACE}"/.*; do
+            base=$(basename "${item}")
+            [ "${base}" = "." ] || [ "${base}" = ".." ] || [ "${base}" = ".git" ] && continue
+            cp -r "${item}" .
+          done
           
           echo "提交并推送..."
           git add -A
@@ -58,3 +59,6 @@ jobs:
             echo "  URL:    https://modelscope.cn/studios/Pisces43/Dev-partner"
             echo "=========================================="
           fi
+          
+          # 清理临时目录
+          rm -rf "${TEMP_DIR}"
