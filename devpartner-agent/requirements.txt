@@ -1,0 +1,7 @@
+﻿# DevPartner Agent 依赖
+# 包含更多依赖用于智能管家功能
+
+fastmcp>=0.3.0
+httpx>=0.24.0
+pyyaml>=6.0
+watchdog>=3.0.0

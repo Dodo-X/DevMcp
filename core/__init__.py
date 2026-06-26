@@ -1,1 +1,0 @@
-# devPartner Core Module

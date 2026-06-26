@@ -1,1 +1,0 @@
-# devPartner Services Module

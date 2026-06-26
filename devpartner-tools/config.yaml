@@ -1,0 +1,24 @@
+﻿# DevPartner Tools v2.0.0 配置
+# 纯工具层，配置项极少，体现"无状态"原则
+
+server:
+  host: "0.0.0.0"
+  port: 8081
+
+tools:
+  filesystem:
+    max_file_size_mb: 10
+    default_encoding: utf-8
+  git:
+    default_repo_path: "."
+  web:
+    timeout_seconds: 30
+    max_redirects: 5
+  reasoning:
+    max_thinking_steps: 10
+  discovery:
+    npm_search_timeout: 30
+
+logging:
+  level: WARNING
+  format: "[%(asctime)s] %(levelname)s: %(message)s"

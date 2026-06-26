@@ -1,0 +1,5 @@
+﻿# DevPartner Tools 依赖
+# 最小化依赖原则，只包含真正需要的包
+
+fastmcp>=0.3.0
+httpx>=0.24.0

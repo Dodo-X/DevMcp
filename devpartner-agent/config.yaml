@@ -1,0 +1,48 @@
+﻿# DevPartner Agent v2.0.0 配置
+# 智能管家层，有状态管理，配置项较多
+
+agent:
+  name: "devpartner-agent"
+  version: "2.0.0"
+  description: "DevPartner 智能管家 - 有状态、有记忆、自进化"
+
+server:
+  host: "0.0.0.0"
+  port: 8082
+  transport: "stdio"
+
+data:
+  root_dir: "./data"
+  databases_dir: "./data/databases"
+  logs_dir: "./data/logs"
+  memories_dir: "./data/memories"
+  backups_dir: "./data/backups"
+  temp_dir: "./data/temp"
+
+services:
+  log_service:
+    enabled: true
+    log_retention_days: 90
+    auto_cleanup: true
+  dialogue_service:
+    enabled: true
+    max_message_history: 500
+  evolution_service:
+    enabled: true
+    max_changes_per_day: 3
+    require_approval: true
+    backup_before_change: true
+  data_lifecycle:
+    log_retention_days: 90
+    db_cleanup_days: 90
+    auto_cleanup: true
+    backup_before_cleanup: true
+
+rules:
+  auto_load_builtin: true
+  trigger_on_startup: true
+
+logging:
+  level: DEBUG
+  format: "[%(asctime)s] [%(levelname)s] %(name)s: %(message)s"
+  file: "./data/logs/agent.log"

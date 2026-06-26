@@ -1,1 +1,0 @@
-# devPartner Skills Module
