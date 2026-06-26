@@ -30,13 +30,16 @@ jobs:
           REPO_URL="https://oauth2:${MODELSCOPE_TOKEN}@www.modelscope.cn/studios/Pisces43/Dev-partner.git"
 
           echo "同步 ModelScope 仓库..."
-          git remote add modelscope "${REPO_URL}" || true
-          git fetch modelscope master || echo "首次推送，ModelScope 仓库无 master 分支"
+          git remote add modelscope "${REPO_URL}" 2>/dev/null || true
+          git fetch modelscope master || echo "(ModelScope 仓库无历史，跳过)"
 
-          # 合并历史（允许无关历史合并）
+          # 合并 ModelScope 现有历史，冲突以我们的代码为准
           if git rev-parse --verify modelscope/master >/dev/null 2>&1; then
-            echo "合并 ModelScope 现有历史..."
-            git merge modelscope/master --allow-unrelated-histories -m "merge: sync with ModelScope" || true
+            echo "合并 ModelScope 现有历史（冲突以 GitHub 代码为准）..."
+            git merge modelscope/master --allow-unrelated-histories -X ours -m "merge: sync from GitHub" || {
+              echo "合并失败，终止"
+              exit 1
+            }
           fi
 
           echo "推送到 ModelScope..."
@@ -48,6 +51,4 @@ jobs:
           echo "=========================================="
           echo "  Studio: Pisces43/Dev-partner"
           echo "  URL:    https://modelscope.cn/studios/Pisces43/Dev-partner"
-          echo ""
-          echo "  ModelScope 将自动检测代码变更并重新部署。"
           echo "=========================================="
