@@ -1,0 +1,30 @@
+{
+  "_comment": "CodeBuddy MCP 配置 - 使用 devPartner 替代所有分散的 MCP 服务",
+  "_guide": "将此内容合并到 %USERPROFILE%\\.codebuddy\\mcp.json 中",
+  
+  "mcpServers": {
+    "devpartner": {
+      "type": "sse",
+      "url": "http://localhost:8080/sse",
+      "_description": "devPartner - 自我进化的全能 MCP 聚合服务，覆盖 50+ 工具",
+      "_tools_note": "启动 python server.py 后即可使用所有工具"
+    }
+  },
+  
+  "_migration_note": "如果 devPartner 正常运行，可以移除以下旧的 MCP 服务配置：",
+  "_remove_if_devpartner_works": [
+    "local-aggregator",
+    "filesystem", 
+    "sqlite",
+    "knowledge-graph",
+    "sequentialthinking"
+  ],
+  
+  "_keep_as_backup": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    }
+  }
+}

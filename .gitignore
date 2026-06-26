@@ -1,0 +1,35 @@
+# devPartner MCP 配置
+
+# 项目文件
+*.pyc
+__pycache__/
+*.egg-info/
+
+# 运行时数据
+data/devpartner.db
+data/daily_logs/
+data/logs_archive/
+data/tool_archive/
+data/mindmaps/
+data/memories/
+data/backups/
+data/.pending_log.json
+data/.pending_dialogue.json
+data/.dialogue_state.json
+data/.tool_events.json
+data/.evolution_history.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python
+.venv/
+venv/
+env/
+
+# 系统
+Thumbs.db
+.DS_Store
