@@ -15,40 +15,46 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: 📥 Checkout
+      - name: 📥 Checkout GitHub
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: 🚀 Push to ModelScope
         env:
           MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
         run: |
+          REPO_URL="https://oauth2:${MODELSCOPE_TOKEN}@www.modelscope.cn/studios/Pisces43/Dev-partner.git"
+          
+          echo "克隆 ModelScope 仓库..."
+          git clone "${REPO_URL}" modelscope-temp
+          cd modelscope-temp
+          
+          echo "清空 ModelScope 仓库内容（保留 .git）..."
+          find . -maxdepth 1 -not -name '.git' -not -name '.' -exec rm -rf {} +
+          
+          echo "复制 GitHub 最新代码..."
+          shopt -s dotglob
+          cp -r ../* .  2>/dev/null || true
+          # 确保不覆盖 ModelScope 的 .git
+          cp -r ../.* . 2>/dev/null || true
+          
+          # 删除可能复制过来的 GitHub .git
+          rm -rf .github/workflows/deploy-modelScope.yml.bak 2>/dev/null || true
+          
+          echo "提交并推送..."
+          git add -A
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
-
-          REPO_URL="https://oauth2:${MODELSCOPE_TOKEN}@www.modelscope.cn/studios/Pisces43/Dev-partner.git"
-
-          echo "同步 ModelScope 仓库..."
-          git remote add modelscope "${REPO_URL}" 2>/dev/null || true
-          git fetch modelscope master || echo "(ModelScope 仓库无历史，跳过)"
-
-          # 合并 ModelScope 现有历史，冲突以我们的代码为准
-          if git rev-parse --verify modelscope/master >/dev/null 2>&1; then
-            echo "合并 ModelScope 现有历史（冲突以 GitHub 代码为准）..."
-            git merge modelscope/master --allow-unrelated-histories -X ours -m "merge: sync from GitHub" || {
-              echo "合并失败，终止"
-              exit 1
-            }
+          
+          if git diff --cached --quiet; then
+            echo "没有变更，跳过推送。"
+          else
+            git commit -m "sync: update from GitHub $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git push origin master
+            echo ""
+            echo "=========================================="
+            echo "  代码已推送到 ModelScope 创空间 ✅"
+            echo "=========================================="
+            echo "  Studio: Pisces43/Dev-partner"
+            echo "  URL:    https://modelscope.cn/studios/Pisces43/Dev-partner"
+            echo "=========================================="
           fi
-
-          echo "推送到 ModelScope..."
-          git push modelscope master:master
-
-          echo ""
-          echo "=========================================="
-          echo "  代码已推送到 ModelScope 创空间"
-          echo "=========================================="
-          echo "  Studio: Pisces43/Dev-partner"
-          echo "  URL:    https://modelscope.cn/studios/Pisces43/Dev-partner"
-          echo "=========================================="
