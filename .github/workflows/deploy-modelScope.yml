@@ -9,81 +9,35 @@ on:
       - 'MODELSCOPE_DEPLOY.md'
       - '.idea/**'
       - '.gitignore'
-  # 也支持手动触发（在 GitHub Actions 页面点 Run workflow）
   workflow_dispatch:
 
-env:
-  # ModelScope Docker Registry
-  REGISTRY: registry.modelscope.cn
-  NAMESPACE: Pisces43
-  APP_NAME: Dev-partner
-  IMAGE_NAME: Pisces43/Dev-partner
-
 jobs:
-  build-and-push:
+  deploy:
     runs-on: ubuntu-latest
     steps:
-      # ============================================================
-      # Step 1: 检出代码
-      # ============================================================
       - name: 📥 Checkout
         uses: actions/checkout@v4
-
-      # ============================================================
-      # Step 2: 登录 ModelScope Docker Registry
-      # ============================================================
-      - name: 🔑 Login to ModelScope Registry
-        uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
-          username: Pisces43
-          password: ${{ secrets.MODELSCOPE_TOKEN }}
+          fetch-depth: 0
 
-      # ============================================================
-      # Step 3: 构建并推送 Docker 镜像
-      # ============================================================
-      - name: 🏗️ Build & Push Docker Image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-
-      # ============================================================
-      # Step 4: 触发 ModelScope 创空间重新部署
-      # ============================================================
-      - name: 🔄 Trigger ModelScope Redeploy
-        if: success()
+      - name: 🚀 Push to ModelScope
         env:
           MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
         run: |
-          echo "触发 ModelScope 创空间重新部署..."
-          echo "命名空间: ${{ env.NAMESPACE }}"
-          echo "应用名:   ${{ env.APP_NAME }}"
-          echo ""
-          echo "镜像已推送至: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
-          echo ""
-          echo "ModelScope 创空间通常会自动检测 registry 镜像更新并重建。"
-          echo "如果不是自动重建，请前往以下地址手动触发重建："
-          echo "https://modelscope.cn/studios/${{ env.IMAGE_NAME }}/settings"
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
 
-      # ============================================================
-      # Step 5: 通知结果
-      # ============================================================
-      - name: 📢 Summary
-        run: |
-          echo "=========================================="
-          echo "  镜像已推送到 ModelScope Registry"
-          echo "=========================================="
-          echo "  Registry: ${{ env.REGISTRY }}"
-          echo "  Image:    ${{ env.IMAGE_NAME }}"
-          echo "  Tag:      latest"
+          REPO_URL="https://oauth2:${MODELSCOPE_TOKEN}@www.modelscope.cn/studios/Pisces43/Dev-partner.git"
+
+          echo "推送 Master 分支到 ModelScope..."
+          git push "${REPO_URL}" master:master --force
+
           echo ""
-          echo "  请前往 ModelScope 创空间查看部署状态："
-          echo "  https://modelscope.cn/studios/${{ env.IMAGE_NAME }}"
+          echo "=========================================="
+          echo "  代码已推送到 ModelScope 创空间"
+          echo "=========================================="
+          echo "  Studio: Pisces43/Dev-partner"
+          echo "  URL:    https://modelscope.cn/studios/Pisces43/Dev-partner"
+          echo ""
+          echo "  ModelScope 将自动检测代码变更并重新部署。"
           echo "=========================================="
