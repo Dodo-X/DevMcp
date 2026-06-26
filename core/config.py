@@ -219,6 +219,13 @@ class ConfigManager:
                     parent_attr, child_attr, typ = target
                     setattr(getattr(config, parent_attr), child_attr, typ(value))
 
+        # Render 等平台自动注入 PORT 环境变量，若未设 DEVPARTNER_PORT 则自动适配
+        if "DEVPARTNER_PORT" not in os.environ and "PORT" in os.environ:
+            try:
+                config.port = int(os.environ["PORT"])
+            except ValueError:
+                pass
+
         return config
 
     def _ensure_dirs(self, config: AppConfig):
