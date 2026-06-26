@@ -1132,6 +1132,11 @@ def devpartner_get_suggestions(client_name: str = "") -> str:
 # 启动服务
 # ============================================================
 if __name__ == "__main__":
+    # Windows CMD 兼容: 强制 UTF-8 输出
+    import io as _io
+    if sys.platform == "win32":
+        sys.stdout = _io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    
     # 读取配置（支持环境变量覆盖）
     from core.config import ConfigManager
     cfg = ConfigManager().load()
