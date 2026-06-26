@@ -29,8 +29,18 @@ jobs:
 
           REPO_URL="https://oauth2:${MODELSCOPE_TOKEN}@www.modelscope.cn/studios/Pisces43/Dev-partner.git"
 
-          echo "推送 Master 分支到 ModelScope..."
-          git push "${REPO_URL}" master:master --force
+          echo "同步 ModelScope 仓库..."
+          git remote add modelscope "${REPO_URL}" || true
+          git fetch modelscope master || echo "首次推送，ModelScope 仓库无 master 分支"
+
+          # 合并历史（允许无关历史合并）
+          if git rev-parse --verify modelscope/master >/dev/null 2>&1; then
+            echo "合并 ModelScope 现有历史..."
+            git merge modelscope/master --allow-unrelated-histories -m "merge: sync with ModelScope" || true
+          fi
+
+          echo "推送到 ModelScope..."
+          git push modelscope master:master
 
           echo ""
           echo "=========================================="
