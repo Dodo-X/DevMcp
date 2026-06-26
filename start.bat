@@ -42,7 +42,7 @@ if %errorlevel% neq 0 (
 REM 启动服务
 echo.
 echo [启动] devPartner 服务...
-echo         地址: http://0.0.0.0:8080
+echo         地址: http://0.0.0.0:5000
 echo         协议: SSE (MCP)
 echo         按 Ctrl+C 停止服务
 echo ========================================

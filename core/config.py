@@ -92,7 +92,7 @@ class AppConfig:
     name: str = "devPartner"
     version: str = "1.0.0"
     host: str = "0.0.0.0"
-    port: int = 8080
+    port: int = 5000
     transport: str = "sse"
     project_root: str = "."
     deployment: DeploymentConfig = field(default_factory=DeploymentConfig)

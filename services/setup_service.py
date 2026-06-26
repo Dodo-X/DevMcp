@@ -305,7 +305,7 @@ class SetupWizard:
             "config_file": str(self.config_path),
         }
 
-    def generate_mcp_config_snippet(self, host: str = "localhost", port: int = 8080) -> dict:
+    def generate_mcp_config_snippet(self, host: str = "localhost", port: int = 5000) -> dict:
         """
         生成 MCP 连接配置代码片段（供用户粘贴到 CodeBuddy/Trae 的 mcp.json 中）
         """

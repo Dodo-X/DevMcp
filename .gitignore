@@ -19,8 +19,28 @@ data/.dialogue_state.json
 data/.tool_events.json
 data/.evolution_history.json
 
-# IDE
-.idea/
+# IDE - IntelliJ IDEA
+# 保留共享的项目配置
+!.idea/
+.idea/*
+!.idea/modules.xml
+!.idea/misc.xml
+!.idea/vcs.xml
+!.idea/codeStyles/
+!.idea/inspectionProfiles/
+!.idea/runConfigurations/
+!.idea/dataSources/
+!.idea/*.iml
+
+# 排除用户本地配置
+.idea/workspace.xml
+.idea/usage.statistics.xml
+.idea/shelf/
+.idea/tasks.xml
+.idea/uiDesigner.xml
+.idea/dictionaries/
+
+# VS Code
 .vscode/
 *.swp
 *.swo

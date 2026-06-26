@@ -22,17 +22,17 @@ COPY . .
 # 创建数据目录
 RUN mkdir -p data/daily_logs data/logs_archive data/mindmaps data/backups data/reports
 
-# 暴露端口
-EXPOSE 8080
+# 暴露端口（ModelScope 创空间默认 7860）
+EXPOSE 7860
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:7860/health')" || exit 1
 
 # 环境变量（ModelScope 部署时可覆盖）
 ENV DEVPARTNER_HOST=0.0.0.0
-ENV DEVPARTNER_PORT=8080
-ENV DEVPARTNER_TRANSPORT=sse
+ENV DEVPARTNER_PORT=7860
+ENV DEVPARTNER_TRANSPORT=streamable-http
 ENV DEVPARTNER_DATA_ROOT=data
 ENV PYTHONUNBUFFERED=1
 

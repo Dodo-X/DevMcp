@@ -5,7 +5,7 @@
   "mcpServers": {
     "devpartner": {
       "type": "sse",
-      "url": "http://localhost:8080/sse",
+      "url": "http://localhost:5000/sse",
       "_description": "devPartner - 自我进化的全能 MCP 聚合服务，覆盖 50+ 工具",
       "_tools_note": "启动 python server.py 后即可使用所有工具"
     }

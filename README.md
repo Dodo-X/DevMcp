@@ -67,7 +67,7 @@ start.bat
 
 ```bash
 docker build -t devpartner .
-docker run -d -p 8080:8080 --name devpartner devpartner
+docker run -d -p 5000:5000 --name devpartner devpartner
 ```
 
 ### ModelScope 部署
@@ -85,7 +85,7 @@ docker run -d -p 8080:8080 --name devpartner devpartner
   "mcpServers": {
     "devpartner": {
       "type": "sse",
-      "url": "http://localhost:8080/sse"
+      "url": "http://localhost:5000/sse"
     }
   }
 }

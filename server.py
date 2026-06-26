@@ -29,7 +29,7 @@ v3.0 重大架构升级：
   做到真正的"AI自己分析自己的工作数据"
 
 启动: python server.py
-默认: SSE 传输, 0.0.0.0:8080
+默认: 通过 config.yaml 配置传输方式与端口（支持环境变量覆盖）
 
 ModelScope 部署: python server.py --host 0.0.0.0 --port $PORT
 """
@@ -1123,11 +1123,15 @@ def devpartner_get_suggestions(client_name: str = "") -> str:
 # 启动服务
 # ============================================================
 if __name__ == "__main__":
+    # 读取配置（支持环境变量覆盖）
+    from core.config import ConfigManager
+    cfg = ConfigManager().load()
+    
     print("=" * 60)
     print("  🧬 devPartner - 自我进化 MCP 服务 v4.0")
     print("=" * 60)
-    print(f"  传输: SSE")
-    print(f"  地址: 0.0.0.0:8080")
+    print(f"  传输: {cfg.transport}")
+    print(f"  地址: {cfg.host}:{cfg.port}")
     print(f"  工具数: 70+ (19个分类)")
     print()
     print("  能力:")
@@ -1152,4 +1156,4 @@ if __name__ == "__main__":
     print(f"  🚀 服务启动中...")
     print("=" * 60)
 
-    mcp.run(transport="sse", host="0.0.0.0", port=8080)
+    mcp.run(transport=cfg.transport, host=cfg.host, port=cfg.port)
