@@ -576,20 +576,29 @@ def get_work_schema_guide() -> str:
 # 工具分类 11: 自我迭代 / 涡轮效应
 # ============================================================
 @mcp.tool()
-def run_self_iterate() -> str:
+def run_self_iterate(mode: str = "auto") -> str:
     """
-    执行自我迭代流程 → 提交 PR 到 GitHub
+    执行自我迭代流程，自动检测环境选择合适模式
+
+    Args:
+        mode: 运行模式
+            - "auto" (默认): 自动检测 — 有 git 则走完整流程，否则走本地模式
+            - "local": 本地模式 — 仅分析 + 返回变更方案，适合远程部署到 ModelScope
+            - "full": 完整模式 — Git 分支 + commit + push + GitHub PR（需要本地 git 仓库和 GITHUB_TOKEN）
+
+    本地模式流程：
+        收集系统数据 → 生成改进建议 → 识别代码变更 → 返回变更方案
+        → CodeBuddy 将变更写入本地项目 → 你审查后决定是否推送
     
-    流程：收集系统数据 → 生成改进建议 → 识别代码变更 →
-          创建 Git 分支 → 应用变更 → commit → push → 创建 GitHub PR
-    
-    需要 GITHUB_TOKEN 环境变量才能创建 PR
+    完整模式流程：
+        收集系统数据 → 生成改进建议 → 识别代码变更 →
+        创建 Git 分支 → 应用变更 → commit → push → 创建 GitHub PR
     """
     _ensure_core()
     from skills.self_iterate import execute_self_iterate
 
     async def _run():
-        return await execute_self_iterate()
+        return await execute_self_iterate(mode=mode)
 
     try:
         import concurrent.futures

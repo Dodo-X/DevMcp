@@ -1,0 +1,29 @@
+# Git 仓库（容器内不需要，且会导致误判 git 可用）
+.git/
+.gitignore
+
+# 本地 IDE 用户配置
+.idea/workspace.xml
+.idea/shelf/
+.idea/tasks.xml
+.vscode/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# 本地数据（容器内有自己的数据目录）
+data/daily_logs/
+data/logs_archive/
+data/mindmaps/
+data/backups/
+data/reports/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# CodeBuddy 本地数据
+.codebuddy/

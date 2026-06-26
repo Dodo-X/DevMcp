@@ -1,6 +1,10 @@
 """
-自我迭代技能 v4.0 — 提交 PR 到 GitHub
+自我迭代技能 v4.1 — 双模式进化
 ======================================
+v4.1 变更：
+  - ✅ 新增"本地模式"：远程 MCP 分析 → 返回变更方案 → CodeBuddy 写本地文件
+  - ✅ 自动检测模式：有 git → 全流程；无 git → 本地模式
+  - ✅ 本地模式报告包含完整的文件路径和变更内容，可直接应用
 v4.0 变更：
   - ❌ 移除"仅生成建议存DB"的旧模式
   - ✅ 进化流程改为：收集数据 → 生成改进 → 创建分支 → 应用变更 → 提交 PR 到 GitHub
@@ -10,6 +14,7 @@ v4.0 变更：
 import json
 import os
 import re
+import shutil
 import subprocess
 import asyncio
 from pathlib import Path
@@ -17,8 +22,29 @@ from datetime import datetime
 from typing import Optional
 
 
-async def execute_self_iterate(context: dict = None) -> dict:
-    """执行自我迭代流程 → 最终提交 PR 到 GitHub"""
+def _is_git_available(repo_path: str = ".") -> bool:
+    """检测 git 是否可用且当前目录是 git 仓库"""
+    try:
+        r = subprocess.run(
+            ["git", "-C", repo_path, "rev-parse", "--is-inside-work-tree"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+async def execute_self_iterate(context: dict = None, mode: str = "auto") -> dict:
+    """
+    执行自我迭代流程
+
+    Args:
+        context: 上下文数据（可选）
+        mode: 运行模式
+            - "auto": 自动检测（Docker 环境强 → local，有 git → full，无 git → local）
+            - "full": 完整 Git + PR 流程
+            - "local": 仅分析 + 返回变更方案（适用于远程部署）
+    """
     result = {
         "timestamp": datetime.now().isoformat(),
         "steps": [],
@@ -64,13 +90,43 @@ async def execute_self_iterate(context: dict = None) -> dict:
 
     if not code_changes:
         result["steps"].append({"step": "identify_changes", "status": "ok",
-                                 "note": "无可自动执行的代码变更，跳过 PR 创建"})
+                                 "note": "无可自动执行的代码变更"})
         report = _generate_iteration_report(result)
         result["report"] = report
         return result
 
     result["steps"].append({"step": "identify_changes", "status": "ok",
                              "change_count": len(code_changes)})
+
+    # ============================================================
+    # 判断运行模式
+    # ============================================================
+    use_local_mode = False
+    if mode == "local":
+        use_local_mode = True
+    elif mode == "auto":
+        # Docker 部署（ModelScope）强制走本地模式，避免容器内误操作
+        if os.environ.get("DEVPARTNER_MODE", "") == "local":
+            use_local_mode = True
+        else:
+            use_local_mode = not _is_git_available()
+    # mode == "full": use_local_mode = False
+
+    if use_local_mode:
+        # ---------- 本地模式：跳过 Git，返回变更方案 ----------
+        result["mode"] = "local"
+        result["steps"].append({"step": "mode_detection", "status": "ok",
+                                 "note": "本地模式 — 变更方案已返回，请在本地项目手动应用"})
+        # 生成可直接应用的代码变更（包含完整文件内容）
+        result["file_changes"] = _prepare_local_changes(code_changes)
+        report = _generate_iteration_report(result)
+        result["report"] = report
+        return result
+
+    # ============================================================
+    # 完整模式：Git + PR 流程（需要本地有 git 仓库）
+    # ============================================================
+    result["mode"] = "full"
 
     # Step 4: 创建 Git 分支
     branch_name = f"devpartner-evolve-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
@@ -693,10 +749,13 @@ def _create_github_pr(branch_name: str, base_branch: str,
 # ================================================================
 
 def _generate_iteration_report(result: dict) -> str:
-    """生成自我迭代报告（v4.0 含 PR 信息）"""
+    """生成自我迭代报告（v4.1 含本地模式支持）"""
+    is_local = result.get("mode") == "local"
+
     lines = [
         "# 🧬 devPartner 自我进化报告",
         f"**生成时间**: {result['timestamp']}",
+        f"**运行模式**: {'📡 本地模式（远程分析 → 本地落地）' if is_local else '🌐 完整模式（Git + PR）'}",
         "",
     ]
 
@@ -761,19 +820,91 @@ def _generate_iteration_report(result: dict) -> str:
 
     lines.append("")
 
-    # 应用结果
-    lines.append("## ⚡ 应用结果")
-    applied = result.get("improvements_applied", [])
-    if applied:
-        for imp in applied:
-            status = "✅ 已应用" if imp.get("applied") else "❌ 失败"
-            lines.append(f"- {status} - `{imp.get('file', '')}`: {imp.get('description', '')}")
-            if imp.get("error"):
-                lines.append(f"  - 错误: {imp['error']}")
-    else:
-        lines.append("- 本次未应用代码变更")
+    # 本地模式：显示可直接应用的文件变更
+    if is_local:
+        file_changes = result.get("file_changes", [])
+        if file_changes:
+            lines.append("## 📝 待应用到本地的文件变更")
+            lines.append("> 以下是需要在本地项目中手动应用的变更，请告知 CodeBuddy 执行：")
+            lines.append("")
+            for fc in file_changes:
+                fpath = fc.get("file", "")
+                faction = fc.get("action", "")
+                fdesc = fc.get("description", "")
+                fcontent = fc.get("content", "")
+                lines.append(f"### {'🆕 新建' if faction == 'create' else '✏️ 修改'}: `{fpath}`")
+                lines.append(f"**说明**: {fdesc}")
+                lines.append("")
+                if fcontent:
+                    lines.append("```")
+                    # 截取前 5KB 内容避免报告过长
+                    lines.append(fcontent[:5000])
+                    if len(fcontent) > 5000:
+                        lines.append(f"\n... (内容过长，已截断，完整长度 {len(fcontent)} 字符)")
+                    lines.append("```")
+                else:
+                    lines.append("```")
+                    lines.append("[请查看 data/suggestions 或联系 devPartner 获取详细内容]")
+                    lines.append("```")
+                lines.append("")
+        else:
+            lines.append("- 本次无需要应用到本地的文件变更")
+        lines.append("")
+
+    # 应用结果（完整模式才显示）
+    if not is_local:
+        lines.append("## ⚡ 应用结果")
+        applied = result.get("improvements_applied", [])
+        if applied:
+            for imp in applied:
+                status = "✅ 已应用" if imp.get("applied") else "❌ 失败"
+                lines.append(f"- {status} - `{imp.get('file', '')}`: {imp.get('description', '')}")
+                if imp.get("error"):
+                    lines.append(f"  - 错误: {imp['error']}")
+        else:
+            lines.append("- 本次未应用代码变更")
+
+    # 本地模式的下一步指引
+    if is_local:
+        lines.append("---")
+        lines.append("")
+        lines.append("## 🎯 下一步操作")
+        lines.append("")
+        lines.append("请在本地 `d:\\WorkSpace\\Code\\devPartner` 项目中：")
+        lines.append("")
+        lines.append("1. **审查变更**：查看上方代码变更是否符合预期")
+        lines.append("2. **应用变更**：让 CodeBuddy 将上述文件变更写入本地项目")
+        lines.append("3. **测试运行**：`python server.py` 验证变更无语法错误")
+        lines.append("4. **决定推送**：审查通过后 `git add && git commit && git push`")
+        lines.append("5. **更新部署**：如需同步到 ModelScope，重新构建镜像并部署")
 
     return "\n".join(lines)
+
+
+def _prepare_local_changes(code_changes: list) -> list:
+    """
+    为本地模式准备代码变更列表
+    返回每个文件的路径和新内容，方便 CodeBuddy 直接写入本地项目
+    """
+    changes = []
+    for ch in code_changes:
+        change_info = {
+            "file": ch.get("file", ""),
+            "action": ch.get("action", ""),  # modify / create
+            "description": ch.get("description", ""),
+            "content": ch.get("content", ""),
+        }
+        # 如果是 modify 且没有 content，尝试读取远程容器的当前文件
+        if ch.get("action") == "modify" and not change_info["content"]:
+            try:
+                file_path = ch.get("file", "")
+                if os.path.exists(file_path):
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        change_info["content"] = f.read()
+            except Exception:
+                pass
+        changes.append(change_info)
+    return changes
 
 
 async def check_and_improve() -> dict:

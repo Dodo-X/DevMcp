@@ -9,7 +9,8 @@ LABEL description="全能 MCP 数据服务 - AI-Client-Driven 架构"
 # 设置工作目录
 WORKDIR /app
 
-# 安装系统依赖
+# 安装系统依赖（git 用于自我进化 PR 推送）
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir --upgrade pip
 
 # 复制依赖文件并安装
@@ -35,6 +36,9 @@ ENV DEVPARTNER_PORT=7860
 ENV DEVPARTNER_TRANSPORT=streamable-http
 ENV DEVPARTNER_DATA_ROOT=data
 ENV PYTHONUNBUFFERED=1
+ENV DEVPARTNER_MODE=local
+# DEVPARTNER_MODE=local 强制自我进化走"本地模式"：只分析返回方案，不修改容器文件
+# GITHUB_TOKEN 需在 ModelScope 控制台环境变量中设置（用于自我进化 PR）
 
 # 启动命令
 CMD ["python", "server.py"]
