@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-devPartner - 自我进化的全能 MCP 服务 v3.0
+devPartner - 自我进化的全能 MCP 服务 v4.0
 ===========================================
+v4.0 重大更新：
+  ✅ 进化流程：采集数据 → 识别变更 → 创建分支 → 提交 PR 到 GitHub
 v3.0 重大架构升级：
   ❌ 移除本地 Ollama 依赖（太慢、不支持远程部署）
   ✅ AI-Client-Driven 数据工具：MCP 提供原始数据，AI客户端LLM自己分析
@@ -16,7 +18,7 @@ v3.0 重大架构升级：
   🔄  涡轮效应：系统自改进、自动优化
   🎯  规则引擎：嵌入式规则、自动触发
   🔍  MCP发现：自动扫描、测试、集成新服务
-  🧬  自我进化：代码自更新、热重载、备份回滚
+  🧬  自我进化：代码自更新 → Git分支 → PR到GitHub ★v4.0
   📊  AI分析接口：提供数据，让AI客户端自己做深度分析
   🆔  身份识别：自动检测/注册AI客户端
   ☁️  云盘同步：坚果云/阿里云盘 WAL防冲突
@@ -451,88 +453,123 @@ def list_mindmaps() -> str:
 
 
 # ============================================================
-# 工具分类 9: Ollama AI 分析
+# 工具分类 9: AI-Client-Driven 每日总结数据接口（v3.0 替代 Ollama）
 # ============================================================
+# 理念：MCP 提供纯数据，AI 客户端用自己的 LLM（比本地 Ollama 强大得多）分析
+# 流程：AI调 get_daily_work_data → 拿到数据 → 用自己的LLM分析 → 调 save_daily_analysis
 @mcp.tool()
-def ollama_health() -> str:
-    """检查 Ollama 服务状态"""
+def get_daily_work_data(date_str: str = "") -> str:
+    """
+    获取指定日期的工作数据（供 AI 客户端分析用）
+    
+    返回当日所有对话记录、原始日志、统计数据，
+    AI客户端拿到这些数据后用自己的 LLM 做深度分析总结。
+    比本地 Ollama 7B 模型强大得多！
+    
+    date_str: 可选，格式 YYYY-MM-DD，为空则返回今日数据
+    """
     _ensure_core()
-    from services.ollama_service import get_ollama
-    result = get_ollama().check_health()
+    from skills.daily_summary import get_daily_work_data as _get_data
+    
+    target = date_str or datetime.now().strftime("%Y-%m-%d")
+    data = _get_data(target)
+    return json.dumps(data, ensure_ascii=False)
+
+
+@mcp.tool()
+def save_daily_analysis(analysis_json: str) -> str:
+    """
+    保存 AI 客户端的每日分析结果
+    
+    AI客户端调用 get_daily_work_data 获取数据后，
+    用自己的 LLM 分析，然后调用此工具保存结果。
+    
+    analysis_json: JSON 字符串，格式：
+    {
+      "date": "YYYY-MM-DD",
+      "summary": "一句话总结",
+      "experience": {"deep_dive": "技术深挖", "lesson": "教训"},
+      "skills": {"new_skills": [], "patterns": [], "tools": []},
+      "knowledge": {"must_remember": [], "insights": []},
+      "danger_signals": {"repeated_mistakes": [], "tech_debt": [], "hot_files": []},
+      "tomorrow_plan": "明日计划",
+      "self_analysis": {"strengths": [], "weaknesses": [], "growth_suggestions": []},
+      "cross_insight": {"title": "跨AI洞察", "content": "...", "to": "trae"}
+    }
+    """
+    _ensure_core()
+    from skills.daily_summary import save_daily_analysis as _save
+    
+    result = _save(analysis_json)
     return json.dumps(result, ensure_ascii=False)
 
 
 @mcp.tool()
-def ollama_chat(prompt: str, system_prompt: str = "") -> str:
-    """调用 Ollama 聊天（同步包装）"""
+def get_weekly_work_data() -> str:
+    """
+    获取最近 7 天的工作数据概览
+    
+    返回每周统计：总对话数、各天对话数、任务类型分布等
+    适合 AI 客户端做周度总结
+    """
     _ensure_core()
-    from services.ollama_service import get_ollama
-
-    async def _call():
-        return await get_ollama().chat(prompt, system_prompt)
-
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # 在已有事件循环中创建新任务
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, _call())
-                result = future.result(timeout=600)
-        else:
-            result = asyncio.run(_call())
-        return json.dumps(result, ensure_ascii=False)
-    except Exception as e:
-        return json.dumps({"error": str(e)}, ensure_ascii=False)
+    from skills.daily_summary import get_weekly_work_data as _get_weekly
+    
+    data = _get_weekly()
+    return json.dumps(data, ensure_ascii=False)
 
 
 @mcp.tool()
-def ai_self_reflect(topic: str, decision: str, alternatives: str, outcome: str = "") -> str:
-    """AI 自我反省 - 对决策进行复盘"""
+def get_work_schema_guide() -> str:
+    """
+    获取工作数据结构说明和 AI 分析指南
+    
+    返回数据库表结构、日志格式说明，
+    帮助 AI 客户端理解数据并写出更好的分析
+    """
     _ensure_core()
-    from services.ollama_service import get_ollama
-
-    decision_data = {
-        "topic": topic,
-        "decision": decision,
-        "alternatives": alternatives,
-        "outcome": outcome,
-        "timestamp": datetime.now().isoformat(),
+    guide = {
+        "version": "3.0",
+        "description": "devPartner 工作数据分析指南",
+        "analysis_workflow": {
+            "step1": "调用 get_daily_work_data(date) 获取原始工作数据",
+            "step2": "用你自己的 LLM 分析这些数据（你是 Claude/GPT，比本地7B模型强）",
+            "step3": "调用 save_daily_analysis(analysis_json) 保存分析结果",
+        },
+        "data_structure": {
+            "conversations": "每次对话的结构化记录（topic/task_type/problems/solutions等）",
+            "log_content": "原始 Markdown 日志全文",
+            "stats": "统计数据（总对话数/类型分布）",
+            "files_touched": "涉及到的所有文件路径",
+            "thinking_data": "AI 的思考历程（think步骤/关键决策/自我反思）",
+        },
+        "analysis_dimensions": [
+            "技术深度：今天解决了什么核心技术问题？",
+            "经验教训：从今天的经历中学到了什么？",
+            "技能成长：掌握了哪些新技能或模式？",
+            "危险信号：有没有重复踩坑？技术债积累？",
+            "明日方向：基于今天，明天应该优先做什么？",
+            "跨AI洞察：有什么可以分享给其他AI（如Trae）的经验？",
+        ],
+        "save_format": {
+            "summary": "string - 一句话总结",
+            "experience.deep_dive": "string - 技术深挖",
+            "experience.lesson": "string - 核心教训",
+            "skills.new_skills": "string[] - 新技能",
+            "skills.patterns": "string[] - 可复用模式",
+            "knowledge.must_remember": "string[] - 必记知识点",
+            "knowledge.insights": "string[] - 技术洞察",
+            "danger_signals.repeated_mistakes": "string[] - 重复踩坑",
+            "danger_signals.tech_debt": "string[] - 技术债",
+            "danger_signals.hot_files": "string[] - 高频改动文件",
+            "tomorrow_plan": "string - 明日计划",
+            "self_analysis.strengths": "string[] - 优势",
+            "self_analysis.weaknesses": "string[] - 短板",
+            "self_analysis.growth_suggestions": "string[] - 成长建议",
+            "cross_insight": "object - 跨AI分享 {title, content, to, priority}",
+        },
     }
-
-    async def _reflect():
-        return await get_ollama().reflect_on_decision(decision_data)
-
-    try:
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(asyncio.run, _reflect())
-            reflection = future.result(timeout=600)
-        return json.dumps({"success": True, "reflection": reflection}, ensure_ascii=False)
-    except Exception as e:
-        return json.dumps({"error": str(e)}, ensure_ascii=False)
-
-
-# ============================================================
-# 工具分类 10: 每日总结
-# ============================================================
-@mcp.tool()
-def run_daily_summary() -> str:
-    """执行每日工作总结（Ollama分析 + 生成报告）"""
-    _ensure_core()
-    from skills.daily_summary import execute_daily_summary
-
-    async def _run():
-        return await execute_daily_summary()
-
-    try:
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(asyncio.run, _run())
-            result = future.result(timeout=600)
-        return json.dumps(result, ensure_ascii=False)
-    except Exception as e:
-        return json.dumps({"error": str(e)}, ensure_ascii=False)
+    return json.dumps(guide, ensure_ascii=False, indent=2)
 
 
 # ============================================================
@@ -540,7 +577,14 @@ def run_daily_summary() -> str:
 # ============================================================
 @mcp.tool()
 def run_self_iterate() -> str:
-    """执行自我迭代流程（系统分析 + 改进建议 + 自动应用）"""
+    """
+    执行自我迭代流程 → 提交 PR 到 GitHub
+    
+    流程：收集系统数据 → 生成改进建议 → 识别代码变更 →
+          创建 Git 分支 → 应用变更 → commit → push → 创建 GitHub PR
+    
+    需要 GITHUB_TOKEN 环境变量才能创建 PR
+    """
     _ensure_core()
     from skills.self_iterate import execute_self_iterate
 
@@ -1080,9 +1124,8 @@ def devpartner_get_suggestions(client_name: str = "") -> str:
 # ============================================================
 if __name__ == "__main__":
     print("=" * 60)
-    print("  🧬 devPartner - 自我进化 MCP 聚合服务")
+    print("  🧬 devPartner - 自我进化 MCP 服务 v4.0")
     print("=" * 60)
-    print(f"  版本: 2.0.0")
     print(f"  传输: SSE")
     print(f"  地址: 0.0.0.0:8080")
     print(f"  工具数: 70+ (19个分类)")
@@ -1094,8 +1137,8 @@ if __name__ == "__main__":
     print("    🧠  思维导图: Mermaid生成/HTML渲染")
     print("    🔄  涡轮效应: 系统自改进/自动优化")
     print("    🔍  MCP发现: 自动扫描/测试/集成新服务")
-    print("    🧬  自我进化: 代码自更新/热重载/备份回滚")
-    print("    💭  自我反省: 决策复盘/经验积累")
+    print("    🧬  自我进化: 代码自更新 → Git分支 → PR到GitHub ★v4.0")
+    print("    📊  AI分析接口: 数据提供给AI客户端自行分析 ★v3.0")
     print("    🆔  身份识别: CodeBuddy/Trae/Cursor 自动检测")
     print("    ☁️  云盘同步: 坚果云/阿里云盘 WAL防冲突")
     print("    🧙  配置向导: 智能检测/引导配置/路径验证")

@@ -1,18 +1,24 @@
-# devPartner 配置文件
-# 可用环境变量覆盖: DEVPARTNER_PORT, OLLAMA_HOST, DEVPARTNER_SHARED_DB
+# devPartner 配置文件 v4.0
+# 可用环境变量覆盖: DEVPARTNER_PORT, DEVPARTNER_SHARED_DB, DEVPARTNER_DATA_ROOT
+#
+# v4.0 变更：
+#   - ✅ 进化流程升级为"提交 PR 到 GitHub"
+#   - ❌ 移除 Ollama 配置（不再依赖本地 Ollama）
+#   - ✅ 新增 AI-Client-Driven 数据接口（让 AI 自己的 LLM 做分析）
+#   - ✅ 新增部署配置（适配 ModelScope 等远程部署）
 
 app:
   name: devPartner
-  version: "1.0.0"
+  version: "4.0.0"
   host: "0.0.0.0"
   port: 8080
   transport: sse
   project_root: "."
 
-ollama:
-  host: "http://localhost:11434"
-  model: "qwen2.5-coder:7b"
-  timeout: 600
+deployment:
+  platform: local        # local / modelscope / custom
+  api_url: ""            # ModelScope API 地址
+  health_check_path: "/health"
 
 database:
   local_db: "data/devpartner.db"
