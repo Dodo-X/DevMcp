@@ -62,7 +62,7 @@ docker push registry.modelscope.cn/<namespace>/devpartner:latest
   "mcpServers": {
     "devpartner": {
       "type": "streamable_http",
-      "url": "https://<你的应用名>.modelscope.cn/mcp"
+      "url": "https://{owner}-{repo_name}.ms.show/mcp"
     }
   }
 }
