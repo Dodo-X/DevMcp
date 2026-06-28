@@ -15,11 +15,9 @@ v3.0 重大架构变更：
   daily_logs/ + SQLite DB → get_daily_work_data → AI分析 → save_daily_analysis → DB + Report
 """
 import json
-import os
 import re
-from pathlib import Path
 from datetime import datetime, date, timedelta
-from typing import Optional
+from pathlib import Path
 
 
 def get_daily_work_data(date_str: str = None, fallback_to_log: bool = True) -> dict:
@@ -670,3 +668,51 @@ def _generate_report_file(analysis: dict, target_date: str) -> str:
         f.write(content)
     
     return str(report_path)
+# ============================================================
+# 公共入口函数
+# ============================================================
+
+def generate_daily_summary(date_str: str = "") -> dict:
+    """
+    生成每日工作总结（公共入口）
+    
+    被 server.py 调用，封装 get_daily_work_data 返回结构化摘要。
+    
+    Args:
+        date_str: 日期字符串（YYYY-MM-DD），默认今天
+    
+    Returns:
+        dict: 每日工作总结
+    """
+    try:
+        data = get_daily_work_data(date_str, fallback_to_log=True)
+        
+        if not data.get("success", False):
+            return {
+                "success": False,
+                "error": data.get("error", "获取数据失败"),
+                "date": date_str or "today",
+            }
+        
+        tasks = data.get("tasks", [])
+        stats = data.get("stats", {})
+        
+        return {
+            "success": True,
+            "date": data.get("date", date_str),
+            "summary": {
+                "total_tasks": len(tasks),
+                "task_types": stats.get("task_types", {}),
+                "files_touched": stats.get("files_touched", 0),
+                "problems_count": stats.get("problems_count", 0),
+                "solutions_count": stats.get("solutions_count", 0),
+            },
+            "tasks": tasks[:20],  # 最多返回 20 条
+            "raw_data": data,
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "date": date_str or "today",
+        }

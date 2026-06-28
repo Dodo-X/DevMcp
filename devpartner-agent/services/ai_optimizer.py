@@ -5,22 +5,19 @@ AI配置优化建议服务
 
 原则：
   - 只分析，不直接修改AI客户端配置
-  - 通过跨AI对话或日志给出建议
+  - 通过模块协作消息或日志给出建议
   - 检测配置问题并提出解决方案
 
 分析维度：
   1. MCP 配置完整性（是否连接了 devPartner）
   2. Rules/Skills 覆盖度
-  3. 自动化任务设置
-  4. 日志记录机制
 """
 import json
-import yaml
-from pathlib import Path
 from datetime import datetime
-from typing import Optional, List, Dict
+from pathlib import Path
+from typing import Optional, List
 
-from core.identity import KNOWN_CLIENTS
+from core import KNOWN_CLIENTS
 
 
 class AIOptimizer:
@@ -74,16 +71,6 @@ class AIOptimizer:
         rule_issues = self._check_rules(config_dir)
         analysis["issues"].extend(rule_issues)
         analysis["score"] -= len(rule_issues) * 5
-
-        # 检查 3: 自动化/定时任务
-        auto_issues = self._check_automations(config_dir)
-        analysis["issues"].extend(auto_issues)
-        analysis["score"] -= len(auto_issues) * 5
-
-        # 检查 4: 日志记录
-        log_issues = self._check_logging(config_dir, workspace_root)
-        analysis["issues"].extend(log_issues)
-        analysis["score"] -= len(log_issues) * 5
 
         # 生成建议
         analysis["suggestions"] = self._generate_suggestions(
@@ -207,44 +194,6 @@ class AIOptimizer:
 
         return issues
 
-    def _check_automations(self, config_dir: Path) -> List[dict]:
-        """检查自动化/定时任务"""
-        issues = []
-        auto_dir = config_dir / "automations"
-
-        if not auto_dir.exists():
-            # 不一定是问题，CodeBuddy 才有 automations
-            return issues
-
-        toml_files = list(auto_dir.glob("**/*.toml"))
-        if not toml_files:
-            issues.append({
-                "severity": "low",
-                "category": "no_automations",
-                "message": "未设置任何自动化定时任务",
-            })
-
-        return issues
-
-    def _check_logging(self, config_dir: Path, workspace_root: str) -> List[dict]:
-        """检查日志记录机制"""
-        issues = []
-        scripts_dir = config_dir / "scripts"
-
-        # 检查是否有日志脚本
-        log_scripts = []
-        if scripts_dir.exists():
-            log_scripts = list(scripts_dir.glob("*log*")) + list(scripts_dir.glob("*hook*"))
-
-        if not log_scripts:
-            issues.append({
-                "severity": "medium",
-                "category": "no_log_mechanism",
-                "message": "未检测到日志记录脚本（Hook/自动化），devPartner 可以提供完整的日志服务",
-            })
-
-        return issues
-
     def _generate_suggestions(self, issues: List[dict],
                                client_name: str, workspace_root: str) -> List[dict]:
         """根据问题生成优化建议"""
@@ -284,14 +233,6 @@ class AIOptimizer:
                     "priority": "medium",
                     "title": "创建项目规则",
                     "description": "devPartner 可以建议为你的项目创建合适的规则文件",
-                })
-
-            elif issue["category"] == "no_log_mechanism":
-                suggestions.append({
-                    "action": "setup_logging",
-                    "priority": "medium",
-                    "title": "启用 devPartner 日志服务",
-                    "description": "devPartner 内置完整的日志记录系统（对话日志/每日总结/数据库归档），可用 devpartner_setup 配置",
                 })
 
         return suggestions

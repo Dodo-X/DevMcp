@@ -66,6 +66,7 @@ class DataLifecycleConfig:
     log_retention_days: int = 90
     db_cleanup_days: int = 90
     auto_cleanup: bool = True
+    auto_cleanup_interval_hours: int = 24  # 自动清理间隔（小时）
     backup_before_cleanup: bool = True
 
 

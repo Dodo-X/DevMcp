@@ -230,6 +230,225 @@ class EvolutionEngine:
         except Exception as e:
             return {"available": False, "package": package_name, "error": str(e)}
 
+    # ── Git 版本控制 ──────────────────────────────────
+
+    def _is_git_available(self) -> bool:
+        """检测 git 是否可用"""
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--is-inside-work-tree"],
+                capture_output=True, text=True, timeout=10,
+                cwd=str(self._project_root.parent)
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _run_git(self, args: list, cwd: str = None) -> subprocess.CompletedProcess:
+        """执行 git 命令"""
+        if cwd is None:
+            cwd = str(self._project_root.parent)
+        result = subprocess.run(
+            ["git"] + args,
+            capture_output=True, text=True, timeout=60,
+            cwd=cwd
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} 失败")
+        return result
+
+    def git_create_branch(self, branch_name: str, base_branch: str = None) -> dict:
+        """
+        AI 控制的 Git 分支创建
+
+        在系统升级前创建新分支，用于安全地应用变更。
+        自动记录当前分支以便回滚。
+
+        Args:
+            branch_name: 新分支名称
+            base_branch: 基础分支（默认当前分支）
+
+        Returns:
+            {success, branch, previous_branch}
+        """
+        if not self._is_git_available():
+            return {"success": False, "error": "Git 不可用"}
+
+        try:
+            # 记录当前分支
+            r = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True, text=True, timeout=15,
+                cwd=str(self._project_root.parent)
+            )
+            previous = r.stdout.strip()
+
+            # 如果指定了 base_branch，先切换
+            if base_branch and base_branch != previous:
+                self._run_git(["checkout", base_branch])
+                # 确保基于最新代码
+                try:
+                    self._run_git(["pull", "--ff-only"])
+                except Exception:
+                    pass
+
+            # 创建并切换到新分支
+            self._run_git(["checkout", "-b", branch_name])
+
+            self._git_previous_branch = previous
+
+            return {
+                "success": True,
+                "branch": branch_name,
+                "previous_branch": previous,
+                "base_branch": base_branch or previous,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def git_commit_and_push(self, message: str, branch_name: str = None) -> dict:
+        """
+        AI 控制的 Git 提交和推送
+
+        暂存所有变更 → 提交 → 推送到 origin。
+        这是系统升级完成后的标准 Git 操作。
+
+        Args:
+            message: 提交信息
+            branch_name: 要推送的分支名（默认当前分支）
+
+        Returns:
+            {success, branch, commit_message, push_result}
+        """
+        if not self._is_git_available():
+            return {"success": False, "error": "Git 不可用"}
+
+        try:
+            # 1. 暂存所有变更
+            self._run_git(["add", "-A"])
+
+            # 2. 提交
+            self._run_git(["commit", "-m", message])
+
+            # 3. 获取当前分支名
+            if branch_name is None:
+                r = subprocess.run(
+                    ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                    capture_output=True, text=True, timeout=15,
+                    cwd=str(self._project_root.parent)
+                )
+                branch_name = r.stdout.strip()
+
+            # 4. 推送
+            result = self._run_git(["push", "-u", "origin", branch_name])
+
+            return {
+                "success": True,
+                "branch": branch_name,
+                "commit_message": message,
+                "push_output": result.stdout.strip()[:500],
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def git_checkout_previous(self) -> dict:
+        """切回升级前的原始分支"""
+        if hasattr(self, "_git_previous_branch") and self._git_previous_branch:
+            try:
+                self._run_git(["checkout", self._git_previous_branch])
+                return {"success": True, "branch": self._git_previous_branch}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+        return {"success": False, "error": "无记录的前一个分支"}
+
+    def git_rollback_branch(self, branch_name: str) -> dict:
+        """
+        AI 控制的 Git 回滚
+
+        删除失败的分支，切回原分支。
+        用于升级失败时的自动恢复。
+
+        Args:
+            branch_name: 要删除的分支名
+
+        Returns:
+            {success, deleted_branch, current_branch}
+        """
+        if not self._is_git_available():
+            return {"success": False, "error": "Git 不可用"}
+
+        try:
+            # 先切回之前的 branch
+            checkout_result = self.git_checkout_previous()
+            current = checkout_result.get("branch", "unknown")
+
+            # 删除失败的分支
+            self._run_git(["branch", "-D", branch_name])
+
+            return {
+                "success": True,
+                "deleted_branch": branch_name,
+                "current_branch": current,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def git_get_status(self) -> dict:
+        """
+        获取 Git 仓库状态
+
+        返回当前分支、变更文件列表、是否干净等信息。
+        用于 AI 决策是否应该创建分支/提交。
+
+        Returns:
+            {branch, is_clean, changes: {staged, unstaged, untracked}, files: [...]}
+        """
+        if not self._is_git_available():
+            return {"git_available": False}
+
+        try:
+            r = subprocess.run(
+                ["git", "status", "--porcelain"],
+                capture_output=True, text=True, timeout=15,
+                cwd=str(self._project_root.parent)
+            )
+            lines = [l for l in r.stdout.strip().split("\n") if l]
+
+            r_branch = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True, text=True, timeout=15,
+                cwd=str(self._project_root.parent)
+            )
+
+            staged = []
+            unstaged = []
+            untracked = []
+            for line in lines:
+                if len(line) < 3:
+                    continue
+                status_code = line[:2]
+                filename = line[3:].strip()
+                if status_code[0] in "MRC" and status_code[1] != "?":
+                    staged.append(filename)
+                elif status_code[0] == "?":
+                    untracked.append(filename)
+                else:
+                    unstaged.append(filename)
+
+            return {
+                "git_available": True,
+                "branch": r_branch.stdout.strip(),
+                "is_clean": len(lines) == 0,
+                "changes": {
+                    "staged": len(staged),
+                    "unstaged": len(unstaged),
+                    "untracked": len(untracked),
+                },
+                "files": lines[:20],  # 最多返回前20个文件
+            }
+        except Exception as e:
+            return {"git_available": True, "error": str(e)}
+
     # ── 状态查询 ──────────────────────────────────────
 
     def get_evolution_history(self) -> list[dict]:

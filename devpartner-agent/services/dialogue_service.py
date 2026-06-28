@@ -1,9 +1,16 @@
 """
-跨AI对话服务
-- 读写 agent_dialogue.md
-- 检测新消息
-- 生成回复
-- 管理已读状态
+模块间协作消息服务
+==================
+用于 devpartner-tools 和 devpartner-agent 两个模块间的内部通信。
+
+定位：纯工具层 ↔ 智能管家层的内部消息传递
+  - 读写 module_dialogue.md
+  - 检测新消息
+  - 生成回复
+  - 管理已读状态
+
+注意：这不是面向 CodeBuddy/Trae/用户的跨AI对话，
+      而是 devPartner 内部两个模块之间的协作机制。
 """
 import json
 import re
@@ -13,7 +20,7 @@ from typing import Optional
 
 
 class DialogueService:
-    """跨AI对话管理服务"""
+    """模块间协作消息管理服务"""
 
     _instance: Optional["DialogueService"] = None
 
@@ -30,12 +37,12 @@ class DialogueService:
             from core.config import get_config
             cfg = get_config()
             data_root = cfg.data.root_dir
-            self._dialogue_file = Path(data_root) / "agent_dialogue.md"
-            self._state_file = Path(data_root) / ".dialogue_state.json"
+            self._dialogue_file = Path(data_root) / "module_dialogue.md"
+            self._state_file = Path(data_root) / ".module_dialogue_state.json"
         except Exception:
-            self._dialogue_file = Path("data/agent_dialogue.md")
-            self._state_file = Path("data/.dialogue_state.json")
-        self._pending_file = Path("data/.pending_dialogue.json")
+            self._dialogue_file = Path("data/module_dialogue.md")
+            self._state_file = Path("data/.module_dialogue_state.json")
+        self._pending_file = Path("data/.pending_module_dialogue.json")
         self._initialized = True
 
     def configure(self, dialogue_file: str, state_file: str, pending_file: str):
@@ -45,9 +52,9 @@ class DialogueService:
         self._pending_file = Path(pending_file)
 
     def read_dialogue(self) -> str:
-        """读取对话文件"""
+        """读取模块协作消息文件"""
         if not self._dialogue_file.exists():
-            return json.dumps({"entries": [], "message": "对话文件不存在"}, ensure_ascii=False)
+            return json.dumps({"entries": [], "message": "模块对话文件不存在"}, ensure_ascii=False)
 
         with open(self._dialogue_file, "r", encoding="utf-8") as f:
             content = f.read()
@@ -59,7 +66,7 @@ class DialogueService:
         }, ensure_ascii=False)
 
     def parse_entries(self) -> list[dict]:
-        """解析对话文件中的所有条目"""
+        """解析模块对话文件中的所有条目"""
         if not self._dialogue_file.exists():
             return []
 
@@ -79,10 +86,10 @@ class DialogueService:
                 "body": body.strip(),
             }
 
-            # 提取元数据
+            # 提取元数据（模块间消息）
             time_match = re.search(r'时间.*?(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})', body)
-            from_match = re.search(r'来自.*?(CodeBuddy|Trae|你|所有人|All|devPartner)', body)
-            to_match = re.search(r'写给.*?(CodeBuddy|Trae|你|所有人|All|devPartner)', body)
+            from_match = re.search(r'来自.*?(devpartner-tools|devpartner-agent|tools|agent)', body)
+            to_match = re.search(r'写给.*?(devpartner-tools|devpartner-agent|tools|agent)', body)
             priority_match = re.search(r'优先级.*?(high|medium|low)', body)
 
             entry["time"] = time_match.group(1) if time_match else ""
@@ -95,29 +102,29 @@ class DialogueService:
         return entries
 
     def get_new_entries(self) -> list[dict]:
-        """获取写给本服务的新条目"""
+        """获取写给当前模块的新条目"""
         all_entries = self.parse_entries()
         read_ids = self._get_read_state()
 
         new_entries = []
         for entry in all_entries:
             if entry["id"] not in read_ids:
-                # 检查是否写给我们
+                # 检查是否写给当前模块（devpartner-agent 或 devpartner-tools）
                 to_field = entry["to"].lower()
-                if any(name in to_field for name in ["codebuddy", "devpartner", "所有人", "all", "你"]):
+                if any(name in to_field for name in ["devpartner-agent", "agent", "devpartner-tools", "tools"]):
                     new_entries.append(entry)
 
         return new_entries
 
-    def write_entry(self, content: str, to: str = "所有人",
+    def write_entry(self, content: str, to: str = "devpartner-tools",
                     entry_type: str = "条目", priority: str = "medium") -> dict:
-        """写入新条目到对话文件"""
+        """写入新条目到模块对话文件"""
         # 确保文件存在
         self._dialogue_file.parent.mkdir(parents=True, exist_ok=True)
         if not self._dialogue_file.exists():
             with open(self._dialogue_file, "w", encoding="utf-8") as f:
-                f.write("# 三方圆桌 - AI 对话记录\n\n")
-                f.write("> CodeBuddy ↔ Trae ↔ devPartner ↔ 你\n\n")
+                f.write("# devPartner 模块协作消息记录\n\n")
+                f.write("> devpartner-tools ↔ devpartner-agent 内部通信\n\n")
 
         # 获取下一个 ID
         existing = self.parse_entries()
@@ -134,7 +141,7 @@ class DialogueService:
 ---
 ## {entry_type} #{next_id}
 - **时间**: {timestamp}
-- **来自**: devPartner
+- **来自**: devpartner-agent
 - **写给**: {to}
 - **优先级**: {priority}
 - **类型**: 通知 / 建议 / 问题报告 / 设计讨论
@@ -153,14 +160,14 @@ class DialogueService:
             "file": str(self._dialogue_file),
         }
 
-    def write_reply(self, entry_id: int, content: str, to: str = "所有人") -> dict:
+    def write_reply(self, entry_id: int, content: str, to: str = "devpartner-tools") -> dict:
         """回复指定条目"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
         reply = f"""
 ---
 ## 回复 条目 #{entry_id}
 - **时间**: {timestamp}
-- **来自**: devPartner
+- **来自**: devpartner-agent
 - **写给**: {to}
 
 ### 回复内容
@@ -208,7 +215,7 @@ class DialogueService:
             }, f, ensure_ascii=False, indent=2)
 
     def check_for_messages(self) -> dict:
-        """检查是否有新消息（给 Hook 调用）"""
+        """检查是否有来自其他模块的新消息"""
         new_entries = self.get_new_entries()
 
         if new_entries:
@@ -231,7 +238,7 @@ class DialogueService:
             return {"has_new": False, "count": 0, "entries": []}
 
     def get_statistics(self) -> dict:
-        """获取对话统计"""
+        """获取模块间对话统计"""
         entries = self.parse_entries()
         by_from = {}
         by_to = {}

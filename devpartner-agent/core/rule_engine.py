@@ -59,19 +59,20 @@ class RuleEngine:
 - 输出到 daily_logs/conversation_{date}.md"""
         ))
 
-        # 规则2：跨AI对话
+        # 规则2：模块间协作消息
         self.register(Rule(
             name="cross-agent-dialogue",
-            description="CodeBuddy ↔ Trae ↔ 用户 三方对话机制",
-            version="2.0",
+            description="devpartner-tools ↔ devpartner-agent 内部模块协作消息机制",
+            version="2.1",
             priority=1,
             auto_trigger=True,
-            trigger_keywords=["Trae", "对方", "跨AI", "对话", "交流"],
-            content="""跨AI对话机制：
-- 共享文件：agent_dialogue.md
-- Hook自动检索新消息
-- 自动回复机制
-- 条目格式：时间/来自/写给/优先级/类型/内容"""
+            trigger_keywords=["模块协作", "内部消息", "tools", "agent", "跨模块", "协作"],
+            content="""模块间协作消息规则：
+- 用途：devpartner-tools 和 devpartner-agent 两个模块间的内部通信
+- 共享文件：data/module_dialogue.md
+- 自动检索未读消息
+- 支持消息类型：info/warning/error/question
+- 条目格式：时间/来自模块/发往模块/优先级/类型/内容"""
         ))
 
         # 规则3：涡轮效应

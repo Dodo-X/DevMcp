@@ -1,26 +1,31 @@
-﻿# 🧬 devPartner v2.0.0 - MCP 双服务架构
+﻿# 🧬 devPartner v2.2.0 - MCP 统一服务器
 
-> **纯工具 + 智能管家**：彻底分离关注点，工具层无状态，管家层有记忆
+> **纯工具 + 智能管家 · 单入口统一架构**：ModelScope 等云平台仅支持单一端口，合并为统一入口
 > 保留全部自我迭代、规则引擎、进化引擎等核心能力
 
-## 🏗️ v2.0 架构理念
+## 🏗️ v2.2 架构理念
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                      v2.0.0 (新架构)                          │
+│                      v2.2.0 (统一架构)                        │
 │                                                              │
-│  ┌─────────────────────┐    ┌─────────────────────────────┐  │
-│  │  devpartner-tools   │    │     devpartner-agent        │  │
-│  │  ─────────────────  │    │  ─────────────────────────  │  │
-│  │  📦 纯工具层         │◄───│  🧠 智能管家层               │  │
-│  │  · 无状态            │    │  · 有状态（DB/日志/记忆）    │  │
-│  │  · 无副作用          │    │  · 自我迭代引擎              │  │
-│  │  · 即用即弃          │    │  · 规则引擎（自动触发）      │  │
-│  │  · 25 个纯函数       │    │  · 进化引擎（代码自更新）    │  │
-│  │  · 输入→处理→输出    │    │  · 43 个 Agent 工具         │  │
-│  └─────────────────────┘    └─────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │                 server.py                               │    │
+│  │                 ────────────────                      │    │
+│  │                 单一入口 · 单一端口                      │    │
+│  │                 (7860 或 8080)                        │    │
+│  │                                                      │    │
+│  │  ┌─────────────────────┐ ┌─────────────────────────┐ │    │
+│  │  │  📦 纯工具层          │ │  🧠 智能管家层           │ │    │
+│  │  │  · 无状态            │ │  · 有状态（DB/日志/记忆） │ │    │
+│  │  │  · 无副作用          │ │  · 自我迭代引擎          │ │    │
+│  │  │  · 25 个纯函数       │ │  · 规则引擎（自动触发）  │ │    │
+│  │  │  · 输入→处理→输出    │ │  · 进化引擎（代码自更新）│ │    │
+│  │  └─────────────────────┘ └─────────────────────────┘ │    │
+│  └──────────────────────────────────────────────────────┘    │
 │                                                              │
 │  原则：                                                       │
+│  ✅ 单一入口，单一端口，适配云平台限制                            │
 │  ✅ 工具层不存数据，只做处理                                    │
 │  ✅ 管家层负责状态管理、记忆、进化                               │
 │  ✅ 清晰的职责边界，易维护、易扩展                               │
@@ -41,33 +46,25 @@
 
 ### 前置要求
 - Python 3.10+
-- Node.js（可选，用于部分 MCP 服务）
 
 ### 安装
 
 ```bash
-# 安装 tools 层依赖
 pip install -r devpartner-tools/requirements.txt
-
-# 安装 agent 层依赖
 pip install -r devpartner-agent/requirements.txt
 ```
 
 ### 启动
 
 ```bash
-# 方式一：仅启动纯工具层（轻量，25个工具）
-python devpartner-tools/server.py
+# 本地 stdio 模式（推荐）
+python server.py
 
-# 方式二：仅启动智能管家层（完整功能，15个Agent工具）
-python devpartner-agent/server.py
+# 远程 SSE 模式（默认端口 7860，ModelScope 兼容）
+python server.py sse
 
-# 方式三：同时启动（推荐，完整功能）
-# 终端1 - 工具层
-python devpartner-tools/server.py
-
-# 终端2 - 管家层
-python devpartner-agent/server.py
+# 远程 SSE 模式（指定端口，仅支持 7860 或 8080）
+python server.py sse 8080
 ```
 
 ### MCP 客户端配置
@@ -75,14 +72,9 @@ python devpartner-agent/server.py
 ```json
 {
   "mcpServers": {
-    "devpartner-tools": {
+    "devpartner": {
       "command": "python",
-      "args": ["<PATH>/devpartner-tools/server.py"],
-      "transport": "stdio"
-    },
-    "devpartner-agent": {
-      "command": "python",
-      "args": ["<PATH>/devpartner-agent/server.py"],
+      "args": ["<PATH>/server.py"],
       "transport": "stdio"
     }
   }
@@ -94,9 +86,10 @@ python devpartner-agent/server.py
 ```
 devPartner/
 │
+├── server.py                   # 🚀 统一入口（唯一启动文件，67个工具）
+│
 ├── devpartner-tools/            # 🔧 纯工具层（无状态）
-│   ├── server.py               # MCP 入口（25个工具注册）
-│   ├── config.yaml              # 工具层配置（极少配置项）
+│   ├── config.yaml              # 工具层配置
 │   ├── requirements.txt         # 最小依赖（fastmcp + httpx）
 │   └── tools/                   # 6 大类工具模块
 │       ├── filesystem.py        # 文件系统（5个：读/写/列表/搜索文件/搜索内容）
@@ -107,36 +100,32 @@ devPartner/
 │       └── discovery.py         # 服务发现（5个：MCP发现/测试/配置生成）
 │
 ├── devpartner-agent/            # 🧠 智能管家层（有状态）
-│   ├── server.py               # MCP 入口（15个Agent工具注册）
-│   ├── config.yaml              # 管家层配置（服务开关、数据目录等）
+│   ├── config.yaml              # 管家层配置
 │   ├── requirements.txt         # 依赖（fastmcp + pyyaml + watchdog）
 │   │
-│   ├── core/                    # 核心引擎（保留原有逻辑）
+│   ├── core/                    # 核心引擎
 │   │   ├── rule_engine.py      # 规则引擎（自动触发+动态注册）
 │   │   ├── evolution.py        # 进化引擎（代码自更新+热重载）
-│   │   ├── identity.py         # 身份管理（多客户端配置）
-│   │   ├── database.py         # 数据存储（SQLite+共享DB）
-│   │   └── cloud_sync.py       # 云同步（数据备份恢复）
+│   │   ├── identity.py         # 身份管理
+│   │   ├── database.py         # 数据存储（SQLite）
+│   │   ├── approval_chain.py   # 审批链
+│   │   ├── capabilities.py     # 能力授权
+│   │   └── tool_registry.py    # 工具注册表
 │   │
-│   ├── services/                # 业务服务（保留原有逻辑）
-│   │   ├── log_service.py      # 日志服务（对话记录+分析）
-│   │   ├── dialogue_service.py # 跨AI对话服务（消息传递）
+│   ├── services/                # 业务服务
+│   │   ├── log_service.py      # 日志服务
+│   │   ├── dialogue_service.py # 跨AI对话
 │   │   ├── discovery_service.py# 服务发现
-│   │   └── ai_optimizer.py     # AI优化器（提示词优化）
+│   │   ├── ai_optimizer.py     # AI优化器
+│   │   └── cleanup_scheduler.py# 自动清理
 │   │
-│   ├── skills/                  # 技能模块（🌟 核心保留）
-│   │   ├── self_iterate.py     # 自我迭代引擎（34KB，最核心）
-│   │   └── daily_summary.py    # 每日总结分析（24KB）
-│   │
-│   ├── tools_bridge/            # 工具桥接（保留旧工具代码）
-│   │   ├── filesystem.py
-│   │   ├── native_tools.py
-│   │   └── subprocess_tools.py
+│   ├── skills/                  # 技能模块
+│   │   ├── self_iterate.py     # 自我迭代引擎
+│   │   └── daily_summary.py    # 每日总结
 │   │
 │   └── data/                    # 运行时数据（自动创建）
 │       ├── databases/           # SQLite 数据库
 │       ├── logs/                # 对话日志
-│       ├── memories/            # 知识记忆
 │       ├── backups/             # 进化备份
 │       └── temp/                # 临时协同文件
 │
@@ -233,14 +222,17 @@ devPartner/
 
 ## 📝 版本历史
 
+- **v2.2.0** (2026-06-28): 🔗 **统一入口架构**
+  - ✅ 合并 `devpartner-agent/server.py` 和 `devpartner-tools/server.py` 为单一 `server.py`
+  - ✅ 删除冗余的独立启动脚本，精简代码
+  - ✅ 端口限制为 ModelScope 支持的 7860 / 8080
+  - ✅ 更新文档、MCP 配置示例
 - **v2.0.0** (2026-06-27): 🏗️ **双服务架构重构 - 正式版**
   - ✅ 拆分为 `devpartner-tools`（纯工具层，25个无状态工具）
   - ✅ 拆分为 `devpartner-agent`（智能管家层，42个有状态工具）
   - ✅ 保留全部自我迭代、规则引擎、进化引擎核心逻辑
-  - ✅ 补回全部缺失的 MCP 工具（日志管理、每日总结、数据迁移、系统诊断等）
-  - ✅ 修复所有 Bug（语法错误、导入路径、缺失方法）
-  - ✅ 统一导入路径为绝对导入
-  - ✅ 删除所有老版代码，项目结构干净整洁
+  - ✅ 补回全部缺失的 MCP 工具
+  - ✅ 修复所有 Bug，统一导入路径为绝对导入
 
 ## 📄 许可
 

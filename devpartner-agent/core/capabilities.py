@@ -66,8 +66,10 @@ class ApprovalResult:
     """审批结果"""
     approved: bool
     reason: str
-    approver: str  # "auto" | "user" | "system"
+    approver: str  # "auto" | "ai" | "user" | "system" | "pending"
     timestamp: str = ""
+    approval_required: bool = False  # 是否需要调用方向用户发起二次确认
+    approval_prompt: str = ""  # 给调用方的审批提示文案
 
 
 # 能力配置表
@@ -321,15 +323,33 @@ class CapabilityManager:
                     approved=True,
                     reason=f"工具 '{tool_name}' 已设为自动批准",
                     approver="auto",
-                    timestamp=timestamp
+                    timestamp=timestamp,
+                    approval_required=False
                 )
             else:
-                # 需要审批
+                # 需要审批 → 返回 approval_required=True 让调用方向用户确认
+                caps_info = [
+                    {
+                        "capability": c.value,
+                        "risk": CAPABILITY_PROFILES[c].risk_level.value if c in CAPABILITY_PROFILES else "unknown",
+                        "description": CAPABILITY_PROFILES[c].description if c in CAPABILITY_PROFILES else "",
+                    }
+                    for c in caps if c in CAPABILITY_PROFILES
+                ]
+                prompt = (
+                    f"⚠️ 工具 '{tool_name}' 需要审批\n"
+                    f"风险等级: {risk_level.value}\n"
+                    f"涉及能力: {', '.join(c['capability'] for c in caps_info)}\n"
+                    f"说明: {'; '.join(c['description'] for c in caps_info)}\n"
+                    f"是否允许执行此操作？"
+                )
                 result = ApprovalResult(
                     approved=False,
                     reason=f"工具 '{tool_name}' 需要审批（风险等级: {risk_level.value}）",
                     approver="pending",
-                    timestamp=timestamp
+                    timestamp=timestamp,
+                    approval_required=True,
+                    approval_prompt=prompt
                 )
         else:
             result = ApprovalResult(
@@ -384,9 +404,11 @@ def require_capability(tool_name: str):
                 return json.dumps({
                     "success": False,
                     "error": result.reason,
-                    "approval_required": True,
+                    "approval_required": result.approval_required,
+                    "approval_prompt": result.approval_prompt,
                     "risk_level": mgr.get_risk_level(tool_name).value,
-                    "capabilities": [c.value for c in mgr.get_tool_capabilities(tool_name)]
+                    "capabilities": [c.value for c in mgr.get_tool_capabilities(tool_name)],
+                    "instruction": "如果你认为此操作是安全的，请确认后重新调用此工具并附带 approval_granted=true 参数"
                 }, ensure_ascii=False)
             
             return func(*args, **kwargs)

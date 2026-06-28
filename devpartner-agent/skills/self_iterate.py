@@ -921,3 +921,161 @@ async def check_and_improve() -> dict:
         }
     except Exception as e:
         return {"error": str(e)}
+
+# ============================================================
+# 公共入口函数
+# ============================================================
+
+def run_self_iterate(mode: str = "auto") -> dict:
+    """
+    执行自我迭代流程（公共入口）
+    
+    这是被 server.py 调用的入口函数，编排完整的自我迭代流程：
+    1. 收集系统数据
+    2. 生成改进建议
+    3. 识别代码变更
+    4. 应用变更
+    5. 生成报告
+    
+    Args:
+        mode: 运行模式
+            - 'auto': 自动选择
+            - 'local': 本地模式
+            - 'full': 完整模式（Git分支+提交+PR）
+            - 'analyze': 仅分析不执行变更
+    
+    Returns:
+        dict: 迭代结果
+    """
+    import json
+    from datetime import datetime
+    
+    result = {
+        "success": False,
+        "mode": mode,
+        "timestamp": datetime.now().isoformat(),
+        "steps": [],
+        "suggestions": [],
+        "code_changes": [],
+        "applied_changes": [],
+        "git_operations": [],
+    }
+    
+    try:
+        # Step 1: 收集系统数据
+        try:
+            system_data = _collect_system_data()
+            result["steps"].append({
+                "step": "collect_data",
+                "status": "ok",
+                "data_points": len(system_data),
+            })
+            result["system_data_summary"] = {
+                "project_files": system_data.get("project_files", 0),
+                "log_files": system_data.get("log_files", 0),
+                "db_records": system_data.get("db_records", 0),
+            }
+        except Exception as e:
+            result["steps"].append({
+                "step": "collect_data",
+                "status": "error",
+                "error": str(e),
+            })
+            result["error"] = f"数据收集失败: {e}"
+            return result
+        
+        # Step 2: 生成改进建议
+        try:
+            suggestions = _generate_data_driven_suggestions(system_data)
+            result["suggestions"] = suggestions
+            result["steps"].append({
+                "step": "generate_suggestions",
+                "status": "ok",
+                "count": len(suggestions),
+            })
+        except Exception as e:
+            result["steps"].append({
+                "step": "generate_suggestions",
+                "status": "error",
+                "error": str(e),
+            })
+            result["error"] = f"建议生成失败: {e}"
+            return result
+        
+        # Step 3: 识别代码变更
+        try:
+            code_changes = _identify_code_changes(suggestions, system_data)
+            result["code_changes"] = code_changes
+            result["steps"].append({
+                "step": "identify_changes",
+                "status": "ok",
+                "count": len(code_changes),
+            })
+        except Exception as e:
+            result["steps"].append({
+                "step": "identify_changes",
+                "status": "error",
+                "error": str(e),
+            })
+            result["error"] = f"变更识别失败: {e}"
+            return result
+        
+        # Step 4: 应用变更（非 analyze 模式）
+        if mode != "analyze" and code_changes:
+            try:
+                applied = _apply_code_changes(code_changes)
+                result["applied_changes"] = applied
+                result["steps"].append({
+                    "step": "apply_changes",
+                    "status": "ok",
+                    "count": len(applied),
+                })
+            except Exception as e:
+                result["steps"].append({
+                    "step": "apply_changes",
+                    "status": "error",
+                    "error": str(e),
+                })
+        elif mode == "analyze":
+            result["steps"].append({
+                "step": "apply_changes",
+                "status": "skipped",
+                "reason": "analyze 模式，跳过变更应用",
+            })
+        
+        # Step 5: Git 操作（仅 full 模式）
+        if mode == "full" and _is_git_available():
+            try:
+                branch_name = f"auto-iterate-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                _git_create_branch(branch_name)
+                _git_add_all()
+                commit_msg = _build_commit_message(suggestions, code_changes, result)
+                _git_commit(commit_msg)
+                result["git_operations"].append({
+                    "action": "create_branch",
+                    "branch": branch_name,
+                    "status": "ok",
+                })
+                result["steps"].append({
+                    "step": "git_operations",
+                    "status": "ok",
+                    "branch": branch_name,
+                })
+            except Exception as e:
+                result["steps"].append({
+                    "step": "git_operations",
+                    "status": "error",
+                    "error": str(e),
+                })
+        
+        result["success"] = True
+        return result
+        
+    except Exception as e:
+        result["error"] = f"自我迭代异常: {e}"
+        result["steps"].append({
+            "step": "fatal",
+            "status": "error",
+            "error": str(e),
+        })
+        return result

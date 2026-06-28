@@ -8,7 +8,7 @@ DevPartner Tools - 纯工具包
   🌐 web_requests   — 网络请求 (4个: fetch_url, github_search_code, github_search_repositories, context7_search)
   🧠 reasoning      — 推理分析 (4个: sequential_think, generate_mindmap, generate_mindmap_from_tree, list_mindmaps)
   ⚙️ system_utils   — 系统工具 (4个: execute_system_command, detect_client, environment_scan, validate_path)
-  🔍 discovery      — 服务发现 (5个: discover_mcp_servers, list_known_mcp_servers, test_mcp_server, get_rules_summary, generate_config_snippet)
+  🔍 mcp_discovery  — MCP服务发现 (5个: discover_mcp_servers, list_known_mcp_servers, test_mcp_server, get_rules_summary, generate_config_snippet)
 
 设计原则：
   - 无状态：函数不持有内部状态，每次调用独立
@@ -32,7 +32,7 @@ from .reasoning import (
 from .system_utils import (
     execute_system_command, detect_client, environment_scan, validate_path
 )
-from .discovery import (
+from .mcp_discovery import (
     discover_mcp_servers, list_known_mcp_servers, test_mcp_server,
     get_rules_summary, generate_config_snippet
 )

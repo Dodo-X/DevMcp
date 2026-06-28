@@ -1,5 +1,5 @@
-﻿"""
-🔍 服务发现工具集 — 5 个工具
+"""
+🔍 MCP 服务发现工具集 — 5 个工具
 
 设计原则：
   - 提供 MCP 服务发现、测试、配置生成能力
@@ -41,7 +41,7 @@ def discover_mcp_servers() -> Dict[str, Any]:
     Returns:
         {success, servers, count, source, last_updated, error}
     """
-    discovered = [s.copy() for s in KNOWN_MCP_SERVERS]
+    discovered: list[dict[str, Any]] = [s.copy() for s in KNOWN_MCP_SERVERS]
 
     try:
         result = subprocess.run(
@@ -59,7 +59,7 @@ def discover_mcp_servers() -> Dict[str, Any]:
                             "name": pkg.get("name", "").replace("@modelcontextprotocol/server-", ""),
                             "package": pkg.get("name", ""),
                             "category": "npm_discovered",
-                            "rating": None,
+                            "rating": 0.0,
                             "description": pkg.get("description", ""),
                             "recommended": False
                         })
@@ -192,14 +192,9 @@ def generate_config_snippet() -> Dict[str, Any]:
     """
     config_snippet = {
         "mcpServers": {
-            "devpartner-tools": {
+            "devpartner": {
                 "command": "python",
-                "args": ["<PATH>/devpartner-tools/server.py"],
-                "transport": "stdio"
-            },
-            "devpartner-agent": {
-                "command": "python",
-                "args": ["<PATH>/devpartner-agent/server.py"],
+                "args": ["<PATH>/server.py"],
                 "transport": "stdio"
             }
         }
@@ -210,7 +205,7 @@ def generate_config_snippet() -> Dict[str, Any]:
     return {
         "success": True,
         "config_json": config_json,
-        "servers": ["devpartner-tools", "devpartner-agent"],
-        "note": "请替换 <PATH> 为实际项目路径",
+        "servers": ["devpartner"],
+        "note": "请替换 <PATH> 为实际项目路径，端口仅支持 7860 / 8080",
         "error": None
     }
