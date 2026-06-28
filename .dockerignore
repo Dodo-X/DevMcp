@@ -1,29 +1,50 @@
 # Git 仓库（容器内不需要，且会导致误判 git 可用）
 .git/
 .gitignore
+.gitattributes
+
+# GitHub
+.github/
 
 # 本地 IDE 用户配置
-.idea/workspace.xml
-.idea/shelf/
-.idea/tasks.xml
+.idea/
 .vscode/
+*.iml
 
 # Python 缓存
 __pycache__/
 *.pyc
 *.pyo
 *.egg-info/
+*.egg
 
-# 本地数据（容器内有自己的数据目录）
-data/daily_logs/
-data/logs_archive/
-data/mindmaps/
-data/backups/
-data/reports/
+# 本地数据目录（通过 volume 挂载，不打包进镜像）
+data/
 
 # 系统文件
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
 
 # CodeBuddy 本地数据
 .codebuddy/
+
+# 文档（减小镜像体积）
+README.md
+*.md
+
+# Docker 自身
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# 测试
+tests/
+*_test.py
+_test_*.py
+
+# 临时文件
+*.tmp
+*.bak
+*.log

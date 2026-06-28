@@ -1,4 +1,4 @@
-"""
+﻿"""
 DevPartner MCP 服务器 v2.2.0
 =============================
 
@@ -7,8 +7,8 @@ ModelScope 等云平台限制只能暴露两个端口之一（7860 / 8080）。
 
 架构：
   server.py (单一端口)
-  ├── devpartner-tools  (纯工具层，无状态，25个工具)
-  └── devpartner-agent  (智能管家层，有状态，42个工具)
+  ├── devpartner_tools/  (纯工具层，无状态，25个工具)
+  └── devpartner_agent/  (智能管家层，有状态，42个工具)
 
 启动方式：
     python server.py          # stdio 模式（推荐本地）
@@ -26,13 +26,14 @@ ModelScope 等云平台限制只能暴露两个端口之一（7860 / 8080）。
 """
 
 import sys
-import os
 import json
 from pathlib import Path
 from datetime import datetime
 
-# 确保项目根目录在 sys.path 中
-sys.path.insert(0, str(Path(__file__).parent))
+# 将项目根目录加入 sys.path，确保包导入正常工作
+_project_root = Path(__file__).resolve().parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
 
 from fastmcp import FastMCP
 
@@ -52,24 +53,22 @@ print("=" * 60)
 print("[INFO] 加载 devpartner-tools 工具层...")
 
 try:
-    sys.path.insert(0, str(Path(__file__).parent / "devpartner-tools"))
-
-    from tools.filesystem import (
+    from devpartner_tools.tools.filesystem import (
         read_file, write_file, list_directory, search_files, search_content
     )
-    from tools.git_operations import (
+    from devpartner_tools.tools.git_operations import (
         git_status, git_log, git_diff
     )
-    from tools.web_requests import (
+    from devpartner_tools.tools.web_requests import (
         fetch_url, github_search_code, github_search_repositories, context7_search
     )
-    from tools.reasoning import (
+    from devpartner_tools.tools.reasoning import (
         sequential_think, generate_mindmap, generate_mindmap_from_tree, list_mindmaps
     )
-    from tools.system_utils import (
+    from devpartner_tools.tools.system_utils import (
         execute_system_command, detect_client, environment_scan, validate_path
     )
-    from tools.mcp_discovery import (
+    from devpartner_tools.tools.mcp_discovery import (
         discover_mcp_servers, list_known_mcp_servers, test_mcp_server,
         get_rules_summary, generate_config_snippet
     )
@@ -116,8 +115,6 @@ except Exception as e:
 
 print("[INFO] 加载 devpartner-agent 智能管家层...")
 
-sys.path.insert(0, str(Path(__file__).parent / "devpartner-agent"))
-
 # ── 核心初始化 ──────────────────────────────────────────────
 _core_initialized = False
 
@@ -128,21 +125,21 @@ def _ensure_core():
         return True
 
     try:
-        from core.config import get_config
-        from core.database import get_db
+        from devpartner_agent.core.config import get_config
+        from devpartner_agent.core.database import get_db
 
         cfg = get_config()
         db_path = str(Path(cfg.data.databases_dir) / "devpartner.db")
         get_db().init_local(db_path)
 
         # 预热其他核心模块
-        from core.rule_engine import get_rule_engine
-        from core.identity import get_identity
-        from core.evolution import get_evolution_engine
+        from devpartner_agent.core.rule_engine import get_engine
+        from devpartner_agent.core.identity import get_identity
+        from devpartner_agent.core.evolution import get_evolution_engine
 
         # 启动自动清理调度器
         try:
-            from services.cleanup_scheduler import get_cleanup_scheduler
+            from devpartner_agent.services.cleanup_scheduler import get_cleanup_scheduler
             scheduler = get_cleanup_scheduler()
             cleanup_interval = (
                 cfg.data_lifecycle.auto_cleanup_interval_hours
@@ -192,7 +189,7 @@ def log_conversation(topic: str, task_type: str, user_intent: str,
     """
     _ensure_core()
     try:
-        from services.log_service import get_log_service
+        from devpartner_agent.services.log_service import get_log_service
         log_svc = get_log_service()
 
         data = {
@@ -212,7 +209,7 @@ def log_conversation(topic: str, task_type: str, user_intent: str,
         log_file = log_svc.append_to_daily_log(data)
 
         try:
-            from core.database import get_db
+            from devpartner_agent.core.database import get_db
             db = get_db()
             db.insert_conversation(data)
         except Exception:
@@ -245,8 +242,8 @@ def send_module_message(target_module: str, message: str,
     """
     _ensure_core()
     try:
-        from services.dialogue_service import get_dialogue_service
-        dialogue_svc = get_dialogue_service()
+        from devpartner_agent.services.dialogue_service import get_dialogue
+        dialogue_svc = get_dialogue()
 
         msg_data = {
             "from": "devpartner-agent" if target_module == "tools" else "devpartner-tools",
@@ -275,8 +272,8 @@ def check_module_messages() -> str:
     """
     _ensure_core()
     try:
-        from services.dialogue_service import get_dialogue_service
-        dialogue_svc = get_dialogue_service()
+        from devpartner_agent.services.dialogue_service import get_dialogue
+        dialogue_svc = get_dialogue()
         messages = dialogue_svc.get_unread_messages()
         return json.dumps({"success": True, "messages": messages, "count": len(messages)}, ensure_ascii=False)
     except Exception as e:
@@ -311,8 +308,8 @@ def self_iterate(mode: str = "auto", dry_run: bool = False,
     """
     _ensure_core()
     try:
-        from skills.self_iterate import run_self_iterate
-        from core.approval_chain import ApprovalChain, create_approval_request
+        from devpartner_agent.skills.self_iterate import run_self_iterate
+        from devpartner_agent.core.approval_chain import ApprovalChain, create_approval_request
 
         chain = ApprovalChain(
             auto_approve_enabled=True,
@@ -366,7 +363,7 @@ def self_upgrade(file_path: str, new_content: str,
     """自我升级 - 修改自身代码（备份+验证+回滚）"""
     _ensure_core()
     try:
-        from core.evolution import get_evolution_engine
+        from devpartner_agent.core.evolution import get_evolution_engine
         engine = get_evolution_engine()
         result = engine.upgrade_file(file_path, new_content, validate)
         return json.dumps(result, ensure_ascii=False)
@@ -380,7 +377,7 @@ def self_create_file(file_path: str, content: str,
     """自我创建新文件"""
     _ensure_core()
     try:
-        from core.evolution import get_evolution_engine
+        from devpartner_agent.core.evolution import get_evolution_engine
         engine = get_evolution_engine()
         result = engine.create_file(file_path, content, validate)
         return json.dumps(result, ensure_ascii=False)
@@ -394,8 +391,8 @@ def get_rules() -> str:
     """获取所有已注册的规则"""
     _ensure_core()
     try:
-        from core.rule_engine import get_rule_engine
-        engine = get_rule_engine()
+        from devpartner_agent.core.rule_engine import get_engine
+        engine = get_engine()
         rules = engine.get_all_rules()
         return json.dumps({"success": True, "rules": rules, "count": len(rules)}, ensure_ascii=False)
     except Exception as e:
@@ -407,8 +404,8 @@ def trigger_rule(rule_name: str, context: str = "{}") -> str:
     """手动触发指定规则"""
     _ensure_core()
     try:
-        from core.rule_engine import get_rule_engine
-        engine = get_rule_engine()
+        from devpartner_agent.core.rule_engine import get_engine
+        engine = get_engine()
         ctx = json.loads(context) if isinstance(context, str) else context
         result = engine.trigger(rule_name, ctx)
         return json.dumps(result, ensure_ascii=False)
@@ -422,7 +419,7 @@ def get_daily_summary(date: str = "") -> str:
     """获取每日工作总结"""
     _ensure_core()
     try:
-        from skills.daily_summary import generate_daily_summary
+        from devpartner_agent.skills.daily_summary import generate_daily_summary
         result = generate_daily_summary(date)
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
@@ -434,7 +431,7 @@ def read_daily_log(date: str = "") -> str:
     """读取指定日期的对话日志"""
     _ensure_core()
     try:
-        from services.log_service import get_log_service
+        from devpartner_agent.services.log_service import get_log_service
         log_svc = get_log_service()
         result = log_svc.read_daily_log(date if date else None)
         return result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
@@ -447,7 +444,7 @@ def list_logs() -> str:
     """列出所有日志文件"""
     _ensure_core()
     try:
-        from services.log_service import get_log_service
+        from devpartner_agent.services.log_service import get_log_service
         log_svc = get_log_service()
         logs = log_svc.list_logs()
         return json.dumps({"success": True, "logs": logs, "count": len(logs)}, ensure_ascii=False)
@@ -460,7 +457,7 @@ def check_log_gaps(date: str = "") -> str:
     """检查日志时间间隙"""
     _ensure_core()
     try:
-        from services.log_service import get_log_service
+        from devpartner_agent.services.log_service import get_log_service
         log_svc = get_log_service()
         result = log_svc.gap_check(date if date else None)
         return json.dumps(result, ensure_ascii=False)
@@ -474,7 +471,7 @@ def get_daily_work_data(date: str = "", fallback_to_log: bool = True) -> str:
     """获取指定日期的工作原始数据（供 AI 客户端分析用）"""
     _ensure_core()
     try:
-        from skills.daily_summary import get_daily_work_data as get_data
+        from devpartner_agent.skills.daily_summary import get_daily_work_data as get_data
         result = get_data(date if date else None, fallback_to_log)
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
@@ -486,7 +483,7 @@ def save_daily_analysis(analysis_json: str) -> str:
     """保存 AI 客户端的每日分析结果"""
     _ensure_core()
     try:
-        from skills.daily_summary import save_daily_analysis as save_analysis
+        from devpartner_agent.skills.daily_summary import save_daily_analysis as save_analysis
         result = save_analysis(analysis_json)
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
@@ -498,7 +495,7 @@ def get_weekly_work_data() -> str:
     """获取最近7天的工作数据概览"""
     _ensure_core()
     try:
-        from skills.daily_summary import get_weekly_work_data as get_weekly
+        from devpartner_agent.skills.daily_summary import get_weekly_work_data as get_weekly
         result = get_weekly()
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
@@ -529,7 +526,7 @@ def import_daily_log_to_db(date: str = "") -> str:
     """将本地 Markdown 日志导入到 SQLite 数据库"""
     _ensure_core()
     try:
-        from skills.daily_summary import import_daily_log_to_db as import_log
+        from devpartner_agent.skills.daily_summary import import_daily_log_to_db as import_log
         result = import_log(date if date else None)
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
@@ -541,7 +538,7 @@ def sync_all_logs_to_db() -> str:
     """批量同步所有本地日志到数据库"""
     _ensure_core()
     try:
-        from skills.daily_summary import sync_all_logs_to_db as sync_all
+        from devpartner_agent.skills.daily_summary import sync_all_logs_to_db as sync_all
         result = sync_all()
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
@@ -634,7 +631,7 @@ def get_tool_registry() -> str:
     """
     _ensure_core()
     try:
-        from core.tool_registry import get_tool_registry as get_registry
+        from devpartner_agent.core.tool_registry import get_tool_registry as get_registry
         registry = get_registry()
         result = registry.get_summary()
         return json.dumps(result, ensure_ascii=False)
@@ -660,7 +657,7 @@ def register_custom_tool(tool_name: str, tool_code: str,
     """
     _ensure_core()
     try:
-        from core.tool_registry import get_tool_registry as get_registry
+        from devpartner_agent.core.tool_registry import get_tool_registry as get_registry
         registry = get_registry()
         result = registry.register(tool_name, tool_code, category)
         return json.dumps(result, ensure_ascii=False)
@@ -681,7 +678,7 @@ def get_capabilities() -> str:
     """
     _ensure_core()
     try:
-        from core.capabilities import get_capability_manager
+        from devpartner_agent.core.capabilities import get_capability_manager
         mgr = get_capability_manager()
         result = mgr.get_status()
         return json.dumps(result, ensure_ascii=False)
@@ -707,7 +704,7 @@ def authorize_capability(module: str, capability: str,
     """
     _ensure_core()
     try:
-        from core.capabilities import get_capability_manager
+        from devpartner_agent.core.capabilities import get_capability_manager
         mgr = get_capability_manager()
         result = mgr.authorize(module, capability, reason)
         return json.dumps(result, ensure_ascii=False)
@@ -731,7 +728,7 @@ def revoke_capability(module: str, capability: str,
     """
     _ensure_core()
     try:
-        from core.capabilities import get_capability_manager
+        from devpartner_agent.core.capabilities import get_capability_manager
         mgr = get_capability_manager()
         result = mgr.revoke(module, capability, reason)
         return json.dumps(result, ensure_ascii=False)
@@ -755,7 +752,7 @@ def get_approval_chain(operation: str = "") -> str:
     """
     _ensure_core()
     try:
-        from core.approval_chain import ApprovalChain
+        from devpartner_agent.core.approval_chain import ApprovalChain
         chain = ApprovalChain()
         result = chain.get_status(operation) if operation else chain.get_all_status()
         return json.dumps(result, ensure_ascii=False)
@@ -777,7 +774,7 @@ def approve_operation(operation_id: str, reason: str = "") -> str:
     """
     _ensure_core()
     try:
-        from core.approval_chain import ApprovalChain
+        from devpartner_agent.core.approval_chain import ApprovalChain
         chain = ApprovalChain()
         result = chain.manual_approve(operation_id, reason)
         return json.dumps(result, ensure_ascii=False)
@@ -799,7 +796,7 @@ def reject_operation(operation_id: str, reason: str) -> str:
     """
     _ensure_core()
     try:
-        from core.approval_chain import ApprovalChain
+        from devpartner_agent.core.approval_chain import ApprovalChain
         chain = ApprovalChain()
         result = chain.manual_reject(operation_id, reason)
         return json.dumps(result, ensure_ascii=False)
@@ -824,8 +821,8 @@ def check_rule(rule_name: str, content: str = "") -> str:
     """
     _ensure_core()
     try:
-        from core.rule_engine import get_rule_engine
-        engine = get_rule_engine()
+        from devpartner_agent.core.rule_engine import get_engine
+        engine = get_engine()
         result = engine.check_rule(rule_name, content)
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
@@ -847,7 +844,7 @@ def hot_reload(module: str = "all") -> str:
         JSON: {success, reloaded, failed, timestamp}
     """
     try:
-        from core.evolution import get_evolution_engine
+        from devpartner_agent.core.evolution import get_evolution_engine
         engine = get_evolution_engine()
         result = engine.hot_reload(module)
         return json.dumps(result, ensure_ascii=False)
@@ -871,7 +868,7 @@ def security_audit(scope: str = "quick") -> str:
     """
     _ensure_core()
     try:
-        from core.evolution import get_evolution_engine
+        from devpartner_agent.core.evolution import get_evolution_engine
         engine = get_evolution_engine()
         result = engine.security_audit(scope)
         return json.dumps(result, ensure_ascii=False)
@@ -892,7 +889,7 @@ def system_diagnose() -> str:
     """
     _ensure_core()
     try:
-        from core.database import get_db
+        from devpartner_agent.core.database import get_db
 
         issues = []
         checks = {}
@@ -907,7 +904,7 @@ def system_diagnose() -> str:
 
         # 日志目录检查
         try:
-            from core.config import get_config
+            from devpartner_agent.core.config import get_config
             cfg = get_config()
             log_dir = Path(cfg.data.logs_dir)
             if log_dir.exists():
@@ -921,8 +918,8 @@ def system_diagnose() -> str:
 
         # 规则引擎检查
         try:
-            from core.rule_engine import get_rule_engine
-            engine = get_rule_engine()
+            from devpartner_agent.core.rule_engine import get_engine
+            engine = get_engine()
             rules = engine.get_all_rules()
             checks["rules"] = f"healthy ({len(rules)} 条规则)"
         except Exception as e:
@@ -956,7 +953,7 @@ def cleanup_data(scope: str = "all", dry_run: bool = False) -> str:
     """
     _ensure_core()
     try:
-        from services.cleanup_scheduler import get_cleanup_scheduler
+        from devpartner_agent.services.cleanup_scheduler import get_cleanup_scheduler
         scheduler = get_cleanup_scheduler()
         result = scheduler.cleanup(scope, dry_run)
         return json.dumps(result, ensure_ascii=False)
@@ -981,7 +978,7 @@ def git_auto_branch(description: str, base_branch: str = "main") -> str:
     """
     _ensure_core()
     try:
-        from core.evolution import get_evolution_engine
+        from devpartner_agent.core.evolution import get_evolution_engine
         engine = get_evolution_engine()
         result = engine.git_auto_branch(description, base_branch)
         return json.dumps(result, ensure_ascii=False)
@@ -1005,7 +1002,7 @@ def git_auto_commit(message: str, files: str = "[]",
     """
     _ensure_core()
     try:
-        from core.evolution import get_evolution_engine
+        from devpartner_agent.core.evolution import get_evolution_engine
         engine = get_evolution_engine()
         file_list = json.loads(files) if isinstance(files, str) else files
         result = engine.git_auto_commit(message, file_list, auto_push)
@@ -1028,7 +1025,7 @@ def git_auto_push(remote: str = "origin", branch: str = "") -> str:
     """
     _ensure_core()
     try:
-        from core.evolution import get_evolution_engine
+        from devpartner_agent.core.evolution import get_evolution_engine
         engine = get_evolution_engine()
         result = engine.git_auto_push(remote, branch)
         return json.dumps(result, ensure_ascii=False)
@@ -1052,7 +1049,7 @@ def git_rollback(commit_hash: str = "HEAD~1", hard: bool = False) -> str:
     """
     _ensure_core()
     try:
-        from core.evolution import get_evolution_engine
+        from devpartner_agent.core.evolution import get_evolution_engine
         engine = get_evolution_engine()
         result = engine.git_rollback(commit_hash, hard)
         return json.dumps(result, ensure_ascii=False)

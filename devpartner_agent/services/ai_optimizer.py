@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
 
-from core import KNOWN_CLIENTS
+from devpartner_agent.core import KNOWN_CLIENTS
 
 
 class AIOptimizer:

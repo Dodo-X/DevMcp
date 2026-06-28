@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "devpartner-agent"
+version = "2.2.0"
+description = "DevPartner 智能管家层 - 有状态 MCP 工具包"
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp",
+    "pyyaml",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["tests", "tests.*", "data", "data.*", "migrations", "migrations.*", "scripts", "scripts.*"]

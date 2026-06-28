@@ -357,7 +357,7 @@ def _identify_code_changes(suggestions: list[dict],
 devPartner 自动生成规则
 由自我进化引擎生成，可自行修改
 """
-from core.rule_engine import Rule
+from devpartner_agent.core.rule_engine import Rule
 
 
 RULES = [
