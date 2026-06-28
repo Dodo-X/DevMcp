@@ -393,10 +393,15 @@ def get_rules() -> str:
     try:
         from devpartner_agent.core.rule_engine import get_engine
         engine = get_engine()
-        rules = engine.get_all_rules()
-        return json.dumps({"success": True, "rules": rules, "count": len(rules)}, ensure_ascii=False)
+        rules = engine.get_all()
+        from dataclasses import asdict
+        rules_list = [{"name": k, **{key: val for key, val in asdict(v).items() if key != 'handler'}} for k, v in rules.items()]
+        return json.dumps({"success": True, "rules": rules_list, "count": len(rules_list)}, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+
+
+
 
 
 @mcp.tool()
@@ -846,7 +851,56 @@ def hot_reload(module: str = "all") -> str:
     try:
         from devpartner_agent.core.evolution import get_evolution_engine
         engine = get_evolution_engine()
-        result = engine.hot_reload(module)
+
+        if module == "all":
+            targets = [
+                "devpartner_tools",
+                "devpartner_tools.tools.filesystem",
+                "devpartner_tools.tools.git_operations",
+                "devpartner_tools.tools.web_requests",
+                "devpartner_tools.tools.reasoning",
+                "devpartner_tools.tools.system_utils",
+                "devpartner_tools.tools.mcp_discovery",
+                "devpartner_agent",
+                "devpartner_agent.core",
+                "devpartner_agent.services",
+                "devpartner_agent.skills",
+            ]
+        elif module == "tools":
+            targets = [
+                "devpartner_tools",
+                "devpartner_tools.tools.filesystem",
+                "devpartner_tools.tools.git_operations",
+                "devpartner_tools.tools.web_requests",
+                "devpartner_tools.tools.reasoning",
+                "devpartner_tools.tools.system_utils",
+                "devpartner_tools.tools.mcp_discovery",
+            ]
+        elif module == "agent":
+            targets = [
+                "devpartner_agent",
+                "devpartner_agent.core",
+                "devpartner_agent.services",
+                "devpartner_agent.skills",
+            ]
+        else:
+            targets = [module]
+
+        reloaded = []
+        failed = []
+        for target in targets:
+            r = engine.hot_reload_module(target)
+            if r.get("success"):
+                reloaded.append({"module": target, "action": r.get("action", "reloaded")})
+            else:
+                failed.append({"module": target, "error": r.get("error", "unknown")})
+
+        result = {
+            "success": len(failed) == 0,
+            "reloaded": reloaded,
+            "failed": failed,
+            "timestamp": datetime.now().isoformat()
+        }
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
@@ -920,7 +974,7 @@ def system_diagnose() -> str:
         try:
             from devpartner_agent.core.rule_engine import get_engine
             engine = get_engine()
-            rules = engine.get_all_rules()
+            rules = engine.get_all()
             checks["rules"] = f"healthy ({len(rules)} 条规则)"
         except Exception as e:
             checks["rules"] = f"error: {e}"
