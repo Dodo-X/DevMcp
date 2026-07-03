@@ -99,18 +99,28 @@ class LoggingConfig:
 @dataclass
 class LLMConfig:
     """
-    本地 LLM 配置（v5.1 - llama-cpp-python 专用）
+    本地 LLM 配置（v6.0 - llama-cpp-python 专用）
     
     使用 llama-cpp-python 加载本地 GGUF 模型文件进行推理。
     当前模型：Qwen3.5-9B Q4_1 量化版（~5.7GB）
+    
+    v6.0 变更：
+    - 统一模型存放位置: ./models/Qwen3.5-9B-Q4_1.gguf
+    - 支持多环境自动检测（本地/Docker/ModelScope云端）
+    - 通过 volume 挂载或手动上传管理模型文件
     
     特性：
     - 单引擎架构，无外部依赖
     - 支持 CPU/GPU 混合推理
     - 针对量化模型优化的参数配置
+    
+    模型文件管理：
+    - 本地开发: 手动下载到 ./models/ 目录
+    - Docker部署: 通过 volume 挂载 ./models:/app/models
+    - ModelScope云端: 上传到 Dataset 或打包进镜像
     """
-    # ── 模型路径 ──
-    model_path: str = "./models/default.gguf"          # GGUF 模型文件路径
+    # ── 模型路径（v6.0: 统一使用 models/ 目录）──
+    model_path: str = "./models/Qwen3.5-9B-Q4_1.gguf"   # GGUF 模型文件路径
     
     # ── 推理参数（针对 Q4_1 量化模型优化）──
     n_ctx: int = 8192                                  # 上下文窗口大小（8K 平衡内存与性能）

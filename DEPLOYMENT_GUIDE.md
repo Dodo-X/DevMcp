@@ -154,41 +154,270 @@ git pull github main
 git push origin main
 ```
 
-#### **Step 4: 处理模型文件**
+#### **Step 4: ⭐ 手动上传模型文件到 ModelScope（核心步骤）**
 
-**在 ModelScope 端有三种选择：**
+> ⚠️ **重要**: 由于 GitHub 无法上传大文件（>100MB），且 Git LFS 免费额度有限，
+> 模型文件必须通过 ModelScope 平台单独上传！
 
-##### **选项 A: 上传到 Dataset（推荐用于云端）**
+##### **📋 前置准备**
 
-```bash
-# 1. 在 ModelScope 创建 Dataset
-# 2. 上传模型文件到 Dataset
-# 3. 在 docker-compose.yml 中配置 volume 挂载:
+1. **确认模型文件已下载**
+   ```bash
+   # 检查本地模型文件是否存在
+   ls -lh models/Qwen3.5-9B-Q4_1.gguf
+   
+   # 预期输出:
+   # -rw-r--r-- 1 user user 5.7G Jul  3 13:30 models/Qwen3.5-9B-Q4_1.gguf
+   ```
 
-services:
-  devpartner:
-    volumes:
-      - modelscope_dataset:/app/models  # 挂载 Dataset 到容器内
+2. **如果没有模型文件，先下载**
+   ```bash
+   # 方式一：使用 ModelScope CLI（国内推荐）
+   pip install modelscope
+   modelscope download --model Qwen/Qwen3.5-9B-Instruct-GGUF \
+       --local_dir ./models \
+       Qwen3.5-9B-Q4_1.gguf
+   
+   # 方式二：使用 HuggingFace CLI
+   pip install huggingface_hub
+   huggingface-cli download Qwen/Qwen3.5-9B-Instruct-GGUF \
+       Qwen3.5-9B-Q4_1.gguf \
+       --local-dir ./models
+   
+   # 方式三：手动浏览器下载
+   # 访问: https://modelscope.cn/models/Qwen/Qwen3.5-9B-Instruct-GGUF/files
+   # 下载 Qwen3.5-9B-Q4_1.gguf 到 ./models/ 目录
+   ```
 
-volumes:
-  modelscope_dataset:
-    external: true
-    name: your_model_dataset_name
+---
+
+##### **🎯 方法一：上传到 ModelScope Dataset（推荐用于云端部署）**
+
+**适用场景**: ModelScope 云端运行、需要持久化存储
+
+**操作步骤**:
+
+1️⃣ **登录 ModelScope**
+   ```
+   访问: https://modelscope.cn
+   登录账号（支持 GitHub/手机号登录）
+   ```
+
+2️⃣ **创建新 Dataset**
+   ```
+   点击右上角 "+" → "创建 Dataset"
+   
+   填写信息：
+   - Dataset 名称: devpartner-models (或自定义)
+   - 可见性: Public (公开) 或 Private (私有)
+   - 描述: DevPartner v6.0 LLM 推理模型文件
+   
+   点击"创建"
+   ```
+
+3️⃣ **上传模型文件**
+   ```
+   进入刚创建的 Dataset 页面
+   点击"上传文件" 或拖拽文件
+   
+   选择文件:
+   ✅ models/Qwen3.5-9B-Q4_1.gguf (~5.7GB)
+   
+   等待上传完成（根据网速，可能需要10-30分钟）
+   
+   上传完成后，记录 Dataset 路径:
+   例如: your_username/devpartner-models
+   ```
+
+4️⃣ **配置云端部署挂载**
+   
+   编辑 `deploy/docker-compose.yml` 或 ModelScope 创空间配置:
+
+   ```yaml
+   services:
+     devpartner:
+       volumes:
+         # ★ 挂载 ModelScope Dataset 到容器内的 models 目录
+         - your_username_devpartner-models:/app/models
+   
+   volumes:
+     your_username_devpartner-models:
+       external: true
+       name: your_username/devpartner-models  # Dataset 完整路径
+   ```
+
+5️⃣ **验证配置**
+   ```bash
+   # 本地测试 Docker 配置
+   docker-compose config
+   
+   # 确认看到 volumes 配置包含模型 Dataset
+   ```
+
+**✅ 优点**:
+- 模型文件独立管理，不影响代码仓库
+- 支持版本控制（可上传多个模型版本）
+- 多个实例可共享同一 Dataset
+- ModelScope 提供高速内网传输
+
+**❌ 缺点**:
+- 需要额外创建和管理 Dataset
+- 首次配置稍复杂
+
+---
+
+##### **🎯 方法二：直接打包进 Docker 镜像（适合离线/私有部署）**
+
+**适用场景**: 私有服务器、无外网访问、需要完全离线运行
+
+**操作步骤**:
+
+1️⃣ **准备模型文件**
+   ```bash
+   # 确保 models/Qwen3.5-9B-Q4_1.gguf 存在
+   ls -lh models/Qwen3.5-9B-Q4_1.gguf
+   ```
+
+2️⃣ **修改 Docker 构建配置**
+   
+   编辑 `deploy/.dockerignore`:
+   ```dockerignore
+   # 注释掉以下两行（允许模型被打包进镜像）
+   # models/*.gguf
+   # models/*.bin
+   ```
+
+3️⃣ **构建完整镜像**
+   ```bash
+   cd deploy
+   
+   # 使用完整模式构建（包含模型）
+   docker build \
+     --build-arg INCLUDE_MODEL=true \
+     -t devpartner:v6.0-full \
+     -f Dockerfile .
+   
+   # 构建时间: 约 15-30 分钟（取决于网络和磁盘速度)
+   # 最终镜像大小: ~6.5 GB
+   ```
+
+4️⃣ **验证镜像包含模型**
+   ```bash
+   # 运行容器并检查模型文件
+   docker run --rm devpartner:v6.0-full ls -lh /app/models/
+   
+   # 预期输出应包含:
+   # Qwen3.5-9B-Q4_1.gguf  (约 5.7GB)
+   ```
+
+5️⃣ **推送到 ModelScope 或私有 Registry**
+   ```bash
+   # 标记镜像
+   docker tag devpartner:v6.0-full registry.cn-hangzhou.aliyuncs.com/your_namespace/devpartner:v6.0-full
+   
+   # 推送到阿里云 ACR（示例）
+   docker push registry.cn-hangzhou.aliyuncs.com/your_namespace/devpartner:v6.0-full
+   
+   # 或推送到 ModelScope Registry
+   docker tag devpartner:v6.0-full modelscope.cn/your_username/devpartner:v6.0-full
+   docker push modelscope.cn/your_username/devpartner:v6.0-full
+   ```
+
+6️⃣ **简化 docker-compose.yml（无需挂载模型卷）**
+   ```yaml
+   services:
+     devpartner:
+       image: devpartner:v6.0-full  # 使用完整镜像
+       volumes:
+         - ./data:/app/data        # 只需挂载数据目录
+         # 不再需要挂载 models 目录！
+   ```
+
+**✅ 优点**:
+- 完全离线可用，无外部依赖
+- 部署简单，单镜像即可运行
+- 适合安全要求高的私有环境
+
+**❌ 缺点**:
+- 镜像体积大 (~6.5GB)，上传/下载慢
+- 更新模型需重新构建镜像
+- 占用较多存储空间
+
+---
+
+##### **🎯 方法三：ModelScope 创空间 + OSS 对象存储（适合大规模部署）**
+
+**适用场景**: 高并发、多实例、需要弹性扩展
+
+**操作步骤**:
+
+1️⃣ **上传模型到阿里云 OSS**
+   ```bash
+   # 安装阿里云 CLI
+   pip install oss2
+   
+   # 上传模型文件（示例脚本）
+   python scripts/upload_to_oss.py \
+     --bucket your-bucket-name \
+     --object models/Qwen3.5-9B-Q4_1.gguf \
+     --file ./models/Qwen3.5-9B-Q4_1.gguf
+   ```
+
+2️⃣ **配置 ModelScope 创空间启动脚本**
+   
+   在创空间设置中添加启动命令:
+   ```bash
+   #!/bin/bash
+   # 启动前下载模型
+   echo "正在从 OSS 下载模型文件..."
+   wget -O /app/models/Qwen3.5-9B-Q4_1.gguf \
+     "https://your-bucket.oss-cn-hangzhou.aliyuncs.com/models/Qwen3.5-9B-Q4_1.gguf"
+   
+   # 启动服务
+   python server.py sse 7860
+   ```
+
+3️⃣ **配置环境变量**
+   ```yaml
+   environment:
+     - MODEL_PATH=/app/models/Qwen3.5-9B-Q4_1.gguf
+     - MODEL_SOURCE=remote
+     - MODEL_URL=https://your-bucket.oss-cn-hangzhou.aliyuncs.com/...
+   ```
+
+**✅ 优点**:
+- 支持多实例共享同一模型源
+- 可结合 CDN 加速下载
+- 弹性扩展能力强
+
+**❌ 缺点**:
+- 需要对象存储服务（产生费用）
+- 首次启动需要下载时间
+- 配置复杂度较高
+
+---
+
+#### **Step 5: 选择最适合你的方案**
+
+| 部署场景 | 推荐方案 | 原因 |
+|---------|---------|------|
+| **个人开发/学习** | 本地 `models/` 目录 | 简单直接，无需额外配置 |
+| **小团队内部使用** | Docker + Volume 挂载 | 团队共享，易于更新 |
+| **ModelScope 公开服务** | Dataset 挂载 | 平台原生支持，免费额度大 |
+| **企业私有部署** | 完整 Docker 镜像 | 安全可控，离线可用 |
+| **高并发生产环境** | OSS/CDN + 动态下载 | 弹性扩展，性能最优 |
+
+**💡 个人推荐（针对你的情况）**:
+```
+如果你要部署到 ModelScope 创空间:
+  → 使用方法一（Dataset 挂载）最简单！
+
+如果你要在本地 Docker 测试:
+  → 直接用 docker-compose.yml 的默认配置即可
+    （已自动挂载 ./models:/app/models）
 ```
 
-##### **选项 B: 打包进 Docker 镜像（适合离线环境）**
-
-```bash
-# 修改 deploy/.dockerignore，注释掉模型排除规则:
-# models/*.gguf  ← 注释这行
-
-# 构建完整镜像（包含模型，~6.5GB）
-docker build -t devpartner:full -f deploy/Dockerfile .
-
-# 注意: 构建时间长，镜像体积大
-```
-
-##### **选项 C: 运行时动态下载（需要网络）**
+---
 
 在 `config.yaml` 中配置：
 

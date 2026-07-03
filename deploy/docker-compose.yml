@@ -1,10 +1,25 @@
-# DevPartner MCP Server - Docker Compose
-# 本地开发/测试用
+# DevPartner MCP Server - Docker Compose v6.0
+# 本地开发/测试/ModelScope部署通用配置
 #
-# 启动: docker-compose up -d
-# 停止: docker-compose down
-# 日志: docker-compose logs -f
-# 重建: docker-compose up -d --build
+# 🎯 核心特性（v6.0）:
+#   - 统一从 ./models/ 目录加载模型文件
+#   - 数据和模型持久化到宿主机
+#   - 支持本地开发和云端部署
+#
+# 使用方式:
+#   本地开发: docker-compose up -d --build
+#   ModelScope: 参照 DEPLOYMENT_GUIDE.md 配置
+#
+# ⚠️ 重要提示:
+#   运行前请确保 models/Qwen3.5-9B-Q4_1.gguf 文件存在！
+#   下载方法见 models/README.md
+#
+# 命令速查:
+#   启动:   docker-compose up -d
+#   停止:   docker-compose down
+#   日志:   docker-compose logs -f devpartner
+#   重启:   docker-compose restart devpartner
+#   重建:   docker-compose up -d --build
 
 version: "3.8"
 
@@ -13,7 +28,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: devpartner:latest
+      args:
+        # 可选：构建时是否包含模型文件（默认不包含）
+        - INCLUDE_MODEL=false
+    image: devpartner:v6.0
     container_name: devpartner-mcp
     restart: unless-stopped
 
@@ -21,14 +39,19 @@ services:
     ports:
       - "7860:7860"
 
-    # 持久化数据目录（重要！容器重启不丢数据）
+    # 持久化目录挂载（v6.0: 统一数据+模型管理）
     volumes:
+      # 运行时数据（对话记录、日志、知识库等）
       - ./data:/app/data
+      # ★ 模型文件目录（v6.0 核心：统一从这里加载模型）
+      - ./models:/app/models
 
     environment:
       - MCP_PORT=7860
       - TZ=Asia/Shanghai
       - PYTHONUNBUFFERED=1
+      # v6.0: 明确指定模型路径（可选，默认已配置）
+      - MODEL_PATH=/app/models/Qwen3.5-9B-Q4_1.gguf
 
     # 健康检查
     healthcheck:
@@ -38,10 +61,12 @@ services:
       retries: 3
       start_period: 30s
 
-    # 资源限制（可选）
+    # 资源限制（根据实际需求调整）
     deploy:
       resources:
         limits:
-          memory: 512M
+          # v6.0: 如果使用GPU推理，建议增加内存限制
+          memory: 2G
+          # cpus: '2.0'
         reservations:
-          memory: 128M
+          memory: 512M

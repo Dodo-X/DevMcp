@@ -1,6 +1,16 @@
 # ============================================
-# DevPartner .gitignore - v5.2
+# DevPartner .gitignore - v6.0 (优化版)
 # ============================================
+# 
+# 重要变更记录:
+#   v6.0: 排除大模型文件(~5.7GB)，支持GitHub→ModelScope同步
+#   v5.2: 添加运行时数据目录保护
+#
+# 核心策略:
+#   - 代码+配置 → 提交到GitHub (~50MB)
+#   - 模型文件 → 手动管理 (Dataset/Volume/Docker镜像)
+#   - 运行时数据 → 本地生成，不纳入版本控制
+#
 
 # ===== Python =====
 *.py[cod]
@@ -53,10 +63,22 @@ data/.dialogue_state.json
 data/.tool_events.json
 data/.evolution_history.json
 
-# ===== 模型文件（大文件，不提交）=====
-models/*.gguf
-models/*.bin
-!models/.gitkeep
+# ===== 模型文件（v6.0: 不纳入 Git，手动管理）=====
+# 原因:
+#   - 文件过大 (~5.7GB)，超出 GitHub 单文件限制 (100MB)
+#   - 即使使用 Git LFS，免费额度也有限 (1GB存储 + 1GB/月带宽)
+#   - ModelScope 支持更灵活的模型托管方式
+#
+# 部署方式:
+#   方式A: 手动下载到 models/ 目录（推荐用于本地/Docker开发）
+#   方式B: 上传到 ModelScope Dataset，通过 volume 挂载
+#   方式C: 打包进 Docker 镜像（镜像较大 ~6.5GB）
+#
+models/*.gguf           # GGUF 格式模型文件（llama-cpp-python 使用）
+models/*.bin            # 其他二进制模型文件
+models/*.safetensors    # HuggingFace safetensors 格式
+!models/.gitkeep        # 保留占位符文件（确保目录被跟踪）
+!models/README.md       # 保留模型说明文档
 
 # ===== IDE 配置 =====
 
