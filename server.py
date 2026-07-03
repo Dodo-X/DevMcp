@@ -85,7 +85,7 @@ if str(_project_root) not in sys.path:
 from fastmcp import FastMCP
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from starlette.requests import Request
-from starlette.responses import HTMLResponse
+from starlette.responses import HTMLResponse, JSONResponse
 import os as _os
 
 # ── ClosedResourceError 补丁 ──────────────────────────────────
@@ -198,28 +198,24 @@ from devpartner_tools.tools.growth_analytics import (
 @mcp.custom_route("/api/growth/user-overview", methods=["GET"])
 async def api_user_growth_overview(request: Request) -> JSONResponse:
     """获取用户成长总览数据"""
-    from fastapi.responses import JSONResponse
     data = json.loads(get_user_growth_overview())
     return JSONResponse(content=data)
 
 @mcp.custom_route("/api/growth/system-evolution", methods=["GET"])
 async def api_system_evolution(request: Request) -> JSONResponse:
     """获取系统进化统计数据"""
-    from fastapi.responses import JSONResponse
     data = json.loads(get_system_evolution_stats())
     return JSONResponse(content=data)
 
 @mcp.custom_route("/api/growth/skill-radar", methods=["GET"])
 async def api_skill_radar(request: Request) -> JSONResponse:
     """获取用户技能六维雷达图数据"""
-    from fastapi.responses import JSONResponse
     data = json.loads(get_user_skill_radar())
     return JSONResponse(content=data)
 
 @mcp.custom_route("/api/growth/timeline", methods=["GET"])
 async def api_learning_timeline(request: Request) -> JSONResponse:
     """获取融合时间线数据"""
-    from fastapi.responses import JSONResponse
     limit = int(request.query_params.get("limit", 20))
     data = json.loads(get_learning_timeline(limit=limit))
     return JSONResponse(content=data)
@@ -227,7 +223,6 @@ async def api_learning_timeline(request: Request) -> JSONResponse:
 @mcp.custom_route("/api/growth/activity-heatmap", methods=["GET"])
 async def api_activity_heatmap(request: Request) -> JSONResponse:
     """获取学习热力图数据"""
-    from fastapi.responses import JSONResponse
     data = json.loads(get_user_activity_heatmap())
     return JSONResponse(content=data)
 
@@ -612,15 +607,8 @@ try:
     from devpartner_tools.tools.web_requests import (
         fetch_url, github_search_code, github_search_repositories, context7_search
     )
-    from devpartner_tools.tools.reasoning import (
-        sequential_think, generate_mindmap, generate_mindmap_from_tree, list_mindmaps
-    )
     from devpartner_tools.tools.system_utils import (
         execute_system_command, detect_client, environment_scan, validate_path
-    )
-    from devpartner_tools.tools.mcp_discovery import (
-        discover_mcp_servers, list_known_mcp_servers, test_mcp_server,
-        get_rules_summary, generate_config_snippet
     )
 
     # 注册所有工具
@@ -636,21 +624,12 @@ try:
     mcp.tool(github_search_code)
     mcp.tool(github_search_repositories)
     mcp.tool(context7_search)
-    mcp.tool(sequential_think)
-    mcp.tool(generate_mindmap)
-    mcp.tool(generate_mindmap_from_tree)
-    mcp.tool(list_mindmaps)
     mcp.tool(execute_system_command)
     mcp.tool(detect_client)
     mcp.tool(environment_scan)
     mcp.tool(validate_path)
-    mcp.tool(discover_mcp_servers)
-    mcp.tool(list_known_mcp_servers)
-    mcp.tool(test_mcp_server)
-    mcp.tool(get_rules_summary)
-    mcp.tool(generate_config_snippet)
 
-    _tools_count = 25
+    _tools_count = 21
     print(f"[INFO] devpartner-tools: {_tools_count} 个纯工具已注册")
 
 except Exception as e:
@@ -1319,9 +1298,8 @@ def hot_reload(module: str = "all") -> str:
                 "devpartner_tools.tools.filesystem",
                 "devpartner_tools.tools.git_operations",
                 "devpartner_tools.tools.web_requests",
-                "devpartner_tools.tools.reasoning",
                 "devpartner_tools.tools.system_utils",
-                "devpartner_tools.tools.mcp_discovery",
+                "devpartner_tools.tools.growth_analytics",
                 "devpartner_agent",
                 "devpartner_agent.core",
                 "devpartner_agent.services",
@@ -1333,9 +1311,8 @@ def hot_reload(module: str = "all") -> str:
                 "devpartner_tools.tools.filesystem",
                 "devpartner_tools.tools.git_operations",
                 "devpartner_tools.tools.web_requests",
-                "devpartner_tools.tools.reasoning",
                 "devpartner_tools.tools.system_utils",
-                "devpartner_tools.tools.mcp_discovery",
+                "devpartner_tools.tools.growth_analytics",
             ]
         elif module == "agent":
             targets = [
