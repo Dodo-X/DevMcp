@@ -1,26 +1,66 @@
-# devPartner MCP 配置
+# ============================================
+# DevPartner .gitignore - v5.2
+# ============================================
 
-# 项目文件
-*.pyc
+# ===== Python =====
+*.py[cod]
 __pycache__/
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
 *.egg-info/
+.installed.cfg
+*.egg
 
-# 运行时数据
-data/devpartner.db
+# ===== 虚拟环境 =====
+.venv/
+venv/
+ENV/
+env/
+venv.bak/
+
+# ===== 运行时数据（核心）=====
+data/
+!data/.gitkeep
+data/databases/*.db
+data/databases/*.db-shm
+data/databases/*.db-wal
+data/databases/*.db-journal
+data/logs/
 data/daily_logs/
-data/logs_archive/
-data/tool_archive/
-data/mindmaps/
+data/reports/
 data/memories/
 data/backups/
+data/tool_archive/
+data/mindmaps/
+data/logs_archive/
+data/.conversation_counter.json
 data/.pending_log.json
 data/.pending_dialogue.json
 data/.dialogue_state.json
 data/.tool_events.json
 data/.evolution_history.json
 
-# IDE - IntelliJ IDEA
-# 保留共享的项目配置
+# ===== 模型文件（大文件，不提交）=====
+models/*.gguf
+models/*.bin
+!models/.gitkeep
+
+# ===== IDE 配置 =====
+
+## IntelliJ IDEA (保留部分共享配置)
 !.idea/
 .idea/*
 !.idea/modules.xml
@@ -32,7 +72,6 @@ data/.evolution_history.json
 !.idea/dataSources/
 !.idea/*.iml
 
-# 排除用户本地配置
 .idea/workspace.xml
 .idea/usage.statistics.xml
 .idea/shelf/
@@ -40,16 +79,59 @@ data/.evolution_history.json
 .idea/uiDesigner.xml
 .idea/dictionaries/
 
-# VS Code
+## VS Code
 .vscode/
 *.swp
 *.swo
+*~
 
-# Python
-.venv/
-venv/
-env/
+# ===== 测试产物 =====
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.pytest_cache/
+nosetests.xml
+.tox/
+.nox/
 
-# 系统
+# ===== 日志文件 =====
+*.log
+logs/
+
+# ===== 环境变量（敏感信息）=====
+.env
+.env.local
+.env.*.local
+.env.production
+deploy/.env
+
+# ===== 操作系统 =====
 Thumbs.db
 .DS_Store
+Desktop.ini
+$RECYCLE.BIN/
+
+# ===== 临时文件 =====
+*.tmp
+*.temp
+*.bak
+*.swp
+*~.nib
+.cache/
+
+# ===== 打包文件 =====
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# ===== MCP 相关（可选）=====
+.codebuddy/memory/*.md
+!.codebuddy/memory/MEMORY.md
+.trae/rules/*.md
+!.trae/rules/task_pipeline.md
+
+# ===== GitHub Actions =====
+.github/workflows/*.yml.backup

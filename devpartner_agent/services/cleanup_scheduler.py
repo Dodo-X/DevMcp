@@ -105,7 +105,7 @@ class CleanupScheduler:
         }
 
         try:
-            from core.config import get_config
+            from devpartner_agent.core.config import get_config
             cfg = get_config()
             retention_days = cfg.data_lifecycle.log_retention_days
             backup_before = cfg.data_lifecycle.backup_before_cleanup
@@ -117,7 +117,7 @@ class CleanupScheduler:
 
         # ── 清理数据库旧记录 ──
         try:
-            from core.database import get_db
+            from devpartner_agent.core.database import get_db
             db = get_db()
 
             # 获取清理前记录数
@@ -158,23 +158,8 @@ class CleanupScheduler:
         except Exception as e:
             result["errors"].append(f"数据库清理失败: {e}")
 
-        # ── 清理旧日志文件 ──
-        try:
-            from services.log_service import get_log_service
-            log_svc = get_log_service()
-
-            # 列出旧日志
-            old_logs = log_svc.list_old_logs(retention_days) if hasattr(log_svc, "list_old_logs") else []
-            if old_logs:
-                # 归档旧日志
-                archived = log_svc.archive_old_logs(retention_days)
-                result["actions"].append({
-                    "action": "log_cleanup",
-                    "archived_count": len(archived) if archived else 0,
-                    "cutoff_date": cutoff_date,
-                })
-        except Exception as e:
-            result["errors"].append(f"日志文件清理失败: {e}")
+        # ── 清理旧日志文件（v5.2: Markdown 文件日志已废弃，仅清理数据库旧记录）──
+        # 注：日志文件清理功能已在 v5.2 中移除，数据统一由 SQLite 管理
 
         # ── 记录清理历史 ──
         self._last_cleanup = datetime.now()

@@ -27,7 +27,7 @@ def _is_git_available(repo_path: str = ".") -> bool:
     try:
         r = subprocess.run(
             ["git", "-C", repo_path, "rev-parse", "--is-inside-work-tree"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=10,
         )
         return r.returncode == 0
     except Exception:
@@ -65,10 +65,35 @@ async def execute_self_iterate(context: dict = None, mode: str = "auto") -> dict
         suggestions = _generate_data_driven_suggestions(system_data)
         result["suggestions_generated"] = suggestions
 
+        # ── v4.1: 从 suggestions 中提取 mcp_tool_actions（可执行指令）──
+        mcp_actions = []
+        for s in suggestions:
+            detail = s.get("detail", {})
+            action = detail.get("action", "")
+            if not action or action == "review":
+                continue
+            if s.get("category") == "mcp_tool_cleanup" and action in ("disable", "deprecate"):
+                tool_names = detail.get("unused_sample_names", [])
+                if tool_names:
+                    mcp_actions.append({
+                        "action": action,
+                        "tool_names": tool_names,
+                        "reason": s.get("suggestion", ""),
+                    })
+            elif s.get("category") == "mcp_tool_hotspot" and action == "enhance":
+                tool_names = detail.get("hot_tool_names", [])
+                if tool_names:
+                    mcp_actions.append({
+                        "action": "enhance",
+                        "tool_names": tool_names,
+                        "reason": s.get("suggestion", ""),
+                    })
+        result["mcp_tool_actions"] = mcp_actions
+
         # 保存建议到数据库（可追溯）
         for suggestion in suggestions:
             try:
-                from core.database import get_db
+                from devpartner_agent.core.database import get_db
                 db = get_db()
                 db.insert_improvement(
                     category=suggestion.get("category", "general"),
@@ -211,23 +236,35 @@ async def execute_self_iterate(context: dict = None, mode: str = "auto") -> dict
 
 
 def _collect_system_data() -> dict:
-    """收集系统当前状态数据"""
+    """
+    收集系统当前状态数据（v4.0 增强版）
+
+    新增维度：
+    - 用户画像：技能领域、熟练度、投入时间
+    - 技能评估：技能等级分布、成长趋势
+    - MCP 工具使用统计：调用频率、零使用工具
+    - 优化反馈统计：待处理反馈、反馈类型
+    - 对话统计：有意义对话数 vs 简单工具调用
+    - 系统反馈：用户纠正/不满/追问频率
+    """
     data = {}
 
     # 配置信息
     try:
-        from core.config import get_config
+        from devpartner_agent.core.config import get_config
         cfg = get_config()
         data["config"] = {
             "version": cfg.version,
             "evolution_enabled": cfg.evolution.enabled,
+            "max_changes_per_day": cfg.evolution.max_changes_per_day,
+            "log_retention_days": cfg.data_lifecycle.log_retention_days,
         }
     except Exception:
         data["config"] = {"error": "配置加载失败"}
 
     # 规则统计
     try:
-        from core.rule_engine import get_engine
+        from devpartner_agent.core.rule_engine import get_engine
         engine = get_engine()
         data["rules"] = {
             "total": len(engine.get_all()),
@@ -237,60 +274,510 @@ def _collect_system_data() -> dict:
     except Exception:
         data["rules"] = {}
 
-    # 数据库统计
+    # ── 数据库统计（增强）──
     try:
-        from core.database import get_db
+        from devpartner_agent.core.database import get_db
         db = get_db()
-        conversations = db.query_local("SELECT COUNT(*) as cnt FROM conversations")
-        improvements = db.query_local("SELECT COUNT(*) as cnt FROM system_improvements WHERE status='pending'")
-        data["database"] = {
-            "conversations": conversations[0]["cnt"] if conversations else 0,
-            "pending_improvements": improvements[0]["cnt"] if improvements else 0,
-        }
-    except Exception:
-        data["database"] = {}
 
-    # 服务发现统计
+        # 总对话数
+        conversations = db.query_local("SELECT COUNT(*) as cnt FROM conversations")
+        total_convs = conversations[0]["cnt"] if conversations else 0
+
+        # 有意义对话数（排除工具调用记录）
+        meaningful = db.query_local(
+            "SELECT COUNT(*) as cnt FROM conversations WHERE task_type != '工具调用'"
+        )
+        meaningful_count = meaningful[0]["cnt"] if meaningful else 0
+
+        # 按任务类型统计
+        task_types = db.query_local(
+            "SELECT task_type, COUNT(*) as cnt FROM conversations "
+            "GROUP BY task_type ORDER BY cnt DESC"
+        )
+
+        # 最近7天对话趋势
+        weekly_trend = db.query_local("""
+            SELECT date(timestamp) as dt, COUNT(*) as cnt
+            FROM conversations
+            WHERE timestamp >= date('now', '-7 days')
+            GROUP BY dt ORDER BY dt
+        """)
+
+        # 待处理改进
+        improvements = db.query_local(
+            "SELECT COUNT(*) as cnt FROM improvement_log WHERE status='pending'"
+        )
+        pending_improvements = improvements[0]["cnt"] if improvements else 0
+
+        # ── 用户画像数据 ──
+        # 技能画像
+        skill_profile = db.get_skill_profile()
+        skill_summary = db.get_skill_summary()
+        domain_stats = db.get_domain_stats()
+
+        # 技能规划
+        skill_plans = db.get_skill_plan()
+
+        # ── MCP 工具使用统计 ──
+        tool_stats = db.get_tool_stats()
+        registered_tools = db.get_registered_tools()
+        # 零使用工具
+        unused_tools = [t for t in registered_tools if t.get("call_count", 0) == 0]
+        # 高频工具（top 10）
+        sorted_by_use = sorted(registered_tools,
+                                key=lambda t: t.get("call_count", 0), reverse=True)
+        hot_tools = sorted_by_use[:10]
+
+        # ── 优化反馈统计 ──
+        optimization_feedbacks = db.get_pending_optimizations(limit=100)
+        feedback_by_type = {}
+        for fb in optimization_feedbacks:
+            ft = fb.get("feedback_type", "unknown")
+            feedback_by_type[ft] = feedback_by_type.get(ft, 0) + 1
+
+        # ── 版本历史 ──
+        versions = db.get_version_history(limit=10)
+
+        # ── 进化历史 ──
+        evolution = db.get_evolution_history(limit=20)
+
+        data["database"] = {
+            "total_conversations": total_convs,
+            "meaningful_conversations": meaningful_count,
+            "task_type_distribution": {t["task_type"]: t["cnt"] for t in task_types},
+            "weekly_trend": {t["dt"]: t["cnt"] for t in weekly_trend},
+            "pending_improvements": pending_improvements,
+        }
+
+        data["user_profile"] = {
+            "skill_profile": skill_profile,
+            "skill_summary": skill_summary,
+            "domain_stats": domain_stats,
+            "skill_plans": skill_plans,
+        }
+
+        data["mcp_tools"] = {
+            "total_registered": tool_stats.get("total_tools", 0),
+            "total_calls": tool_stats.get("total_calls", 0),
+            "unused_tools": [{"name": t["tool_name"], "module": t.get("module", "")}
+                              for t in unused_tools],
+            "unused_count": len(unused_tools),
+            "hot_tools": [{"name": t["tool_name"], "calls": t.get("call_count", 0)}
+                           for t in hot_tools],
+        }
+
+        data["optimization_feedback"] = {
+            "total_pending": len(optimization_feedbacks),
+            "by_type": feedback_by_type,
+        }
+
+        data["version_history"] = versions
+        data["evolution_history"] = evolution
+
+    except Exception as e:
+        data["database"] = {"error": str(e)}
+        data["user_profile"] = {}
+        data["mcp_tools"] = {}
+        data["optimization_feedback"] = {}
+        data["version_history"] = []
+        data["evolution_history"] = []
+
+    # 服务发现统计（v6.0: discovery_service 已移除，MCP工具管理整合到tools层）
+    # 原功能由 devpartner_tools.tools 自动发现替代
     try:
-        from services.discovery_service import get_discovery
-        discovery = get_discovery()
-        data["mcp_servers"] = discovery.get_scan_status()
+        data["mcp_servers"] = {"status": "deprecated", "note": "使用 devpartner_tools 替代"}
     except Exception:
         data["mcp_servers"] = {}
 
     # 跨AI对话统计
     try:
-        from services.dialogue_service import get_dialogue
+        from devpartner_agent.services.dialogue_service import get_dialogue
         dialogue = get_dialogue()
         data["dialogue"] = dialogue.get_statistics()
     except Exception:
         data["dialogue"] = {}
+
+    # ── 对话计数器（有意义对话触发统计）──
+    try:
+        counter_file = Path(__file__).parent.parent.parent / "data" / ".conversation_counter.json"
+        if counter_file.exists():
+            import json
+            with open(counter_file, "r", encoding="utf-8") as f:
+                data["conversation_counter"] = json.load(f)
+    except Exception:
+        data["conversation_counter"] = {}
+
+    # ── 优化状态 ──
+    try:
+        state_file = Path(__file__).parent.parent.parent / "data" / ".optimization_state.json"
+        if state_file.exists():
+            import json
+            with open(state_file, "r", encoding="utf-8") as f:
+                data["optimization_state"] = json.load(f)
+    except Exception:
+        data["optimization_state"] = {}
 
     return data
 
 
 def _generate_data_driven_suggestions(system_data: dict) -> list[dict]:
     """
-    基于系统数据生成改进建议（数据驱动，不依赖Ollama）
+    基于系统数据生成改进建议（v5.0 - LLM 增强 + 数据驱动双引擎）
     
-    分析维度：
-    - 数据库膨胀：对话数过多需要归档
-    - 规则健康度：规则触发频率
-    - MCP服务状态：可用服务数
-    - 跨AI对话活跃度：消息数/未读数
+    策略：
+    - ✨ 优先使用 LLM（Ollama/Qwen3.5）进行深度智能分析
+    - 🔄 回退到数据驱动的规则引擎（LLM 不可用时）
+    
+    LLM 分析维度：
+    1. 性能瓶颈识别
+    2. 用户体验提升
+    3. 功能缺口发现
+    4. MCP 工具优化
+    5. 代码质量改进
+    
+    规则引擎分析维度（回退方案）：
+    1. 用户画像分析 — 技能强弱项、成长趋势、投入分布
+    2. 技能评估 — 技能等级分布、短板识别、学习建议
+    3. 批评指点 — 从优化反馈中提取用户不满/纠正信号
+    4. 未来规划建议 — 基于技能规划的进度评估和目标调整
+    5. MCP 工具优化 — 零使用工具精简、高频工具增强、新工具建议
+    6. 系统健康度 — 数据库膨胀、规则健康、服务发现
+    7. 系统反馈 — 用户反馈趋势、对话质量评估
     """
+    
+    # ═══════════════════════════════════════════════════════
+    # 尝试使用 LLM 智能分析（优先）
+    # ═══════════════════════════════════════════════════════
+    try:
+        from devpartner_agent.services.llm_service import get_llm_service
+        llm = get_llm_service()
+        
+        # 检查是否启用 LLM 自我改进功能
+        cfg = llm._get_config()
+        if getattr(cfg, 'enhance_self_improvement', False) and llm.is_available():
+            import logging
+            logger = logging.getLogger(__name__)
+            
+            logger.info("使用 LLM 生成自我改进建议...")
+            
+            # 获取历史优化记录作为上下文
+            improvement_history = []
+            try:
+                from devpartner_agent.core.database import get_db
+                db = get_db()
+                history = db.query_local(
+                    "SELECT * FROM improvement_log ORDER BY timestamp DESC LIMIT 20"
+                )
+                improvement_history = [
+                    {
+                        "category": h.get("category", ""),
+                        "suggestion": h.get("suggestion", "")[:200],
+                        "timestamp": h.get("timestamp", ""),
+                    }
+                    for h in (history or [])
+                ]
+            except Exception as e:
+                logger.debug(f"获取优化历史失败: {e}")
+            
+            # 调用 LLM 生成建议
+            llm_suggestions = llm.generate_self_improvement_suggestions(
+                system_data, 
+                improvement_history
+            )
+            
+            if llm_suggestions and len(llm_suggestions) > 0:
+                logger.info(f"LLM 自我改进建议生成成功: {len(llm_suggestions)} 条")
+                
+                # 标记为 LLM 生成的建议
+                for s in llm_suggestions:
+                    s["source"] = "llm"
+                    s["confidence"] = "high"
+                    
+                return llm_suggestions
+            
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"LLM 自我改进建议生成失败，回退到规则引擎: {e}")
+    
+    # ═══════════════════════════════════════════════════════
+    # 回退：使用数据驱动的规则引擎
+    # ═══════════════════════════════════════════════════════
     suggestions = []
 
-    # 1. 数据库健康检查
-    db_data = system_data.get("database", {})
-    conv_count = db_data.get("conversations", 0)
-    if conv_count > 1000:
+    # ═══════════════════════════════════════════════════════
+    # 1. 用户画像分析
+    # ═══════════════════════════════════════════════════════
+    user_profile = system_data.get("user_profile", {})
+    skill_summary = user_profile.get("skill_summary", {})
+    domain_stats = user_profile.get("domain_stats", [])
+    skill_profile = user_profile.get("skill_profile", [])
+
+    total_hours = skill_summary.get("total_hours", 0)
+    total_domains = skill_summary.get("total_domains", 0)
+    domains_map = skill_summary.get("domains", {})
+
+    # 识别强项和弱项
+    strengths = []
+    weaknesses = []
+    for ds in domain_stats:
+        domain = ds.get("skill_domain", "")
+        hours = ds.get("total_hours", 0) or 0
+        count = ds.get("cnt", 0)
+        if hours >= 5:
+            strengths.append({"domain": domain, "hours": hours, "conversations": count})
+        elif hours < 1 and count > 0:
+            weaknesses.append({"domain": domain, "hours": hours, "conversations": count})
+
+    if strengths:
         suggestions.append({
-            "category": "database_health",
-            "suggestion": f"数据库对话记录已达 {conv_count} 条，建议归档清理",
+            "category": "user_profile_strength",
+            "suggestion": f"用户强项领域：{', '.join([s['domain'] for s in strengths[:5]])}",
+            "detail": {"strengths": strengths, "total_hours": total_hours},
+            "priority": "low",
+        })
+
+    if weaknesses:
+        suggestions.append({
+            "category": "user_profile_weakness",
+            "suggestion": f"用户待加强领域：{', '.join([w['domain'] for w in weaknesses[:5]])}",
+            "detail": {"weaknesses": weaknesses},
             "priority": "medium",
         })
 
+    # 投入时间分布
+    if total_domains > 0:
+        suggestions.append({
+            "category": "user_profile_summary",
+            "suggestion": f"用户累计投入 {total_hours}h，覆盖 {total_domains} 个技术领域",
+            "detail": {"total_hours": total_hours, "total_domains": total_domains,
+                        "domains": domains_map},
+            "priority": "low",
+        })
+
+    # ═══════════════════════════════════════════════════════
+    # 2. 技能评估与学习建议
+    # ═══════════════════════════════════════════════════════
+    skill_plans = user_profile.get("skill_plans", [])
+    for plan in skill_plans:
+        status = plan.get("status", "active")
+        progress = plan.get("current_progress", "")
+        target_level = plan.get("target_level", "")
+        domain = plan.get("skill_domain", "")
+        if status == "active":
+            suggestions.append({
+                "category": "skill_plan_progress",
+                "suggestion": f"技能规划 [{domain}]：目标 {target_level}，当前进度: {progress or '未记录'}",
+                "detail": {"domain": domain, "target": target_level, "progress": progress},
+                "priority": "medium",
+            })
+
+    # 学习建议
+    if weaknesses and not skill_plans:
+        suggestions.append({
+            "category": "learning_suggestion",
+            "suggestion": f"建议为薄弱领域创建技能规划：{', '.join([w['domain'] for w in weaknesses[:3]])}",
+            "detail": {"weak_domains": [w["domain"] for w in weaknesses[:3]]},
+            "priority": "high",
+        })
+
+    # ═══════════════════════════════════════════════════════
+    # 3. 批评指点 — 从优化反馈中提取
+    # ═══════════════════════════════════════════════════════
+    opt_feedback = system_data.get("optimization_feedback", {})
+    feedback_by_type = opt_feedback.get("by_type", {})
+    total_pending_feedback = opt_feedback.get("total_pending", 0)
+
+    if feedback_by_type.get("tool_logic_error", 0) > 0:
+        suggestions.append({
+            "category": "critique_tool_quality",
+            "suggestion": f"检测到 {feedback_by_type['tool_logic_error']} 次工具返回结果不准确，"
+                           f"建议系统性审查工具实现逻辑，添加结果验证",
+            "detail": {"count": feedback_by_type["tool_logic_error"]},
+            "priority": "high",
+        })
+
+    if feedback_by_type.get("tool_description_weak", 0) > 0:
+        suggestions.append({
+            "category": "critique_tool_description",
+            "suggestion": f"检测到 {feedback_by_type['tool_description_weak']} 次工具描述不够清晰，"
+                           f"AI 客户端未能识别应调用的工具。建议优化工具 description 和触发关键词",
+            "detail": {"count": feedback_by_type["tool_description_weak"]},
+            "priority": "high",
+        })
+
+    if feedback_by_type.get("rule_missing", 0) > 0:
+        suggestions.append({
+            "category": "critique_rule_gap",
+            "suggestion": f"检测到 {feedback_by_type['rule_missing']} 次缺少自动触发规则，"
+                           f"用户期望自动执行但需要手动操作",
+            "detail": {"count": feedback_by_type["rule_missing"]},
+            "priority": "medium",
+        })
+
+    if total_pending_feedback > 10:
+        suggestions.append({
+            "category": "critique_backlog",
+            "suggestion": f"共有 {total_pending_feedback} 条待处理优化反馈，建议逐批处理，"
+                           f"优先处理 high 和 critical 级别",
+            "detail": {"total_pending": total_pending_feedback},
+            "priority": "high" if total_pending_feedback > 30 else "medium",
+        })
+
+    # ═══════════════════════════════════════════════════════
+    # 4. 未来规划建议
+    # ═══════════════════════════════════════════════════════
+    # 基于技能增长趋势
+    for domain, info in domains_map.items():
+        trend = info.get("trend", "stable")
+        level = info.get("level", "beginner")
+        hours = info.get("hours", 0)
+
+        if trend == "growing" and level in ("beginner", "intermediate"):
+            suggestions.append({
+                "category": "future_plan_growth",
+                "suggestion": f"[{domain}] 成长趋势良好（{trend}），已投入 {hours}h，"
+                               f"当前等级 {level}。建议设定升级目标到 "
+                               f"{'intermediate' if level == 'beginner' else 'advanced'}",
+                "detail": {"domain": domain, "trend": trend, "level": level, "hours": hours},
+                "priority": "medium",
+            })
+
+    # 版本演进建议
+    version_history = system_data.get("version_history", [])
+    if len(version_history) >= 3:
+        latest = version_history[0] if version_history else {}
+        suggestions.append({
+            "category": "future_plan_version",
+            "suggestion": f"当前版本 {latest.get('version', 'unknown')}，"
+                           f"已有 {len(version_history)} 次版本迭代。"
+                           f"建议规划下一版本的重点优化方向",
+            "detail": {"current_version": latest.get("version", ""),
+                        "version_count": len(version_history)},
+            "priority": "low",
+        })
+
+    # ═══════════════════════════════════════════════════════
+    # 5. MCP 工具优化（v4.1 增强：生成可执行操作指令）
+    # ═══════════════════════════════════════════════════════
+    mcp_tools = system_data.get("mcp_tools", {})
+    unused_tools = mcp_tools.get("unused_tools", [])
+    unused_count = mcp_tools.get("unused_count", 0)
+    hot_tools = mcp_tools.get("hot_tools", [])
+
+    # ── 零使用工具：生成 disable 指令 ──
+    if unused_count > 0:
+        unused_names = [t["name"] for t in unused_tools]
+        # 安全白名单：这些工具永远不应被禁用
+        _SAFE_TOOLS = {
+            "check_optimization_needed", "mark_optimization_done",
+            "self_iterate", "save_self_iterate_results",
+            "record_dialogue", "record_conversation", "log_conversation",
+            "get_tool_registry", "system_diagnose", "get_capabilities",
+            "check_rule", "get_rules", "process_user_feedback",
+        }
+        # 排除安全白名单
+        unsafe_unused = [n for n in unused_names if n not in _SAFE_TOOLS]
+
+        if len(unsafe_unused) >= 3:
+            # 生成 mcp_tool_actions（可执行指令）
+            disable_targets = unsafe_unused[:10]  # 最多禁用 10 个
+            suggestions.append({
+                "category": "mcp_tool_cleanup",
+                "suggestion": f"有 {unused_count} 个 MCP 工具从未被调用（{len(unsafe_unused)} 个可安全禁用），"
+                               f"包括：{', '.join(unsafe_unused[:5])}... "
+                               f"将自动禁用前 {len(disable_targets)} 个",
+                "detail": {
+                    "unused_count": unused_count,
+                    "safe_to_disable": len(unsafe_unused),
+                    "unused_sample": unsafe_unused[:5],
+                    "action": "disable",
+                    "unused_sample_names": disable_targets,
+                },
+                "priority": "high",
+            })
+        elif unused_count > 0:
+            # 少量未使用，仅生成建议
+            suggestions.append({
+                "category": "mcp_tool_cleanup",
+                "suggestion": f"有 {unused_count} 个 MCP 工具从未被调用，"
+                               f"但数量较少或属于安全白名单，暂不自动禁用。请人工评估",
+                "detail": {
+                    "unused_count": unused_count,
+                    "unused_sample": unused_names[:5],
+                    "action": "review",
+                },
+                "priority": "low",
+            })
+
+    # ── 高频工具：生成 enhance 指令 ──
+    if hot_tools:
+        hot_names = [f"{t['name']}({t['calls']})" for t in hot_tools[:5]]
+        hot_tool_names = [t["name"] for t in hot_tools[:5]]
+        suggestions.append({
+            "category": "mcp_tool_hotspot",
+            "suggestion": f"高频使用工具：{', '.join(hot_names)}。"
+                           f"建议重点优化这些工具的性能和稳定性",
+            "detail": {
+                "hot_tools": hot_tools[:5],
+                "action": "enhance",
+                "hot_tool_names": hot_tool_names,
+            },
+            "priority": "medium",
+        })
+
+    # 工具使用率分布
+    total_registered = mcp_tools.get("total_registered", 0)
+    total_calls = mcp_tools.get("total_calls", 0)
+    if total_registered > 0 and total_calls > 0:
+        avg_calls = total_calls / total_registered
+        if avg_calls < 2:
+            suggestions.append({
+                "category": "mcp_tool_utilization",
+                "suggestion": f"工具平均调用次数仅 {avg_calls:.1f} 次（{total_registered} 个工具，"
+                               f"{total_calls} 次调用），利用率偏低。"
+                               f"建议增强工具描述和触发条件，提高工具发现率",
+                "detail": {"avg_calls": round(avg_calls, 1)},
+                "priority": "medium",
+            })
+
+    # ═══════════════════════════════════════════════════════
+    # 6. 系统健康度
+    # ═══════════════════════════════════════════════════════
+    db_data = system_data.get("database", {})
+    total_convs = db_data.get("total_conversations", 0)
+    meaningful_convs = db_data.get("meaningful_conversations", 0)
+
+    if total_convs > 500:
+        suggestions.append({
+            "category": "database_health",
+            "suggestion": f"数据库对话记录已达 {total_convs} 条（其中 {meaningful_convs} 条有意义对话），"
+                           f"建议定期归档清理旧记录",
+            "priority": "medium",
+        })
+
+    # 对话趋势
+    weekly_trend = db_data.get("weekly_trend", {})
+    if len(weekly_trend) >= 3:
+        values = list(weekly_trend.values())
+        if len(values) >= 2 and values[-1] > values[0] * 1.5:
+            suggestions.append({
+                "category": "system_growth",
+                "suggestion": "最近7天对话量呈上升趋势，系统使用率正在增长",
+                "detail": {"trend": weekly_trend},
+                "priority": "low",
+            })
+
+    # 规则引擎
+    rules = system_data.get("rules", {})
+    if rules.get("total", 0) == 0:
+        suggestions.append({
+            "category": "rule_engine",
+            "suggestion": "规则引擎中没有规则，建议添加至少一个自动触发规则",
+            "priority": "high",
+        })
+
+    # 待处理改进
     pending_improvements = db_data.get("pending_improvements", 0)
     if pending_improvements > 20:
         suggestions.append({
@@ -299,16 +786,7 @@ def _generate_data_driven_suggestions(system_data: dict) -> list[dict]:
             "priority": "high" if pending_improvements > 50 else "medium",
         })
 
-    # 2. 规则引擎检查
-    rules = system_data.get("rules", {})
-    if rules.get("total", 0) == 0:
-        suggestions.append({
-            "category": "rule_engine",
-            "suggestion": "规则引擎中没有规则，建议添加至少一个自动触发规则",
-            "priority": "medium",
-        })
-
-    # 3. MCP服务发现建议
+    # MCP服务发现
     mcp = system_data.get("mcp_servers", {})
     known = mcp.get("known", 0)
     if known < 5:
@@ -318,7 +796,7 @@ def _generate_data_driven_suggestions(system_data: dict) -> list[dict]:
             "priority": "high" if known == 0 else "medium",
         })
 
-    # 4. 跨AI对话健康度
+    # 跨AI对话
     dialogue = system_data.get("dialogue", {})
     unread = dialogue.get("unread", 0)
     if unread > 5:
@@ -328,9 +806,22 @@ def _generate_data_driven_suggestions(system_data: dict) -> list[dict]:
             "priority": "high",
         })
 
-    # 5. 配置建议
-    config = system_data.get("config", {})
-    # 数据生命周期管理建议
+    # ═══════════════════════════════════════════════════════
+    # 7. 系统反馈总结
+    # ═══════════════════════════════════════════════════════
+    optimization_state = system_data.get("optimization_state", {})
+    conv_counter = system_data.get("conversation_counter", {})
+
+    if optimization_state.get("optimization_pending"):
+        last_opt = optimization_state.get("last_optimization_at", "从未")
+        suggestions.append({
+            "category": "system_feedback",
+            "suggestion": f"系统有待处理的优化标记。上次优化时间: {last_opt}。"
+                           f"当前有意义对话计数: {conv_counter.get('total_count', 0)}",
+            "detail": {"last_optimization_at": last_opt,
+                        "conversation_count": conv_counter.get("total_count", 0)},
+            "priority": "medium",
+        })
 
     return suggestions
 
@@ -422,7 +913,7 @@ RULES = [
 
     # 3. 数据库膨胀 → 添加归档脚本
     db_data = system_data.get("database", {})
-    conv_count = db_data.get("conversations", 0)
+    conv_count = db_data.get("total_conversations", 0)
     if conv_count > 1000:
         archive_script = '''"""
 数据库归档脚本（由 devPartner 自我进化引擎生成）
@@ -608,7 +1099,7 @@ def _run_git(args: list, repo_path: str = ".") -> subprocess.CompletedProcess:
     """执行 git 命令"""
     result = subprocess.run(
         ["git", "-C", repo_path] + args,
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60,
     )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "git 命令执行失败")
@@ -621,7 +1112,7 @@ def _git_create_branch(branch_name: str, repo_path: str = "."):
     # 记录当前分支
     r = subprocess.run(
         ["git", "-C", repo_path, "rev-parse", "--abbrev-ref", "HEAD"],
-        capture_output=True, text=True, timeout=15,
+        capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15,
     )
     _PREVIOUS_BRANCH = r.stdout.strip()
     _run_git(["checkout", "-b", branch_name], repo_path)
@@ -658,7 +1149,7 @@ def _get_base_branch(repo_path: str = ".") -> str:
     for name in ["master", "main"]:
         r = subprocess.run(
             ["git", "-C", repo_path, "rev-parse", "--verify", f"origin/{name}"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15,
         )
         if r.returncode == 0:
             return name
@@ -669,7 +1160,7 @@ def _get_github_repo(repo_path: str = ".") -> tuple:
     """从 git remote 解析 GitHub owner/repo"""
     r = subprocess.run(
         ["git", "-C", repo_path, "remote", "get-url", "origin"],
-        capture_output=True, text=True, timeout=15,
+        capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=15,
     )
     url = r.stdout.strip()
     # 支持 https://github.com/owner/repo.git 和 git@github.com:owner/repo.git
@@ -742,12 +1233,12 @@ def _create_github_pr(branch_name: str, base_branch: str,
 # ================================================================
 
 def _generate_iteration_report(result: dict) -> str:
-    """生成自我迭代报告（v4.1 含本地模式支持）"""
+    """生成自我迭代报告（v4.0 增强版 — 含用户画像/技能/批评/规划/MCP工具）"""
     is_local = result.get("mode") == "local"
 
     lines = [
         "# 🧬 devPartner 自我进化报告",
-        f"**生成时间**: {result['timestamp']}",
+        f"**生成时间**: {result.get('timestamp', '')}",
         f"**运行模式**: {'📡 本地模式（远程分析 → 本地落地）' if is_local else '🌐 完整模式（Git + PR）'}",
         "",
     ]
@@ -764,12 +1255,88 @@ def _generate_iteration_report(result: dict) -> str:
         lines.append(f"- **状态**: PR 创建失败或未推送")
         lines.append("")
 
+    # ── v4.0 系统数据摘要 ──
+    system_data = result.get("system_data", {})
+    if system_data:
+        lines.append("## 📊 系统概览")
+        lines.append("")
+
+        # 配置信息
+        config = system_data.get("config", {})
+        lines.append(f"- **版本**: {config.get('version', 'unknown')}")
+        lines.append(f"- **进化引擎**: {'启用' if config.get('evolution_enabled') else '禁用'}")
+
+        # 数据库
+        db_data = system_data.get("database", {})
+        lines.append(f"- **总对话数**: {db_data.get('total_conversations', 0)} "
+                       f"（有意义: {db_data.get('meaningful_conversations', 0)}）")
+
+        # 用户画像
+        user_profile = system_data.get("user_profile", {})
+        skill_summary = user_profile.get("skill_summary", {})
+        lines.append(f"- **技能领域**: {skill_summary.get('total_domains', 0)} 个，"
+                       f"累计 {skill_summary.get('total_hours', 0)}h")
+
+        # MCP 工具
+        mcp_tools = system_data.get("mcp_tools", {})
+        lines.append(f"- **MCP 工具**: {mcp_tools.get('total_registered', 0)} 个注册，"
+                       f"{mcp_tools.get('total_calls', 0)} 次调用，"
+                       f"{mcp_tools.get('unused_count', 0)} 个零使用")
+
+        # 优化反馈
+        opt_fb = system_data.get("optimization_feedback", {})
+        lines.append(f"- **待处理反馈**: {opt_fb.get('total_pending', 0)} 条")
+
+        # 对话计数器
+        conv_counter = system_data.get("conversation_counter", {})
+        if conv_counter:
+            lines.append(f"- **有意义对话计数**: {conv_counter.get('total_count', 0)} "
+                           f"（上次优化后: {conv_counter.get('total_count', 0) - conv_counter.get('last_optimize_count', 0)}）")
+
+        lines.append("")
+
+    # ── 用户画像分析 ──
+    if user_profile:
+        lines.append("## 👤 用户画像")
+        lines.append("")
+        domain_stats = user_profile.get("domain_stats", [])
+        if domain_stats:
+            lines.append("| 领域 | 投入时间 | 对话数 |")
+            lines.append("|------|---------|--------|")
+            for ds in domain_stats[:10]:
+                domain = ds.get("skill_domain", "")
+                hours = ds.get("total_hours", 0) or 0
+                count = ds.get("cnt", 0)
+                lines.append(f"| {domain} | {hours}h | {count} |")
+            lines.append("")
+
+        skill_profile = user_profile.get("skill_profile", [])
+        if skill_profile:
+            lines.append("| 领域 | 等级 | 趋势 |")
+            lines.append("|------|------|------|")
+            for sp in skill_profile[:10]:
+                lines.append(f"| {sp.get('skill_domain', '')} | {sp.get('skill_level', '')} "
+                               f"| {sp.get('growth_trend', '')} |")
+            lines.append("")
+
+    # ── 技能规划 ──
+    skill_plans = user_profile.get("skill_plans", [])
+    if skill_plans:
+        lines.append("## 🎯 技能规划")
+        lines.append("")
+        for plan in skill_plans:
+            lines.append(f"- **{plan.get('skill_domain', '')}**: "
+                           f"目标 {plan.get('target_level', '')} | "
+                           f"进度: {plan.get('current_progress', '未记录')} | "
+                           f"状态: {plan.get('status', '')}")
+        lines.append("")
+
     # 执行步骤
     lines.append("## 📋 执行步骤")
     for step in result.get("steps", []):
         step_name = step.get("step", "")
         status = step.get("status", "")
-        icon = "✅" if status == "ok" else "❌"
+        icon = "✅" if status == "ok" else "❌" if status == "error" else "⏭️"
         detail = ""
         if "branch" in step:
             detail = f" → `{step['branch']}`"
@@ -783,24 +1350,77 @@ def _generate_iteration_report(result: dict) -> str:
             detail = f" → {step['pr_url']}"
         elif "message" in step:
             detail = f" → {step['message'][:80]}..."
+        elif "data_points" in step:
+            detail = f" (收集了 {step['data_points']} 个数据维度)"
         lines.append(f"- {icon} **{step_name}**{detail}")
 
     lines.append("")
 
-    # 分析结果
-    lines.append("## 🔍 分析结果")
+    # 分析结果（按类别分组）
+    lines.append("## 🔍 分析结果与建议")
     suggestions = result.get("suggestions_generated", [])
     if suggestions:
+        # 按类别分组
+        by_category = {}
         for s in suggestions:
             cat = s.get("category", "general")
-            sug = s.get("suggestion", "")
-            pri = s.get("priority", "")
-            label = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(pri, "")
-            lines.append(f"- {label} **[{cat}]** {sug}")
+            if cat not in by_category:
+                by_category[cat] = []
+            by_category[cat].append(s)
+
+        category_labels = {
+            "user_profile_strength": "💪 用户强项",
+            "user_profile_weakness": "🎓 待加强领域",
+            "user_profile_summary": "📊 画像摘要",
+            "skill_plan_progress": "📈 技能规划进度",
+            "learning_suggestion": "📚 学习建议",
+            "critique_tool_quality": "⚠️ 工具质量问题",
+            "critique_tool_description": "📝 工具描述优化",
+            "critique_rule_gap": "🔧 规则缺失",
+            "critique_backlog": "📋 待处理积压",
+            "future_plan_growth": "🚀 成长规划",
+            "future_plan_version": "🏷️ 版本规划",
+            "mcp_tool_cleanup": "🧹 工具精简",
+            "mcp_tool_hotspot": "🔥 高频工具",
+            "mcp_tool_utilization": "📉 工具利用率",
+            "database_health": "💾 数据库健康",
+            "system_growth": "📈 系统增长",
+            "rule_engine": "⚙️ 规则引擎",
+            "maintenance": "🔧 维护建议",
+            "mcp_discovery": "🔍 服务发现",
+            "cross_dialogue": "💬 跨AI对话",
+            "system_feedback": "🔄 系统反馈",
+        }
+
+        for cat, items in by_category.items():
+            label = category_labels.get(cat, f"📌 {cat}")
+            lines.append(f"### {label}")
+            for s in items:
+                pri = s.get("priority", "")
+                pri_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}.get(pri, "")
+                lines.append(f"- {pri_icon} {s.get('suggestion', '')}")
+            lines.append("")
     else:
         lines.append("- 系统运行正常，未发现需改进项")
+        lines.append("")
 
-    lines.append("")
+    # MCP 工具详情
+    mcp_tools = system_data.get("mcp_tools", {}) if system_data else {}
+    unused_tools = mcp_tools.get("unused_tools", [])
+    hot_tools = mcp_tools.get("hot_tools", [])
+    if unused_tools or hot_tools:
+        lines.append("## 🔧 MCP 工具分析")
+        lines.append("")
+        if hot_tools:
+            lines.append("### 🔥 高频使用工具")
+            for t in hot_tools[:5]:
+                lines.append(f"- **{t.get('name', '')}**: {t.get('calls', 0)} 次调用")
+            lines.append("")
+        if unused_tools:
+            lines.append(f"### 🧹 零使用工具（共 {len(unused_tools)} 个）")
+            for t in unused_tools[:10]:
+                lines.append(f"- `{t.get('name', '')}` ({t.get('module', '')})")
+            lines.append("")
 
     # 代码变更
     lines.append("## 💻 代码变更")
@@ -818,7 +1438,7 @@ def _generate_iteration_report(result: dict) -> str:
         file_changes = result.get("file_changes", [])
         if file_changes:
             lines.append("## 📝 待应用到本地的文件变更")
-            lines.append("> 以下是需要在本地项目中手动应用的变更，请告知 CodeBuddy 执行：")
+            lines.append("> 以下是需要在本地项目中手动应用的变更：")
             lines.append("")
             for fc in file_changes:
                 fpath = fc.get("file", "")
@@ -830,21 +1450,16 @@ def _generate_iteration_report(result: dict) -> str:
                 lines.append("")
                 if fcontent:
                     lines.append("```")
-                    # 截取前 5KB 内容避免报告过长
                     lines.append(fcontent[:5000])
                     if len(fcontent) > 5000:
                         lines.append(f"\n... (内容过长，已截断，完整长度 {len(fcontent)} 字符)")
-                    lines.append("```")
-                else:
-                    lines.append("```")
-                    lines.append("[请查看 data/suggestions 或联系 devPartner 获取详细内容]")
                     lines.append("```")
                 lines.append("")
         else:
             lines.append("- 本次无需要应用到本地的文件变更")
         lines.append("")
 
-    # 应用结果（完整模式才显示）
+    # 应用结果（完整模式）
     if not is_local:
         lines.append("## ⚡ 应用结果")
         applied = result.get("improvements_applied", [])
@@ -903,7 +1518,7 @@ def _prepare_local_changes(code_changes: list) -> list:
 async def check_and_improve() -> dict:
     """检查并执行改进（轻量版，适合频繁调用）"""
     try:
-        from core.database import get_db
+        from devpartner_agent.core.database import get_db
         db = get_db()
 
         # 检查待处理的改进

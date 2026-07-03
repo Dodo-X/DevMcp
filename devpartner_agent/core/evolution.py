@@ -187,7 +187,7 @@ class EvolutionEngine:
         try:
             result = subprocess.run(
                 ["npm", "search", "@modelcontextprotocol", "--json"],
-                capture_output=True, text=True, timeout=60
+                capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60
             )
 
             if result.returncode == 0:
@@ -219,7 +219,7 @@ class EvolutionEngine:
         try:
             result = subprocess.run(
                 ["npx", "-y", package_name, "--help"],
-                capture_output=True, text=True, timeout=30
+                capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30
             )
             return {
                 "available": result.returncode == 0,
@@ -237,8 +237,8 @@ class EvolutionEngine:
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "--is-inside-work-tree"],
-                capture_output=True, text=True, timeout=10,
-                cwd=str(self._project_root.parent)
+                capture_output=True, text=True, encoding='utf-8', errors='replace',
+                timeout=10, cwd=str(self._project_root.parent)
             )
             return result.returncode == 0
         except Exception:
@@ -250,8 +250,8 @@ class EvolutionEngine:
             cwd = str(self._project_root.parent)
         result = subprocess.run(
             ["git"] + args,
-            capture_output=True, text=True, timeout=60,
-            cwd=cwd
+            capture_output=True, text=True, encoding='utf-8', errors='replace',
+            timeout=60, cwd=cwd
         )
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} 失败")
@@ -278,8 +278,8 @@ class EvolutionEngine:
             # 记录当前分支
             r = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                capture_output=True, text=True, timeout=15,
-                cwd=str(self._project_root.parent)
+                capture_output=True, text=True, encoding='utf-8', errors='replace',
+                timeout=15, cwd=str(self._project_root.parent)
             )
             previous = r.stdout.strip()
 
@@ -334,8 +334,8 @@ class EvolutionEngine:
             if branch_name is None:
                 r = subprocess.run(
                     ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                    capture_output=True, text=True, timeout=15,
-                    cwd=str(self._project_root.parent)
+                    capture_output=True, text=True, encoding='utf-8', errors='replace',
+                    timeout=15, cwd=str(self._project_root.parent)
                 )
                 branch_name = r.stdout.strip()
 
@@ -409,15 +409,15 @@ class EvolutionEngine:
         try:
             r = subprocess.run(
                 ["git", "status", "--porcelain"],
-                capture_output=True, text=True, timeout=15,
-                cwd=str(self._project_root.parent)
+                capture_output=True, text=True, encoding='utf-8', errors='replace',
+                timeout=15, cwd=str(self._project_root.parent)
             )
             lines = [l for l in r.stdout.strip().split("\n") if l]
 
             r_branch = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-                capture_output=True, text=True, timeout=15,
-                cwd=str(self._project_root.parent)
+                capture_output=True, text=True, encoding='utf-8', errors='replace',
+                timeout=15, cwd=str(self._project_root.parent)
             )
 
             staged = []
@@ -540,39 +540,26 @@ class EvolutionEngine:
         try:
             from .database import get_db
             db = get_db()
-            db.query_local(
-                """INSERT INTO evolution_log
-                   (timestamp, version_from, version_to, change_type, description, files_changed)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (
-                    datetime.now().isoformat(),
-                    cfg.version if cfg else "2.0.0",
-                    cfg.version if cfg else "2.0.0",
-                    change_type,
-                    f"Self-evolution: {change_type} {file_path}",
-                    file_path,
-                ),
+            version = cfg.version if cfg else "2.0.0"
+            db.log_evolution(
+                change_type=change_type,
+                description=f"Self-evolution: {change_type} {file_path}",
+                files_changed=file_path,
+                version=version,
             )
         except Exception:
             pass
 
     def _log_discovery(self, servers: list[dict]):
-        """记录 MCP 发现日志"""
+        """记录 MCP 发现日志到 mcp_tool_registry"""
         try:
             from .database import get_db
             db = get_db()
             for srv in servers:
-                db.query_local(
-                    """INSERT OR REPLACE INTO mcp_discovery
-                       (timestamp, server_name, npm_package, description, status, last_check)
-                       VALUES (?, ?, ?, ?, 'discovered', ?)""",
-                    (
-                        datetime.now().isoformat(),
-                        srv.get("name", ""),
-                        srv.get("package", ""),
-                        srv.get("description", ""),
-                        datetime.now().isoformat(),
-                    ),
+                db.register_tool(
+                    tool_name=srv.get("name", ""),
+                    module=srv.get("package", ""),
+                    description=srv.get("description", ""),
                 )
         except Exception:
             pass

@@ -1,0 +1,770 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DevPartner v5.2 Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --purple: #a371f7;
+    --cyan: #39d2c0;
+    --orange: #db6d28;
+    --radius: 8px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.5;
+    min-height: 100vh;
+  }
+  .header {
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(8px);
+  }
+  .header h1 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .version-badge {
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-weight: 500;
+  }
+  .refresh-indicator {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+  .refresh-dot {
+    display: inline-block;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    margin-right: 6px;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  .container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 24px;
+  }
+  .grid { display: grid; gap: 20px; }
+  .grid-4 { grid-template-columns: repeat(4, 1fr); }
+  .grid-3 { grid-template-columns: repeat(3, 1fr); }
+  .grid-2 { grid-template-columns: repeat(2, 1fr); }
+  .grid-1-2 { grid-template-columns: 1fr 2fr; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow);
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: #484f58; }
+  .card-title {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+  }
+  .metric-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .metric-row:last-child { border-bottom: none; }
+  .metric-label { font-size: 0.85rem; color: var(--text-muted); }
+  .metric-value { font-size: 0.95rem; font-weight: 500; }
+  .metric-value.green { color: var(--green); }
+  .metric-value.yellow { color: var(--yellow); }
+  .metric-value.red { color: var(--red); }
+  .metric-value.cyan { color: var(--cyan); }
+  .metric-value.purple { color: var(--purple); }
+  .metric-big {
+    font-size: 2rem;
+    font-weight: 700;
+    text-align: center;
+  }
+  .metric-big-sub {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-align: center;
+    margin-top: 4px;
+  }
+  .progress-bar {
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    margin-top: 8px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.5s ease;
+  }
+  .progress-fill.green { background: var(--green); }
+  .progress-fill.yellow { background: var(--yellow); }
+  .progress-fill.red { background: var(--red); }
+  .progress-fill.accent { background: var(--accent); }
+  .status-dot {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    margin-right: 6px;
+  }
+  .status-dot.online { background: var(--green); }
+  .status-dot.warning { background: var(--yellow); }
+  .status-dot.offline { background: var(--red); }
+  .section-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 32px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .domain-tag {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    margin: 2px 4px;
+    background: rgba(88, 166, 255, 0.15);
+    color: var(--accent);
+  }
+  .table-container {
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+  th {
+    text-align: left;
+    color: var(--text-muted);
+    font-weight: 500;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--card);
+  }
+  td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 500;
+  }
+  .badge-success { background: rgba(63,185,80,0.2); color: var(--green); }
+  .badge-warning { background: rgba(210,153,34,0.2); color: var(--yellow); }
+  .badge-danger { background: rgba(248,81,73,0.2); color: var(--red); }
+  .badge-info { background: rgba(88,166,255,0.2); color: var(--accent); }
+  .error-banner {
+    background: rgba(248,81,73,0.1);
+    border: 1px solid var(--red);
+    border-radius: var(--radius);
+    padding: 12px 20px;
+    margin-bottom: 16px;
+    color: var(--red);
+    font-size: 0.85rem;
+  }
+  canvas { max-height: 280px; }
+  @media (max-width: 1024px) {
+    .grid-4 { grid-template-columns: repeat(2, 1fr); }
+    .grid-3 { grid-template-columns: repeat(2, 1fr); }
+    .grid-2, .grid-1-2 { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 640px) {
+    .grid-4 { grid-template-columns: 1fr; }
+    .grid-3 { grid-template-columns: 1fr; }
+    .container { padding: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>⚡ DevPartner Dashboard</h1>
+  <div class="header-right">
+    <span class="refresh-indicator"><span class="refresh-dot"></span>实时监控中</span>
+    <span class="version-badge" id="version-badge">v5.2.0</span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- Error Banner -->
+  <div class="error-banner" id="error-banner" style="display:none;"></div>
+
+  <!-- Key Metrics Row -->
+  <div class="grid grid-4">
+    <div class="card" style="text-align:center;">
+      <div class="card-title">活跃会话</div>
+      <div class="metric-big green" id="metric-active-conv">0</div>
+      <div class="metric-big-sub">ConversationManager</div>
+    </div>
+    <div class="card" style="text-align:center;">
+      <div class="card-title">运行中任务</div>
+      <div class="metric-big cyan" id="metric-running-tasks">0</div>
+      <div class="metric-big-sub" id="metric-concurrency">/ 3 并发槽位</div>
+    </div>
+    <div class="card" style="text-align:center;">
+      <div class="card-title">知识库条目</div>
+      <div class="metric-big purple" id="metric-kp-total">0</div>
+      <div class="metric-big-sub">knowledge_points</div>
+    </div>
+    <div class="card" style="text-align:center;">
+      <div class="card-title">回调注册</div>
+      <div class="metric-big orange" id="metric-callbacks">0</div>
+      <div class="metric-big-sub">CallbackRegistry</div>
+    </div>
+  </div>
+
+  <!-- Health & Resources -->
+  <div class="grid grid-2" style="margin-top: 20px;">
+    <div class="card">
+      <div class="card-title">系统健康状态</div>
+      <div id="health-metrics">
+        <div class="metric-row">
+          <span class="metric-label">会话管理器</span>
+          <span class="metric-value green">✓ 正常</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">任务队列</span>
+          <span class="metric-value green">✓ 正常</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">回调注册表</span>
+          <span class="metric-value green">✓ 正常</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">数据库连接</span>
+          <span class="metric-value green">✓ 正常</span>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">内存使用</div>
+      <div style="display:flex; justify-content:space-between; margin-bottom: 8px;">
+        <span id="mem-usage-text">0 MB</span>
+        <span id="mem-limit-text">/ 2048 MB</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill green" id="mem-bar" style="width:0%"></div>
+      </div>
+      <div style="margin-top: 16px; display:flex; gap:24px;">
+        <div>
+          <div class="metric-label">并发槽位</div>
+          <div class="metric-value" id="mem-concurrency">3/3 可用</div>
+        </div>
+        <div>
+          <div class="metric-label">利用率</div>
+          <div class="metric-value" id="mem-util">0%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Task Queue Section -->
+  <div class="section-title">📋 任务队列</div>
+  <div class="grid grid-3">
+    <div class="card">
+      <div class="card-title">待处理</div>
+      <div class="metric-big yellow" id="queue-pending">0</div>
+    </div>
+    <div class="card">
+      <div class="card-title">运行中</div>
+      <div class="metric-big cyan" id="queue-running">0</div>
+    </div>
+    <div class="card">
+      <div class="card-title">已完成</div>
+      <div class="metric-big green" id="queue-completed">0</div>
+    </div>
+  </div>
+
+  <!-- Recent Tasks -->
+  <div class="card" style="margin-top: 20px;">
+    <div class="card-title">最近任务</div>
+    <div class="table-container" id="recent-tasks">
+      <table>
+        <thead>
+          <tr><th>任务ID</th><th>类型</th><th>状态</th><th>优先级</th><th>进度</th><th>队列时间</th></tr>
+        </thead>
+        <tbody id="task-table-body">
+          <tr><td colspan="6" style="text-align:center; color:var(--text-muted);">暂无任务</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Knowledge Base Section -->
+  <div class="section-title">💡 知识库</div>
+  <div class="grid grid-1-2">
+    <div class="card">
+      <div class="card-title">按领域分布</div>
+      <canvas id="domain-chart"></canvas>
+    </div>
+    <div class="card">
+      <div class="card-title">知识点详情</div>
+      <div id="domain-tags" style="margin-bottom:12px;"></div>
+      <div class="table-container" style="max-height:250px;">
+        <table>
+          <thead>
+            <tr><th>标题</th><th>领域</th><th>置信度</th><th>使用次数</th></tr>
+          </thead>
+          <tbody id="kp-table-body">
+            <tr><td colspan="4" style="text-align:center; color:var(--text-muted);">暂无知识点</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Callback Registry Section -->
+  <div class="section-title">📞 回调注册表</div>
+  <div class="grid grid-3">
+    <div class="card">
+      <div class="card-title">活跃注册</div>
+      <div class="metric-big cyan" id="cb-active">0</div>
+    </div>
+    <div class="card">
+      <div class="card-title">总触发次数</div>
+      <div class="metric-big green" id="cb-triggered">0</div>
+    </div>
+    <div class="card">
+      <div class="card-title">错误次数</div>
+      <div class="metric-big red" id="cb-errors">0</div>
+    </div>
+  </div>
+
+  <!-- Trend Chart -->
+  <div class="card" style="margin-top: 20px;">
+    <div class="card-title">实时指标趋势（最近 30 次采样）</div>
+    <canvas id="trend-chart"></canvas>
+  </div>
+
+</div>
+
+<script>
+// ── Configuration ──
+const MCP_BASE = window.location.origin;
+const MCP_MESSAGE_PATH = '/mcp';  // Streamable HTTP transport endpoint
+const REFRESH_INTERVAL = 3000; // 3 seconds
+
+// ── State ──
+let trendData = { active: [], running: [], kp: [], timestamps: [] };
+let maxTrendPoints = 30;
+let domainChart = null;
+let trendChart = null;
+
+// ── MCP API Call ──
+async function callMCPTool(toolName, args = {}) {
+  try {
+    const resp = await fetch(`${MCP_BASE}${MCP_MESSAGE_PATH}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: Date.now(),
+        method: 'tools/call',
+        params: { name: toolName, arguments: args }
+      })
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error.message);
+    // Parse JSON result
+    const content = data.result?.content;
+    if (content && content.length > 0 && content[0].text) {
+      return JSON.parse(content[0].text);
+    }
+    return data.result;
+  } catch (e) {
+    console.warn(`MCP call failed [${toolName}]:`, e.message);
+    return null;
+  }
+}
+
+// ── Data Fetching ──
+async function fetchSystemHealth() {
+  const data = await callMCPTool('get_system_health');
+  if (!data) return null;
+  return data;
+}
+
+async function fetchQueueStats() {
+  const data = await callMCPTool('get_queue_stats');
+  if (!data) return null;
+  return data;
+}
+
+async function fetchV5Status() {
+  const data = await callMCPTool('get_v5_status');
+  if (!data) return null;
+  return data;
+}
+
+async function fetchCallbackStats() {
+  const data = await callMCPTool('get_callback_stats');
+  if (!data) return null;
+  return data;
+}
+
+async function fetchKnowledgePoints(domain = null, limit = 20) {
+  const data = await callMCPTool('list_knowledge_points', { domain: domain || '', limit: String(limit) });
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if (data.points) return data.points;
+  if (data.error) return [];
+  return [];
+}
+
+async function fetchRecentTasks(limit = 10) {
+  const data = await callMCPTool('get_queue_stats');
+  if (!data) return { tasks: [] };
+  // get_queue_stats returns aggregated stats, not individual tasks
+  // We'll use get_task_status for the dashboard overview
+  return data;
+}
+
+// ── UI Updates ──
+function updateErrorBanner(msg) {
+  const banner = document.getElementById('error-banner');
+  if (msg) {
+    banner.textContent = '⚠️ ' + msg;
+    banner.style.display = 'block';
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
+function updateKeyMetrics(health, queueStats, v5Status, cbStats) {
+  if (health) {
+    document.getElementById('metric-active-conv').textContent =
+      health.conversation_manager?.active_conversations ?? 0;
+    document.getElementById('metric-running-tasks').textContent =
+      health.conversation_manager?.running_tasks ?? 0;
+    document.getElementById('metric-concurrency').textContent =
+      `/ ${health.conversation_manager?.concurrency_limit ?? 3} 并发槽位`;
+
+    // Memory
+    const memUsed = health.conversation_manager?.estimated_memory_usage_mb ?? 0;
+    const memMax = health.conversation_manager?.max_memory_limit_mb ?? 2048;
+    const memPct = health.conversation_manager?.memory_utilization_percent ?? 0;
+    document.getElementById('mem-usage-text').textContent = `${memUsed.toFixed(0)} MB`;
+    document.getElementById('mem-limit-text').textContent = `/ ${memMax} MB`;
+    document.getElementById('mem-util').textContent = `${memPct.toFixed(1)}%`;
+
+    const memBar = document.getElementById('mem-bar');
+    memBar.style.width = `${Math.min(memPct, 100)}%`;
+    memBar.className = 'progress-fill ' + (memPct > 80 ? 'red' : memPct > 60 ? 'yellow' : 'green');
+
+    const running = health.conversation_manager?.running_tasks ?? 0;
+    const limit = health.conversation_manager?.concurrency_limit ?? 3;
+    document.getElementById('mem-concurrency').textContent =
+      `${limit - running}/${limit} 可用`;
+
+    // Health status indicators
+    const healthMetrics = document.getElementById('health-metrics');
+    const allGood = health.conversation_manager && health.task_queue;
+    healthMetrics.innerHTML = `
+      <div class="metric-row">
+        <span class="metric-label">会话管理器</span>
+        <span class="metric-value ${allGood ? 'green' : 'red'}">
+          ${allGood ? '✓ 正常' : '✗ 异常'}
+        </span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">任务队列</span>
+        <span class="metric-value ${queueStats ? 'green' : 'red'}">
+          ${queueStats ? '✓ 正常' : '✗ 异常'}
+        </span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">回调注册表</span>
+        <span class="metric-value ${cbStats ? 'green' : 'red'}">
+          ${cbStats ? '✓ 正常' : '✗ 异常'}
+        </span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-label">数据库</span>
+        <span class="metric-value ${v5Status ? 'green' : 'red'}">
+          ${v5Status ? '✓ 正常' : '✗ 异常'}
+        </span>
+      </div>
+    `;
+  }
+
+  // Knowledge base total
+  if (v5Status && v5Status.new_tables) {
+    document.getElementById('metric-kp-total').textContent =
+      v5Status.new_tables.knowledge_points?.count ?? 0;
+  }
+
+  // Callback stats
+  if (cbStats) {
+    document.getElementById('metric-callbacks').textContent =
+      cbStats.active_registrations ?? 0;
+    document.getElementById('cb-active').textContent = cbStats.active_registrations ?? 0;
+    document.getElementById('cb-triggered').textContent = cbStats.total_triggered ?? 0;
+    document.getElementById('cb-errors').textContent = cbStats.total_errors ?? 0;
+  }
+
+  // Queue stats
+  if (queueStats) {
+    document.getElementById('queue-pending').textContent = queueStats.pending_tasks ?? 0;
+    document.getElementById('queue-running').textContent = queueStats.running_tasks ?? 0;
+    document.getElementById('queue-completed').textContent = queueStats.completed_tasks ?? 0;
+  }
+}
+
+function updateKnowledgeBase(v5Status) {
+  if (!v5Status) return;
+
+  // Domain distribution
+  const byDomain = v5Status.knowledge_base?.by_domain || {};
+  const domains = Object.keys(byDomain);
+  const counts = Object.values(byDomain);
+
+  // Domain tags
+  const tagContainer = document.getElementById('domain-tags');
+  tagContainer.innerHTML = domains.map(d =>
+    `<span class="domain-tag">${d} (${byDomain[d]})</span>`
+  ).join('') || '<span style="color:var(--text-muted);">暂无领域数据</span>';
+
+  // Domain chart
+  const ctx = document.getElementById('domain-chart').getContext('2d');
+  if (domainChart) domainChart.destroy();
+
+  const colors = ['#58a6ff','#a371f7','#3fb950','#d29922','#f85149','#39d2c0','#db6d28','#8b949e'];
+  domainChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: domains,
+      datasets: [{
+        data: counts,
+        backgroundColor: colors.slice(0, domains.length),
+        borderColor: '#161b22',
+        borderWidth: 2
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: { color: '#8b949e', padding: 12, font: { size: 11 } }
+        }
+      }
+    }
+  });
+
+  // Knowledge points table
+  updateKPGrid(byDomain);
+}
+
+async function updateKPGrid(byDomain) {
+  // Fetch top knowledge points
+  const kps = await fetchKnowledgePoints(null, 10);
+  const tbody = document.getElementById('kp-table-body');
+  if (!kps || kps.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">暂无知识点</td></tr>';
+    return;
+  }
+  tbody.innerHTML = kps.map(kp => `
+    <tr>
+      <td>${kp.title || 'N/A'}</td>
+      <td><span class="domain-tag">${kp.domain || 'General'}</span></td>
+      <td>${((kp.confidence || 0) * 100).toFixed(0)}%</td>
+      <td>${kp.usage_count || 0}</td>
+    </tr>
+  `).join('');
+}
+
+function updateRecentTasks(queueStats) {
+  const tbody = document.getElementById('task-table-body');
+  const tasks = queueStats?.recent_tasks || [];
+  if (tasks.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-muted);">暂无任务</td></tr>';
+    return;
+  }
+  tbody.innerHTML = tasks.slice(0, 10).map(t => {
+    const statusClass = t.status === 'completed' ? 'badge-success' :
+                        t.status === 'running' ? 'badge-info' :
+                        t.status === 'failed' ? 'badge-danger' : 'badge-warning';
+    return `
+      <tr>
+        <td><code>${(t.task_id || '').slice(0, 16)}...</code></td>
+        <td>${t.task_type || 'N/A'}</td>
+        <td><span class="badge ${statusClass}">${t.status || 'pending'}</span></td>
+        <td>${t.priority || 0}</td>
+        <td>
+          <div class="progress-bar"><div class="progress-fill accent" style="width:${t.progress || 0}%"></div></div>
+          <span style="font-size:0.7rem;">${(t.progress || 0).toFixed(0)}%</span>
+        </td>
+        <td>${(t.queued_at || '').slice(0, 19)}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function updateTrendChart(health, queueStats, v5Status) {
+  const now = new Date().toLocaleTimeString();
+  trendData.timestamps.push(now);
+  trendData.active.push(health?.conversation_manager?.active_conversations ?? 0);
+  trendData.running.push(health?.conversation_manager?.running_tasks ?? 0);
+  trendData.kp.push(v5Status?.new_tables?.knowledge_points?.count ?? 0);
+
+  if (trendData.timestamps.length > maxTrendPoints) {
+    trendData.timestamps.shift();
+    trendData.active.shift();
+    trendData.running.shift();
+    trendData.kp.shift();
+  }
+
+  const ctx = document.getElementById('trend-chart').getContext('2d');
+  if (trendChart) trendChart.destroy();
+
+  trendChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: trendData.timestamps,
+      datasets: [
+        {
+          label: '活跃会话',
+          data: trendData.active,
+          borderColor: '#3fb950',
+          backgroundColor: 'rgba(63,185,80,0.1)',
+          tension: 0.3,
+          fill: true
+        },
+        {
+          label: '运行中任务',
+          data: trendData.running,
+          borderColor: '#39d2c0',
+          backgroundColor: 'rgba(57,210,192,0.1)',
+          tension: 0.3,
+          fill: true
+        },
+        {
+          label: '知识库条目',
+          data: trendData.kp,
+          borderColor: '#a371f7',
+          backgroundColor: 'rgba(163,113,247,0.1)',
+          tension: 0.3,
+          fill: true,
+          yAxisID: 'y1'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      interaction: { intersect: false, mode: 'index' },
+      scales: {
+        x: { ticks: { color: '#8b949e', maxTicksLimit: 10 }, grid: { color: '#21262d' } },
+        y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, beginAtZero: true,
+             title: { display: true, text: '会话/任务数', color: '#8b949e' } },
+        y1: { position: 'right', ticks: { color: '#a371f7' }, grid: { display: false },
+              beginAtZero: true, title: { display: true, text: '知识库条目', color: '#a371f7' } }
+      },
+      plugins: {
+        legend: { labels: { color: '#8b949e', usePointStyle: true } }
+      }
+    }
+  });
+}
+
+// ── Main Refresh Loop ──
+async function refresh() {
+  try {
+    const [health, queueStats, v5Status, cbStats] = await Promise.all([
+      fetchSystemHealth(),
+      fetchQueueStats(),
+      fetchV5Status(),
+      fetchCallbackStats()
+    ]);
+
+    // Check for errors
+    const errors = [];
+    if (!health) errors.push('系统健康检查失败');
+    if (!v5Status) errors.push('v5 状态查询失败');
+
+    if (errors.length > 0) {
+      updateErrorBanner(errors.join('; '));
+    } else {
+      updateErrorBanner(null);
+    }
+
+    updateKeyMetrics(health, queueStats, v5Status, cbStats);
+    updateKnowledgeBase(v5Status);
+    updateRecentTasks(queueStats);
+    updateTrendChart(health, queueStats, v5Status);
+
+    // Update refresh indicator
+    const dot = document.querySelector('.refresh-dot');
+    dot.style.background = errors.length > 0 ? 'var(--red)' : 'var(--green)';
+
+  } catch (e) {
+    console.error('Dashboard refresh error:', e);
+    updateErrorBanner('数据获取失败: ' + e.message);
+  }
+}
+
+// ── Startup ──
+document.addEventListener('DOMContentLoaded', () => {
+  refresh();
+  setInterval(refresh, REFRESH_INTERVAL);
+});
+</script>
+
+</body>
+</html>

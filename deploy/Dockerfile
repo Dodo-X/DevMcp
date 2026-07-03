@@ -1,4 +1,4 @@
-# DevPartner MCP Server v2.2.0
+# DevPartner MCP Server v5.1.0
 # ModelScope 创空间部署用 Docker 镜像
 #
 # 构建: docker build -t devpartner .
@@ -32,8 +32,8 @@ FROM python:3.10-slim
 
 # 元数据
 LABEL org.opencontainers.image.title="DevPartner MCP Server"
-LABEL org.opencontainers.image.version="2.2.0"
-LABEL org.opencontainers.image.description="DevPartner MCP 统一服务器 - ModelScope 创空间部署"
+LABEL org.opencontainers.image.version="5.2.0"
+LABEL org.opencontainers.image.description="DevPartner MCP 统一服务器 v5.2 - 会话管理 + 知识图谱 + Web Dashboard"
 LABEL org.opencontainers.image.authors="DevPartner Team"
 
 WORKDIR /app
@@ -49,8 +49,11 @@ COPY devpartner_agent/ devpartner_agent/
 
 # 创建运行时数据目录（容器启动时会挂载 volume）
 RUN mkdir -p /app/data/databases \
+    /app/data/daily_logs \
     /app/data/logs \
+    /app/data/logs_archive \
     /app/data/backups \
+    /app/data/reports \
     /app/data/temp \
     /app/data/memories
 

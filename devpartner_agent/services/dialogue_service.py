@@ -34,15 +34,17 @@ class DialogueService:
             return
         # 从配置读取路径，失败时使用默认值
         try:
-            from core.config import get_config
+            from devpartner_agent.core.config import get_config
             cfg = get_config()
             data_root = cfg.data.root_dir
             self._dialogue_file = Path(data_root) / "module_dialogue.md"
             self._state_file = Path(data_root) / ".module_dialogue_state.json"
+            self._pending_file = Path(data_root) / ".pending_module_dialogue.json"
         except Exception:
+            data_root = "data"
             self._dialogue_file = Path("data/module_dialogue.md")
             self._state_file = Path("data/.module_dialogue_state.json")
-        self._pending_file = Path("data/.pending_module_dialogue.json")
+            self._pending_file = Path("data/.pending_module_dialogue.json")
         self._initialized = True
 
     def configure(self, dialogue_file: str, state_file: str, pending_file: str):

@@ -93,7 +93,7 @@ def context7_search(query: str) -> Dict[str, Any]:
     """Context7 MCP 搜索 - 需要已安装 @upstash/context7-mcp"""
     try:
         result = subprocess.run(["npx", "-y", "@upstash/context7-mcp", "search", query],
-                               capture_output=True, text=True, timeout=60)
+                               capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60)
         
         if result.returncode != 0:
             return {"success": False, "results": [], "error": f"Context7 失败: {result.stderr}"}

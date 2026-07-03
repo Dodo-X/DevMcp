@@ -5,7 +5,8 @@ from typing import Dict, Any
 def git_status(repo_path: str = ".") -> Dict[str, Any]:
     """查看 Git 仓库状态 - 纯查询，无副作用"""
     try:
-        result = subprocess.run(["git", "status", "--porcelain"], cwd=repo_path, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(["git", "status", "--porcelain"], cwd=repo_path,
+                               capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30)
         
         if result.returncode != 0:
             return {"success": False, "error": f"Git 命令失败: {result.stderr}", "is_git_repo": False}
@@ -24,7 +25,8 @@ def git_status(repo_path: str = ".") -> Dict[str, Any]:
             if status == '??':
                 untracked.append(file_path)
         
-        branch_result = subprocess.run(["git", "branch", "--show-current"], cwd=repo_path, capture_output=True, text=True, timeout=10)
+        branch_result = subprocess.run(["git", "branch", "--show-current"], cwd=repo_path,
+                                      capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=10)
         branch = branch_result.stdout.strip() if branch_result.returncode == 0 else "unknown"
         
         is_clean = len(staged) == 0 and len(modified) == 0 and len(untracked) == 0
@@ -51,7 +53,7 @@ def git_log(repo_path: str = ".", limit: int = 10) -> Dict[str, Any]:
     try:
         result = subprocess.run(
             ["git", "log", f"-{limit}", "--pretty=format:%H|%an|%s|%ai"],
-            cwd=repo_path, capture_output=True, text=True, timeout=30
+            cwd=repo_path, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=30
         )
         
         if result.returncode != 0:
@@ -81,10 +83,12 @@ def git_diff(repo_path: str = ".", staged: bool = False) -> Dict[str, Any]:
         if staged:
             cmd.append("--cached")
         
-        result = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(cmd, cwd=repo_path, capture_output=True,
+                               text=True, encoding='utf-8', errors='replace', timeout=30)
         
         stats_result = subprocess.run(["git", "diff", "--stat"] + (["--cached"] if staged else []),
-                                      cwd=repo_path, capture_output=True, text=True, timeout=10)
+                                      cwd=repo_path, capture_output=True, text=True,
+                                      encoding='utf-8', errors='replace', timeout=10)
         
         return {
             "success": True,

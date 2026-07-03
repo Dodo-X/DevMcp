@@ -26,12 +26,15 @@ class ServerConfig:
 
 @dataclass
 class DataConfig:
-    """数据存储路径配置"""
+    """数据存储路径配置 - 所有数据统一在 data/ 目录下"""
     root_dir: str = "./data"
     databases_dir: str = "./data/databases"
+    daily_logs_dir: str = "./data/daily_logs"
     logs_dir: str = "./data/logs"
+    logs_archive_dir: str = "./data/logs_archive"
     memories_dir: str = "./data/memories"
     backups_dir: str = "./data/backups"
+    reports_dir: str = "./data/reports"
     temp_dir: str = "./data/temp"
 
 
@@ -58,6 +61,14 @@ class EvolutionServiceConfig:
     require_approval: bool = True
     backup_before_change: bool = True
     auto_discover_interval_hours: int = 24
+    known_mcp_servers: list[str] = field(default_factory=lambda: [
+        "@modelcontextprotocol/server-filesystem",
+        "@modelcontextprotocol/server-github",
+        "@modelcontextprotocol/server-sequential-thinking",
+        "@modelcontextprotocol/server-fetch",
+        "@modelcontextprotocol/server-memory",
+        "@modelcontextprotocol/server-git",
+    ])
 
 
 @dataclass
@@ -86,11 +97,59 @@ class LoggingConfig:
 
 
 @dataclass
+class LLMConfig:
+    """
+    本地 LLM 配置（v5.1 - llama-cpp-python 专用）
+    
+    使用 llama-cpp-python 加载本地 GGUF 模型文件进行推理。
+    当前模型：Qwen3.5-9B Q4_1 量化版（~5.7GB）
+    
+    特性：
+    - 单引擎架构，无外部依赖
+    - 支持 CPU/GPU 混合推理
+    - 针对量化模型优化的参数配置
+    """
+    # ── 模型路径 ──
+    model_path: str = "./models/default.gguf"          # GGUF 模型文件路径
+    
+    # ── 推理参数（针对 Q4_1 量化模型优化）──
+    n_ctx: int = 8192                                  # 上下文窗口大小（8K 平衡内存与性能）
+    n_gpu_layers: int = -1                             # GPU 加速层数（-1=全部GPU, 0=纯CPU）
+    n_threads: int = 8                                 # CPU 线程数（建议设为核心数）
+    n_batch: int = 512                                 # 批处理大小（影响推理速度）
+    
+    # ── 生成参数 ──
+    max_tokens: int = 2048                             # 最大生成 token 数
+    max_input_chars: int = 8000                        # 最大输入字符数
+    temperature: float = 0.3                           # 生成温度（Q4_1 建议稍高）
+    top_p: float = 0.9                                 # Top-P 核采样
+    top_k: int = 40                                    # Top-K 候选词限制
+    repeat_penalty: float = 1.1                        # 重复惩罚（避免循环输出）
+    
+    # ── 性能优化 ──
+    verbose: bool = False                              # 详细日志（调试用）
+    preload: bool = True                               # 启动时预加载模型
+    cache_size_kb: int = 2048                          # 模型缓存大小（KB）
+    use_mmap: bool = True                              # 内存映射（减少内存占用）
+    use_mlock: bool = False                            # 锁定内存（防止交换）
+    
+    # ── 容错机制 ──
+    retry_on_error: bool = True                        # 推理失败自动重试
+    fallback_to_rules: bool = True                     # 模型不可用时降级到规则引擎
+    
+    # ── 功能开关 ──
+    enhance_analysis: bool = True                      # 对话分析增强 ⭐ 推荐
+    enhance_file_parsing: bool = True                  # 文件解析增强
+    enhance_daily_summary: bool = True                 # LLM 智能日报生成 ⭐ 强烈推荐
+    enhance_self_improvement: bool = True              # LLM 自我改进建议 ⭐ 推荐
+
+
+@dataclass
 class AgentConfig:
     """Agent 总配置"""
     name: str = "devpartner-agent"
-    version: str = "2.0.0"
-    description: str = "DevPartner 智能管家 - 有状态、有记忆、自进化"
+    version: str = "5.2.0"
+    description: str = "DevPartner 智能管家 - 会话管理 + 异步任务 + 知识图谱 + Web Dashboard"
     server: ServerConfig = field(default_factory=ServerConfig)
     data: DataConfig = field(default_factory=DataConfig)
     log_service: LogServiceConfig = field(default_factory=LogServiceConfig)
@@ -99,6 +158,7 @@ class AgentConfig:
     data_lifecycle: DataLifecycleConfig = field(default_factory=DataLifecycleConfig)
     rules: RulesConfig = field(default_factory=RulesConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    llm: LLMConfig = field(default_factory=LLMConfig)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -120,16 +180,21 @@ class ConfigManager:
         """加载配置，优先级：默认值 < YAML文件 < 环境变量"""
         config = AgentConfig()
 
-        # 1. 加载 YAML 文件
-        yaml_path = Path(config_path)
-        if yaml_path.exists():
-            try:
-                import yaml
-                with open(yaml_path, "r", encoding="utf-8") as f:
-                    yaml_data = yaml.safe_load(f) or {}
-                config = self._merge_yaml(config, yaml_data)
-            except Exception:
-                pass
+        # 1. 加载 YAML 文件（依次尝试 cwd 与 devpartner_agent 目录）
+        yaml_candidates = [
+            Path(config_path),
+            Path(__file__).resolve().parent.parent / "config.yaml",
+        ]
+        for yaml_path in yaml_candidates:
+            if yaml_path.exists():
+                try:
+                    import yaml
+                    with open(yaml_path, "r", encoding="utf-8") as f:
+                        yaml_data = yaml.safe_load(f) or {}
+                    config = self._merge_yaml(config, yaml_data)
+                    break
+                except Exception:
+                    pass
 
         # 2. 环境变量覆盖
         config = self._apply_env_overrides(config)
@@ -159,8 +224,9 @@ class ConfigManager:
         # data
         if "data" in data:
             d = data["data"]
-            for k in ["root_dir", "databases_dir", "logs_dir",
-                       "memories_dir", "backups_dir", "temp_dir"]:
+            for k in ["root_dir", "databases_dir", "daily_logs_dir",
+                       "logs_dir", "logs_archive_dir",
+                       "memories_dir", "backups_dir", "reports_dir", "temp_dir"]:
                 if k in d:
                     setattr(config.data, k, d[k])
 
@@ -188,6 +254,13 @@ class ConfigManager:
                 if k in l:
                     setattr(config.logging, k, l[k])
 
+        # llm
+        if "llm" in data:
+            llm = data["llm"]
+            for k, v in llm.items():
+                if hasattr(config.llm, k):
+                    setattr(config.llm, k, v)
+
         return config
 
     def _apply_env_overrides(self, config: AgentConfig) -> AgentConfig:
@@ -197,6 +270,10 @@ class ConfigManager:
             "DEVPARTNER_AGENT_HOST": ("server", "host", str),
             "DEVPARTNER_AGENT_LOG_LEVEL": ("logging", "level", str),
             "DEVPARTNER_LOG_RETENTION_DAYS": ("data_lifecycle", "log_retention_days", int),
+            "DEVPARTNER_LLM_ENABLED": ("llm", "enabled", lambda v: v.lower() in ("1", "true", "yes")),
+            "DEVPARTNER_LLM_MODEL_PATH": ("llm", "model_path", str),
+            "DEVPARTNER_LLM_N_GPU_LAYERS": ("llm", "n_gpu_layers", int),
+            "DEVPARTNER_LLM_N_CTX": ("llm", "n_ctx", int),
         }
 
         for env_key, target in env_map.items():
@@ -215,11 +292,16 @@ class ConfigManager:
         dirs = [
             config.data.root_dir,
             config.data.databases_dir,
+            config.data.daily_logs_dir,
             config.data.logs_dir,
+            config.data.logs_archive_dir,
             config.data.memories_dir,
             config.data.backups_dir,
+            config.data.reports_dir,
             config.data.temp_dir,
+            str(Path(config.llm.model_path).parent) if config.llm.model_path else "",
         ]
+        dirs = [d for d in dirs if d]
         for d in dirs:
             Path(d).mkdir(parents=True, exist_ok=True)
 

@@ -76,7 +76,13 @@ class IdentityManager:
         if hasattr(self, "_init_done"):
             return
         self._init_done = True
-        self._registry_file = Path("data/.client_registry.json")
+        # 从配置读取数据目录
+        try:
+            from devpartner_agent.core.config import get_config
+            data_root = get_config().data.root_dir
+        except Exception:
+            data_root = "data"
+        self._registry_file = Path(data_root) / ".client_registry.json"
         self._registry: Dict = {}
         self._active_client: Optional[str] = None
         self._active_workspace: Optional[str] = None

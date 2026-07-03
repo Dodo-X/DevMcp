@@ -1,18 +1,18 @@
 """
-每日总结技能 v3.0 — AI-Client-Driven 数据提供
-=================================================
-v3.0 重大架构变更：
-  - ❌ 不再调用本地 Ollama（太慢、不支持远程部署）
-  - ✅ MCP 提供纯数据工具，AI客户端（CodeBuddy/Trae的LLM）自己做分析
-  - ✅ AI 客户端的 LLM (Claude/GPT) 远比本地 7B 模型强大
+每日总结技能 v5.0 — LLM 智能增强版
+=====================================
+v5.0 (LLM 增强): 集成本地 Ollama/Qwen3.5 进行智能日报生成。
+  - ✨ 使用 LLM 自动提取关键成果、学习收获、风险预警
+  - 📊 基于实际工作数据的深度分析（非模板化）
+  - 🔄 双模式：LLM 可用时智能生成，不可用返回原始数据供 AI 客户端分析
 
-架构：
-  AI客户端 → 调用 get_daily_work_data() 获取原始数据
-           → 用自己的 LLM 分析总结
-           → 调用 save_daily_analysis() 保存结果
+v4.0 (v6.2 架构): daily_log Markdown 文件已废弃，数据仅存 SQLite。
+  - ❌ 不再读取 data/daily_logs/conversation_*.md
+  - ✅ 纯从 conversations 表读取
+  - ✅ 所有记录由 record_dialogue MCP 工具写入 DB
 
 数据流向：
-  daily_logs/ + SQLite DB → get_daily_work_data → AI分析 → save_daily_analysis → DB + Report
+  record_dialogue → SQLite DB → get_daily_work_data → [可选] LLM 分析 → save_daily_analysis
 """
 import json
 import re
@@ -20,25 +20,22 @@ from datetime import datetime, date, timedelta
 from pathlib import Path
 
 
-def get_daily_work_data(date_str: str = None, fallback_to_log: bool = True) -> dict:
+def get_daily_work_data(date_str: str = None, fallback_to_log: bool = False) -> dict:
     """
     获取指定日期的工作数据（给 AI 客户端分析用的原始数据）
     
-    v4.1 增强：当数据库为空时，自动从本地 Markdown 日志解析数据作为降级方案
-    解决"刚部署 DB 无历史数据"问题
+    v4.0: 纯从 SQLite 数据库读取，不再读取本地 Markdown 日志文件。
+    fallback_to_log 参数保留兼容但已无效果。
     
     参数：
     - date_str: 日期字符串 YYYY-MM-DD
-    - fallback_to_log: 是否在DB无数据时降级读取本地日志（默认True）
+    - fallback_to_log: 已废弃（v4.0），保留仅为兼容旧调用
     
     返回：
-    - 对话日志内容（Markdown）
     - 数据库中的结构化记录
     - 统计数据
     - 涉及的文件列表
-    - data_source: 标识数据来源 ("db" / "local_log" / "mixed")
-    
-    AI客户端拿到这些数据后用自己的LLM分析总结
+    - data_source: 固定为 "db"
     """
     if date_str is None:
         date_str = datetime.now().strftime("%Y-%m-%d")
@@ -46,34 +43,18 @@ def get_daily_work_data(date_str: str = None, fallback_to_log: bool = True) -> d
     result = {
         "date": date_str,
         "generated_at": datetime.now().isoformat(),
-        "log_content": "",
         "conversations": [],
         "stats": {},
         "files_touched": [],
         "problems_found": [],
         "thinking_data": [],
         "data_source": "db",
+        "note": "v4.0: 纯数据库读取，daily_log Markdown 文件已废弃",
     }
 
-    # 1. 读取日志文件（始终尝试）
-    has_local_log = False
+    # 从数据库读取结构化记录
     try:
-        from services.log_service import get_log_service
-        log_svc = get_log_service()
-        log_data_str = log_svc.read_daily_log(date_str)
-        log_data = json.loads(log_data_str) if isinstance(log_data_str, str) else log_data_str
-        
-        if "error" not in log_data and log_data.get("content", "").strip():
-            result["log_content"] = log_data["content"]
-            result["log_size_bytes"] = log_data.get("size_bytes", 0)
-            has_local_log = True
-    except Exception:
-        pass
-
-    # 2. 从数据库读取结构化记录
-    db_has_data = False
-    try:
-        from core.database import get_db
+        from devpartner_agent.core.database import get_db
         db = get_db()
 
         # 对话记录
@@ -84,12 +65,10 @@ def get_daily_work_data(date_str: str = None, fallback_to_log: bool = True) -> d
             (date_str,)
         )
         
-        if convs:
-            db_has_data = True
-            
-        for c in convs:
+        for c in (convs or []):
             entry = {
                 "timestamp": c.get("timestamp", ""),
+                "conversation_id": c.get("conversation_id", ""),
                 "topic": c.get("topic", ""),
                 "task_type": c.get("task_type", ""),
                 "user_intent": c.get("user_intent", ""),
@@ -141,52 +120,13 @@ def get_daily_work_data(date_str: str = None, fallback_to_log: bool = True) -> d
                 "SELECT * FROM conversations WHERE date(timestamp) = ? AND client != 'unknown'",
                 (date_str,)
             )
-            clients = set(c.get("client", "") for c in dialogue_data)
+            clients = set(c.get("client", "") for c in (dialogue_data or []))
             result["active_clients"] = list(clients)
         except Exception:
             result["active_clients"] = []
 
     except Exception as e:
         result["db_error"] = str(e)
-
-    # 3. 降级机制：DB 无数据但有本地日志时，从日志解析
-    if not db_has_data and fallback_to_log and has_local_log and result["log_content"]:
-        result["data_source"] = "local_log"
-        parsed_convs = parse_markdown_log(result["log_content"], date_str)
-        
-        if parsed_convs:
-            result["conversations"] = parsed_convs
-            
-            # 从解析的数据中提取统计信息
-            task_types = {}
-            for conv in parsed_convs:
-                tt = conv.get("task_type", "未分类")
-                task_types[tt] = task_types.get(tt, 0) + 1
-                
-                # 收集文件
-                if conv.get("files_touched"):
-                    result["files_touched"].extend(conv["files_touched"])
-                
-                # 收集问题和思考
-                if conv.get("problems"):
-                    result["problems_found"].append(conv["problems"])
-                if conv.get("thinking_steps"):
-                    result["thinking_data"].append({
-                        "topic": conv["topic"],
-                        "steps": conv["thinking_steps"],
-                        "self_reflection": conv.get("self_reflection", ""),
-                    })
-            
-            result["files_touched"] = list(set(result["files_touched"]))
-            result["stats"] = {
-                "date": date_str,
-                "total": len(parsed_convs),
-                "by_type": task_types,
-            }
-            result["fallback_note"] = "⚠️ 数据库暂无记录，已从本地日志文件降级读取。可调用 import_daily_log_to_db() 导入到数据库"
-    
-    elif db_has_data and has_local_log:
-        result["data_source"] = "mixed"
     
     return result
 
@@ -222,7 +162,7 @@ def save_daily_analysis(analysis_json: str) -> dict:
 
     # 1. 保存到本地数据库
     try:
-        from core.database import get_db
+        from devpartner_agent.core.database import get_db
         db = get_db()
 
         timestamp = datetime.now().isoformat()
@@ -242,7 +182,7 @@ def save_daily_analysis(analysis_json: str) -> dict:
 
     # 2. 保存到共享数据库（如果可用）
     try:
-        from core.database import get_db
+        from devpartner_agent.core.database import get_db
         db = get_db()
 
         exp = analysis.get("experience", {})
@@ -276,10 +216,10 @@ def save_daily_analysis(analysis_json: str) -> dict:
     cross = analysis.get("cross_insight")
     if cross and cross.get("content"):
         try:
-            from core.database import get_db
+            from devpartner_agent.core.database import get_db
             db = get_db()
             db.query_local(
-                """INSERT INTO system_improvements
+                """INSERT INTO improvement_log
                    (timestamp, category, suggestion, priority)
                    VALUES (?, ?, ?, ?)""",
                 (datetime.now().isoformat(),
@@ -313,7 +253,7 @@ def get_weekly_work_data() -> dict:
         day_data = {"date": d_str, "conversation_count": 0, "tasks": []}
         
         try:
-            from core.database import get_db
+            from devpartner_agent.core.database import get_db
             db = get_db()
             stats = db.get_daily_stats(d_str)
             day_data["conversation_count"] = stats.get("total", 0)
@@ -450,8 +390,8 @@ def import_daily_log_to_db(date_str: str = None) -> dict:
     }
     
     try:
-        from services.log_service import get_log_service
-        from core.database import get_db
+        from devpartner_agent.services.log_service import get_log_service
+        from devpartner_agent.core.database import get_db
         
         log_svc = get_log_service()
         db = get_db()
@@ -524,7 +464,7 @@ def sync_all_logs_to_db() -> dict:
     }
     
     try:
-        from services.log_service import get_log_service
+        from devpartner_agent.services.log_service import get_log_service
         
         log_svc = get_log_service()
         logs = log_svc.list_logs()
@@ -560,9 +500,9 @@ def _generate_report_file(analysis: dict, target_date: str) -> str:
     """生成 Markdown 日报文件"""
     # 确定报告目录
     try:
-        from core.config import get_config
+        from devpartner_agent.core.config import get_config
         cfg = get_config()
-        report_dir = Path(cfg.data.root_dir) / "reports"
+        report_dir = Path(cfg.data.reports_dir)
     except Exception:
         report_dir = Path("data/reports")
     
@@ -672,47 +612,93 @@ def _generate_report_file(analysis: dict, target_date: str) -> str:
 # 公共入口函数
 # ============================================================
 
-def generate_daily_summary(date_str: str = "") -> dict:
+def generate_daily_summary(date_str: str = "", use_llm: bool = True) -> dict:
     """
-    生成每日工作总结（公共入口）
+    生成每日工作总结（v5.0 - LLM 增强版）
     
-    被 server.py 调用，封装 get_daily_work_data 返回结构化摘要。
+    被 server.py 调用，封装 get_daily_work_data + 可选 LLM 智能分析。
     
     Args:
         date_str: 日期字符串（YYYY-MM-DD），默认今天
+        use_llm: 是否使用 LLM 生成智能总结（默认 True）
     
     Returns:
-        dict: 每日工作总结
+        dict: 每日工作总结（含 LLM 分析结果或原始数据）
     """
     try:
+        # Step 1: 获取原始工作数据
         data = get_daily_work_data(date_str, fallback_to_log=True)
         
-        if not data.get("success", False):
+        if not data.get("conversations") and not data.get("stats"):
+            # 空数据返回
             return {
-                "success": False,
-                "error": data.get("error", "获取数据失败"),
-                "date": date_str or "today",
+                "success": True,
+                "date": date_str or datetime.now().strftime("%Y-%m-%d"),
+                "summary": {"message": "今日暂无工作记录"},
+                "analysis_method": "none",
+                "llm_available": False,
             }
         
-        tasks = data.get("tasks", [])
+        target_date = date_str or datetime.now().strftime("%Y-%m-%d")
+        
+        # Step 2: 尝试使用 LLM 智能生成
+        llm_analysis = None
+        if use_llm:
+            try:
+                from devpartner_agent.services.llm_service import get_llm_service
+                llm = get_llm_service()
+                
+                # 检查是否启用 LLM 总结功能
+                cfg = llm._get_config()
+                if getattr(cfg, 'enhance_daily_summary', False) and llm.is_available():
+                    logger.info(f"使用 LLM 生成 {target_date} 的每日总结...")
+                    llm_analysis = llm.generate_daily_summary(target_date, data)
+                    
+                    if llm_analysis:
+                        logger.info(f"LLM 每日总结生成成功")
+                        return {
+                            "success": True,
+                            "date": target_date,
+                            **llm_analysis,
+                            "raw_data": data,
+                            "analysis_method": "llm",
+                            "llm_available": True,
+                        }
+            except Exception as e:
+                logger.warning(f"LLM 每日总结生成失败，回退到原始数据: {e}")
+        
+        # Step 3: LLM 不可用或失败，返回结构化原始数据
+        tasks = data.get("conversations", [])
         stats = data.get("stats", {})
         
-        return {
+        result = {
             "success": True,
-            "date": data.get("date", date_str),
+            "date": target_date,
             "summary": {
-                "total_tasks": len(tasks),
-                "task_types": stats.get("task_types", {}),
-                "files_touched": stats.get("files_touched", 0),
-                "problems_count": stats.get("problems_count", 0),
-                "solutions_count": stats.get("solutions_count", 0),
+                "total_conversations": len(tasks),
+                "task_types": stats.get("by_type", {}),
+                "files_touched": len(data.get("files_touched", [])),
+                "problems_count": sum(1 for t in tasks if t.get("problems")),
+                "clients_active": data.get("active_clients", []),
             },
-            "tasks": tasks[:20],  # 最多返回 20 条
+            "conversations": tasks[:20],
             "raw_data": data,
+            "analysis_method": "rules_fallback" if use_llm else "data_only",
+            "llm_available": bool(llm_analysis),
+            "note": "已返回原始数据（可由 AI 客户端自行分析）" if not llm_analysis else "",
         }
+        
+        return result
+        
     except Exception as e:
         return {
             "success": False,
             "error": str(e),
-            "date": date_str or "today",
+            "date": date_str or datetime.now().strftime("%Y-%m-%d"),
+            "analysis_method": "error",
         }
+
+
+# 添加日志记录器
+import logging
+logger = logging.getLogger(__name__)

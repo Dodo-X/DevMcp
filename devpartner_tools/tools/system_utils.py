@@ -11,7 +11,8 @@ from typing import Dict, Any
 def execute_system_command(command: str, cwd: str = ".", timeout: int = 60) -> Dict[str, Any]:
     """执行系统命令 - 返回结果，不存储"""
     try:
-        result = subprocess.run(command, shell=True, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(command, shell=True, cwd=cwd, capture_output=True,
+                               text=True, encoding='utf-8', errors='replace', timeout=timeout)
         success = result.returncode == 0
         
         return {
@@ -82,7 +83,8 @@ def environment_scan() -> Dict[str, Any]:
     # 检测工具
     for tool, cmd in [("git", ["git", "--version"]), ("nodejs", ["node", "--version"]), ("docker", ["docker", "--version"])]:
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            r = subprocess.run(cmd, capture_output=True, text=True,
+                               encoding='utf-8', errors='replace', timeout=5)
             info["tools_available"][tool] = {"installed": r.returncode == 0, "version": r.stdout.strip() if r.returncode == 0 else None}
         except:
             info["tools_available"][tool] = {"installed": False, "version": None}

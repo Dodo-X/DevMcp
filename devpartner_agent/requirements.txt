@@ -1,7 +1,21 @@
-﻿# DevPartner Agent 依赖
-# 包含更多依赖用于智能管家功能
+﻿# DevPartner Agent 依赖 (v6.0)
+# ============================
+# 核心依赖：MCP 服务框架 + 配置管理 + 本地 LLM 推理
 
-fastmcp>=0.3.0
-httpx>=0.24.0
-pyyaml>=6.0
-watchdog>=3.0.0
+fastmcp>=0.3.0              # MCP 服务框架（必需）
+pyyaml>=6.0                  # YAML 配置解析（必需）
+
+# 本地 LLM 推理引擎（必需 - 用于智能对话分析、日报生成等功能）
+# 安装标准版（CPU推理）:
+#   pip install llama-cpp-python>=0.2.79
+#
+# 安装 CUDA 加速版（GPU推理，推荐）:
+#   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
+#
+# 当前使用模型: Qwen3.5-9B-Q4_1.gguf (~5.7GB)
+llama-cpp-python>=0.2.79     # 本地 GGUF 模型推理引擎
+
+# 测试依赖（开发/CI 使用）
+# ========================
+pytest>=8.0                 # 测试框架
+pytest-cov>=4.0             # 测试覆盖率报告
