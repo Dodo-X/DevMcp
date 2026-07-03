@@ -1,348 +1,408 @@
-# 部署指南
+# DevPartner v6.0 - ModelScope 部署指南
 
-本目录包含 DevPartner 的所有部署相关配置和脚本。
+> **适用环境**: ModelScope Docker 创空间（云端部署）
+>
+> **本地开发**: 请直接运行 `python server.py` 或 `start.bat`（无需使用此目录）
 
-## 📦 部署方式
+---
 
-### 方式 A: Docker Compose（推荐用于生产）
+## 📋 目录结构
 
-#### 前置要求
-- Docker Engine ≥ 20.10
-- Docker Compose ≥ 2.0
-- 可用端口: 8082 (Web UI), 8080 (API)
-
-#### 快速启动
-```bash
-cd deploy/
-
-# 复制环境变量模板
-cp .env.example .env
-
-# 编辑配置（修改模型路径等）
-vim .env
-
-# 启动服务
-docker-compose up -d
-
-# 查看日志
-docker-compose logs -f devpartner
 ```
-
-#### 访问服务
-- Web Dashboard: http://localhost:8082
-- API 文档: http://localhost:8082/api/docs
-- 健康检查: http://localhost:8082/health
-
-#### 常用命令
-```bash
-# 停止服务
-docker-compose down
-
-# 重启服务
-docker-compose restart
-
-# 查看资源占用
-docker stats devpartner-agent
-
-# 进入容器调试
-docker-compose exec agent bash
-
-# 备份数据
-docker cp devpartner-agent:/app/data/databases ./backups/
+deploy/
+├── Dockerfile          # ModelScope 创空间专用 Dockerfile
+├── docker-compose.yml  # Docker Compose 配置（可选，用于本地测试）
+└── README.md           # 本文件（部署说明）
 ```
 
 ---
 
-### 方式 B: Docker 单容器（适合开发测试）
+## 🎯 核心特性
 
-#### 构建镜像
-```bash
-cd deploy/
-docker build -t devpartner:latest .
-```
+### ✨ v6.0 升级要点
 
-#### 运行容器
-```bash
-docker run -d \
-  --name devpartner \
-  -p 8082:8082 \
-  -v $(pwd)/data:/app/data \
-  -v /path/to/models:/app/models:ro \
-  -e MODEL_PATH=/app/models/qwen3.5-9b-q4_1.gguf \
-  devpartner:latest
-```
-
-#### 参数说明
-| 参数 | 说明 | 示例 |
-|------|------|------|
-| `-p` | 端口映射 | 主机端口:容器端口 |
-| `-v` | 目录挂载 | 本地路径:容器路径 |
-| `-e` | 环境变量 | 配置项 |
-| `--gpus` | GPU 加速（可选） | `all` 或 `"device=0"` |
+| 特性 | 说明 |
+|------|------|
+| **Streamable HTTP** | 替代 SSE 模式，更好的兼容性和性能 |
+| **统一模型路径** | `/app/models/Qwen3.5-9B-Q4_1.gguf` |
+| **智能启动脚本** | 自动检测模型文件、支持降级模式 |
+| **健康检查** | 内置 60 秒间隔健康监控 |
+| **Dataset 挂载** | 支持 ModelScope Dataset volume 挂载 |
 
 ---
 
-### 方式 C: 本地裸机部署（推荐用于开发）
+## 🚀 快速部署
 
-#### 前置要求
-- Python 3.10+
-- 内存 ≥ 8GB
-- 磁盘空间 ≥ 10GB
+### **Step 1: 准备代码仓库**
 
-#### 安装步骤
-```bash
-# 1. 克隆项目
-git clone https://github.com/your-repo/devpartner.git
-cd devPartner
-
-# 2. 创建虚拟环境
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# 或 venv\Scripts\activate  # Windows
-
-# 3. 安装依赖
-pip install -r requirements.txt
-
-# 4. 安装 LLM 引擎
-pip install llama-cpp-python>=0.2.79
-
-# 5. 准备模型文件
-mkdir -p models
-# 将 qwen3.5-9b-q4_1.gguf 放入 models/ 目录
-
-# 6. 配置系统
-cp devpartner_agent/config.yaml.example devpartner_agent/config.yaml
-# 编辑 config.yaml 设置模型路径
-
-# 7. 启动服务
-python server.py
-```
-
----
-
-## ⚙️ 配置说明
-
-### 环境变量 (.env)
+确保项目根目录包含以下关键文件：
 
 ```bash
-# ===== 基础配置 =====
-DEVPARTNER_HOST=0.0.0.0
-DEVPARTNER_PORT=8082
-DEVPARTNER_DEBUG=false
+# 必需文件清单
+✅ server.py                    # 主程序入口
+✅ requirements.txt             # Python 依赖
+✅ devpartner_agent/            # 智能管家层
+✅ devpartner_tools/            # 纯工具层
+✅ models/README.md             # 模型管理文档
+✅ .gitignore                   # Git 排除规则（排除模型文件）
 
-# ===== LLM 配置 =====
-MODEL_PATH=/app/models/qwen3.5-9b-q4_1.gguf
-LLM_N_CTX=8192
-LLM_N_GPU_LAYERS=-1
-LLM_N_THREADS=8
-LLM_MAX_TOKENS=2048
-LLM_TEMPERATURE=0.3
-
-# ===== 数据库配置 =====
-DB_PATH=/app/data/databases/devpartner.db
-DB_BACKUP_ENABLED=true
-DB_BACKUP_INTERVAL=24h  # 自动备份间隔
-
-# ===== 日志配置 =====
-LOG_LEVEL=INFO
-LOG_FILE=/app/data/logs/agent.log
-LOG_MAX_SIZE=100MB
-LOG_BACKUP_COUNT=5
-
-# ===== 安全配置 =====
-AUTH_ENABLED=false
-API_KEY=your-secret-key-here  # 如果启用认证
-ALLOWED_ORIGINS=*  # CORS 配置
+# 可选但推荐
+✅ start.bat                    # Windows 启动脚本
+✅ scripts/check_model.py       # 模型检查工具
 ```
 
-### config.yaml (Agent 配置)
+### **Step 2: 上传模型到 ModelScope Dataset**
 
-详见 [../README.md](../README.md#🔧-高级配置) 的"高级配置"章节。
+#### 方法一：上传到 Dataset（推荐用于云端部署）
 
----
-
-## 🐳 Dockerfile 详解
-
-### 多阶段构建优化
-```dockerfile
-# Stage 1: 基础环境
-FROM python:3.11-slim as base
-RUN apt-get update && apt-get install -y build-essential
-
-# Stage 2: 依赖安装
-FROM base as builder
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Stage 3: 运行时镜像
-FROM base as runtime
-WORKDIR /app
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY . .
-
-EXPOSE 8082
-CMD ["python", "server.py"]
-```
-
-**优势**:
-- 最终镜像体积小（~800MB vs ~2GB）
-- 构建缓存友好（依赖层独立）
-- 安全性高（不暴露构建工具）
-
----
-
-## 📊 性能调优
-
-### CPU 优化
-```yaml
-# config.yaml
-llm:
-  n_threads: 8        # 设为 CPU 核心数
-  n_batch: 512        # 批处理大小
-  use_mmap: true      # 内存映射减少 RAM 占用
-```
-
-### GPU 优化
-```bash
-# docker-compose.yml
-services:
-  agent:
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-```
-
-### 内存优化
-```yaml
-llm:
-  n_ctx: 4096         # 减少上下文窗口
-  use_mlock: false    # 不锁定物理内存
-  split_mode: true    # 分层加载（大模型）
-```
-
----
-
-## 🔒 安全建议
-
-### 生产环境必做
-1. **修改默认密码**
-   ```bash
-   export API_KEY=$(openssl rand -hex 32)
+1️⃣ **登录 ModelScope**
+   ```
+   访问: https://modelscope.cn
+   登录账号（支持 GitHub/手机号登录）
    ```
 
-2. **限制网络访问**
-   ```yaml
-   # docker-compose.yml
-   ports:
-     - "127.0.0.1:8082:8082"  # 仅本地访问
+2️⃣ **创建新 Dataset**
+   ```
+   点击右上角 "+" → "创建 Dataset"
+
+   填写信息：
+   - Dataset 名称: `devpartner-models` (或自定义)
+   - 可见性: Public (公开) 或 Private (私有)
+   - 描述: `DevPartner v6.0 LLM 推理模型 - Qwen3.5-9B-Q4_1`
+
+   点击 "创建"
    ```
 
-3. **启用 HTTPS**
-   ```nginx
-   # 反向代理配置
-   server {
-       listen 443 ssl;
-       ssl_certificate /path/to/cert.pem;
-       location / {
-           proxy_pass http://localhost:8082;
-       }
-   }
+3️⃣ **上传模型文件**
+   ```
+   进入刚创建的 Dataset 页面
+   点击 "上传文件" 或拖拽文件
+
+   选择文件:
+   ✅ Qwen3.5-9B-Q4_1.gguf (~5.7GB)
+
+   等待上传完成（根据网速，可能需要10-30分钟）
+
+   上传完成后，记录 Dataset 路径:
+   例如: your_username/devpartner-models
    ```
 
-4. **定期备份**
-   ```bash
-   # Cron 定时备份
-   0 2 * * * docker exec devpartner-agent python scripts/backup_db.py
+### **Step 3: 创建 ModelScope 创空间**
+
+1️⃣ **创建 Docker 创空间**
+   ```
+   在 ModelScope 主页点击 "创建空间"
+
+   选择配置:
+   - 类型: Docker Space (必须！)
+   - 名称: devpartner-v6 (或自定义)
+   - 可见性: Public 或 Private
+   - SDK/Docker: 选择 "Docker"
+   - 关联 GitHub 仓库: 选择你的 devPartner 仓库
+
+   ⚠️ 重要提示:
+     ModelScope 会自动从根目录读取 Dockerfile！
+     但我们的 Dockerfile 位于 deploy/ 目录下。
+
+     解决方案:
+     方案A: 将 deploy/Dockerfile 复制到项目根目录
+     方案B: 在创空间设置中指定 Dockerfile 路径（如果支持）
+   ```
+
+2️⃣ **配置 Volume 挂载（关键！）**
+   ```
+   进入创空间 → 设置 → 存储卷 (Volumes)
+
+   添加挂载:
+   - 来源: your_username/devpartner-models (你刚创建的Dataset)
+   - 目标: /app/models
+   - 权限: 读写 (RW)
+
+   保存设置
+   ```
+
+3️⃣ **配置环境变量（可选）**
+   ```
+   在创空间设置中添加:
+
+   MCP_PORT=7860
+   TZ=Asia/Shanghai
+   MODEL_PATH=/app/models/Qwen3.5-9B-Q4_1.gguf
+   MODEL_SOURCE=dataset
+   TRANSPORT_MODE=streamable-http
+   ```
+
+### **Step 4: 构建和启动**
+
+1️⃣ **首次构建**
+   ```
+   在创空间页面点击:
+   - "重新构建" (首次需要构建)
+   - 或 "启动" (如果已构建)
+
+   等待时间:
+   - 构建: 约 5-10 分钟（安装依赖 + 复制代码）
+   - 启动: 约 1-2 分钟（初始化数据库 + 加载模型）
+   ```
+
+2️⃣ **查看日志**
+   ```
+   在创空间页面点击 "日志" 标签
+
+   应该看到:
+   ╔════════════════════════════════════════╗
+   ║  ⚡ DevPartner v6.0 · ModelScope 启动器 ║
+   ╚════════════════════════════════════════╝
+
+   [步骤 1/3] 检查模型文件...
+          ✅ 模型文件已存在: Qwen3.5-9B-Q4_1.gguf (5.7 GB)
+
+   [步骤 2/3] 初始化数据目录...
+          ✅ 数据目录已就绪
+
+   [步骤 3/3] 启动 DevPartner 服务...
+          🚀 服务正在启动...
+
+   [INFO] devpartner-tools: 21 个纯工具已注册
+   ...
+   ```
+
+3️⃣ **访问 Dashboard**
+   ```
+   访问地址: http://your-space-id.modelscope.cn:7860/dashboard
+
+   应该看到:
+   - 🌱 成长视角 标签页（默认显示）
+   - ⚙️ 运维视角 标签页
+   - 双向成长仪表盘数据正常加载
    ```
 
 ---
 
-## 🔄 升级与回滚
+## 🔧 高级配置
 
-### 升级到新版本
+### **模型来源选项**
+
+| 来源 | 配置方法 | 适用场景 |
+|------|---------|---------|
+| **Dataset 挂载** ⭐ | Volume 挂载到 `/app/models` | 推荐用于云端部署 |
+| **打包进镜像** | 构建时包含模型文件 | 离线/私有环境 |
+| **运行时下载** | 设置 `MODEL_URL` 环境变量 | 动态切换模型 |
+
+### **性能优化**
+
 ```bash
-# 1. 备份数据
-docker cp devpartner-agent:/app/data ./backup_$(date +%Y%m%d)
+# 启用 GPU 加速（如果有 GPU 实例）
+N_GPU_LAYERS=-1  # 全部层使用GPU
 
-# 2. 拉取新镜像
-docker pull devpartner:latest
+# 增加 CPU 并行度
+N_THREADS=8  # 根据 CPU 核心数调整
 
-# 3. 停止旧版本
-docker-compose down
-
-# 4. 启动新版本
-docker-compose up -d
-
-# 5. 运行数据库迁移（如需要）
-docker-compose exec agent python scripts/upgrade_to_v5.py
+# 调整批处理大小
+N_BATCH=1024  # 提高吞吐量（增加内存使用）
 ```
 
-### 回滚到旧版本
-```bash
-# 1. 停止当前版本
-docker-compose down
+### **成本优化**
 
-# 2. 使用旧镜像启动
-docker run -d ... devpartner:v5.1.0
-
-# 3. 恢复备份数据
-docker cp ./backup_YYYYMMDD/data devpartner-agent:/app/
-```
+| 方案 | 月费用估算 | 适用场景 |
+|------|-----------|---------|
+| **CPU Basic (免费)** | ¥0 | 开发测试 |
+| **CPU Standard** | ¥~100/月 | 小规模公开服务 |
+| **GPU 基础版** | ¥~300-500/月 | 需要 LLM 推理加速 |
+| **GPU 高级版** | ¥~1000+/月 | 高并发生产环境 |
 
 ---
 
-## 🐛 故障排查
+## 🆘 常见问题排查
 
-### 容器无法启动？
+### ❌ **问题1: 构建失败**
+
+**症状**: ModelScope 显示 "Docker build failed"
+
+**解决方案**:
 ```bash
-# 查看日志
-docker-compose logs agent
+# 1. 检查本地是否能成功构建
+cd deploy
+docker build -t test-modelscope ../
+
+# 2. 如果失败，查看详细错误信息
+docker build -t test-modelscope ../ 2>&1 | tee build.log
 
 # 常见原因:
-# - 端口被占用 → 修改 ports 映射
-# - 权限不足 → chmod 777 data/
-# - 模型文件缺失 → 检查 volume 挂载
+# - requirements.txt 缺少依赖
+# - Dockerfile 语法错误
+# - 文件复制路径错误
 ```
 
-### LLM 加载失败？
+### ❌ **问题2: 模型文件未找到**
+
+**症状**: 日志显示 `[步骤 1/3] ⚠️ 模型文件不存在`
+
+**解决方案**:
 ```bash
-# 检查模型文件
-docker exec agent ls -lh models/
+# 1. 检查 Dataset 是否正确挂载
+# 在创空间设置中确认:
+# - Volume 来源路径正确
+# - 目标路径是 /app/models
+# - 权限是 RW (读写)
 
-# 验证文件完整性
-docker exec agent md5sum models/*.gguf
-
-# 查看资源占用
-docker stats agent
+# 2. 进入容器检查
+docker exec -it <container_id> ls -lh /app/models/
+# 应该看到 Qwen3.5-9B-Q4_1.gguf 文件
 ```
 
-### 数据库损坏？
-```bash
-# 进入容器修复
-docker exec -it agent bash
-python scripts/check_db_integrity.py --repair
+### ❌ **问题3: 内存不足 (OOM)**
 
-# 如修复失败，从备份恢复
-docker cp backup_YYYYMMDD/databases/devpartner.db data/databases/
+**症状**: 容器被强制终止，日志显示 "OOMKilled"
+
+**解决方案**:
+```bash
+# 1. 升级硬件配置（在创空间设置中）
+#    CPU Basic (免费): 4GB内存 → 可能不够
+#    推荐: CPU Standard (付费) 或 GPU 实例
+
+# 2. 优化 LLM 参数
+# 设置环境变量:
+N_CTX=4096       # 减小上下文窗口 (默认8192)
+N_GPU_LAYERS=0   # 使用纯CPU模式 (节省GPU内存)
+N_THREADS=4      # 减少线程数
+```
+
+### ❌ **问题4: 端口无法访问**
+
+**症状**: 浏览器无法打开 http://your-space:7860
+
+**解决方案**:
+```bash
+# 1. 确认端口配置
+# ModelScope 只允许: 7860 或 8080
+# 检查 Dockerfile: EXPOSE 7860
+
+# 2. 检查防火墙/安全组
+# ModelScope 平台通常会自动处理
+
+# 3. 等待更长时间
+# 首次启动可能需要 2-3 分钟初始化
 ```
 
 ---
 
-## 📞 技术支持
+## 📊 验证清单
 
-遇到部署问题？
+启动成功后，逐一确认：
 
-1. 查看 [故障排查文档](../docs/troubleshooting.md)
-2. 提交 [GitHub Issue](https://github.com/your-repo/issues)
-3. 加入 [讨论区](https://github.com/your-repo/discussions)
+### **基本功能**
+- [ ] Dashboard 页面正常打开（无404错误）
+- [ ] 可以在"成长视角"和"运维视角"之间切换
+- [ ] 用户技能雷达图数据正常显示
+- [ ] 系统进化面板数据正确
+
+### **API端点**
+- [ ] `http://your-space:7860/api/growth/user-overview` 返回JSON
+- [ ] `http://your-space:7860/api/growth/skill-radar` 返回雷达图数据
+- [ ] `http://your-space:7860/docs` API文档可访问
+
+### **LLM推理**
+- [ ] 在Dashboard中可以发送对话消息
+- [ ] 收到LLM生成的回复（非错误信息）
+- [ ] 响应时间合理（<30秒）
+
+### **持久化**
+- [ ] 重启创空间后，对话记录保留
+- [ ] 用户数据和系统状态恢复
+- [ ] 模型文件无需重新下载
 
 ---
 
-**维护者**: DevPartner DevOps Team  
-**最后更新**: 2026-07-03  
-**适用版本**: DevPartner v5.2+
+## 📚 相关文档
+
+| 文档 | 内容 | 适用场景 |
+|------|------|---------|
+| **[DEPLOYMENT_GUIDE.md](../DEPLOYMENT_GUIDE.md)** | 通用部署指南 | 本地/Docker/ModelScope通用 |
+| **[models/README.md](../models/README.md)** | 模型管理文档 | 模型下载与配置 |
+| **[server.py](../server.py)** | 主程序入口 | 启动方式和参数说明 |
+
+---
+
+## 💡 最佳实践
+
+### **开发流程**
+
+```bash
+# 1. 本地开发（使用 stdio 模式）
+python server.py
+# 或
+start.bat
+
+# 2. 测试 Streamable HTTP 模式（本地预览）
+python server.py 7860
+# 访问: http://localhost:7860/dashboard
+
+# 3. 使用 Docker Compose 测试（模拟云端环境）
+cd deploy
+docker-compose up --build
+
+# 4. 推送到 GitHub 并同步到 ModelScope
+git add .
+git commit -m "feat(v6.0): 更新功能"
+git push origin main
+# ModelScope 自动触发重新构建
+```
+
+### **版本发布**
+
+```bash
+# 1. 更新版本号
+# 编辑 server.py 顶部的版本字符串
+# 例如: 版本：6.0.0 → 版本：6.1.0
+
+# 2. 更新 CHANGELOG.md
+# 添加新版本的功能和修复记录
+
+# 3. 提交并推送
+git add .
+git commit -m "release(v6.1.0): 新功能描述"
+git push origin main
+
+# 4. 在 ModelScope 创空间点击"重新构建"
+```
+
+---
+
+## 🆕 v6.0 变更日志
+
+### **新增功能**
+
+- ✅ **Streamable HTTP 模式**: 替代 SSE，更好的兼容性
+- ✅ **双向成长仪表盘**: 用户成长 + 系统进化可视化
+- ✅ **智能启动脚本**: 自动检测模型、支持降级模式
+- ✅ **统一模型路径**: 所有环境从 `models/` 目录加载
+
+### **破坏性变更**
+
+- ⚠️ **移除 SSE 模式**: 不再支持 `python server.py sse`
+- ⚠️ **新的启动参数**: 改用端口号直接启动 HTTP 模式
+
+### **迁移指南**
+
+如果你之前使用的是 v5.x 的 SSE 模式：
+
+```bash
+# 旧命令（v5.x）- 已弃用
+python server.py sse 7860
+
+# 新命令（v6.0）- 推荐
+python server.py 7860
+```
+
+---
+
+**🎯 准备好开始部署了吗？按照上面的步骤操作即可！**
+
+如有任何问题，请查阅相关文档或提交 Issue 到 GitHub 仓库。
+
+---
+
+**作者**: DevPartner Team
+**版本**: v6.0.0
+**最后更新**: 2026-07-03

@@ -1,73 +1,55 @@
 """
-DevPartner MCP 服务器 v5.2.0
+DevPartner MCP 服务器 v6.0.0
 =============================
 
-合并 devpartner-tools 和 devpartner-agent 为单一入口。
-ModelScope 等云平台限制只能暴露两个端口之一（7860 / 8080）。
+🎯 项目定位:
+  以 MCP (Model Context Protocol) 形式对外提供服务的智能助手系统，
+  包含工具层和智能管家层，支持本地开发和云端部署。
 
-v5.2.0 变更：
-  - ★ database.py 内置三张 v5.0 核心表创建（conversation_steps/knowledge_points/task_queue）
-  - ★ server.py 暴露 13 个 v5.0 MCP 工具（会话生命周期/任务队列/知识库/系统健康）
-  - ★ conversations 表自动补齐 status/priority/total_steps/completed_steps 等列
-  - 无需外部 SQL 脚本，启动即完成升级
+📦 系统架构:
+  server.py (MCP 服务入口)
+  ├── devpartner_tools/  (工具层, 无状态, 21个纯工具)
+  │   ├── filesystem     文件系统操作
+  │   ├── git_operations Git 命令封装
+  │   ├── web_requests   HTTP 请求
+  │   ├── system_utils    系统工具
+  │   └── ...            其他基础工具
+  │
+  └── devpartner_agent/  (智能管家层, 有状态, 67+个智能工具)
+      ├── core/           核心引擎 (LLM、数据库、配置)
+      ├── services/       业务服务 (对话分析、LLM推理、日报生成等)
+      └── skills/         技能模块 (每日总结、自我迭代等)
 
-架构：
-  server.py (单一端口)
-  ├── devpartner_tools/  (纯工具层，无状态，25个工具)
-  └── devpartner_agent/  (智能管家层，有状态，67+个工具)
+🔄 协议变更 (v6.0):
+  ❌ 旧版: SSE协议 (Server-Sent Events)
+  ✅ 新版: Streamable HTTP + /mcp 端点
 
-v4.3.0 变更：
-  - ★ FK外键约束：4张子表强制 FOREIGN KEY(conversations_id) REFERENCES conversations(id)
-  - ★ analyzed 列：conversations 表新增 analyzed 标记（auto_analyzer 同步回写）
-  - ★ 数据完整性保障：入库校验关键字段非空 + 三大链路写入成功率监控 + check_data_integrity 新增工具
-  - ★ 存量回填：_backfill_conversations_id() 启动时自动补全历史数据外键关联
-  - ★ save_self_iterate_results 新增 conversations_id 参数，打通优化→对话追溯链路
-  - ★ 项目级分析策略：request_user_profile_analysis 支持 project_id 自适应调整维度权重
-  - ★ Rule 层分析规则：.codebuddy/rules/user-profile-analysis.md 9维用户画像分析规范
-  - ★ 协议文档：docs/user_profile_protocol.md 双向画像传输协议
+  客户端调用方式:
+    POST http://host:7860/mcp
+    Content-Type: application/json
+    Body: { "jsonrpc": "2.0", "method": "...", "params": {...} }
 
-v4.2.0 变更：
-  - 全链路数据关联：evolution_log / improvement_log 新增 conversations_id 外键
-  - 闲置字段实时填充：conversations.skill_domains/feedback_type 在 record_dialogue 写入时分析
-  - 优化闭环：self_iterate 写入 optimization_feedback 自动标记 applied_at/result
-  - 版本记录结构化：version_history 扩充 diff_detail/optimize_point/bug_fix/new_feature/data_change
-  - 联查增强：get_conversation_with_relations 补充 evolution_log / improvement_log
-  - 双向画像协同：新增 request_user_profile_analysis 工具（MCP→客户端主动下发）
+🚀 启动方式:
 
-v4.1.0 变更：
-  - 数据关联重构：conversations.id 主键关联 conversation_archive.conversations_id / optimization_feedback.conversations_id
-  - 字段激活：conversations.skill_domains/complexity/feedback_type 填充；conversation_archive.analyzed 激活
-  - 自动分析引擎：auto_analyzer 每10条未分析存档触发批量分析 → 回写字段 + 更新画像 + 写入反馈
-  - evolution_log / improvement_log 写入链路打通
-  - optimization_feedback 完整生命周期管理（description/suggestion/applied_at/result 填充链路）
-  - 版本记录差异化：version_history changelog 根据版本号和启动类型生成
-  - 用户画像协同分析：record_dialogue 自动分析并更新 user_skills
+  本地开发 (推荐):
+    python server.py              # 自动检测环境 → stdio 模式
+    start.bat                     # Windows 一键启动
 
-v4.0.0 变更：
-  - self_iterate 触发机制重构：基于 conversations 表有意义对话计数（20次触发）
-  - 有意义对话 vs 简单工具调用区分：record_dialogue/log_conversation 触发计数
-  - 对话计数器持久化：data/.conversation_counter.json，重启不丢失
-  - self_iterate 输出增强：用户画像/技能评估/批评指点/未来规划/MCP工具优化/系统反馈
-  - 新增 save_self_iterate_results 工具：将分析结果写入 user_skills/user_skill_plan 等表
-  - AutoLogMiddleware v4.0：有意义对话计数 + 反馈检测 + 工具调用统计
-  - check_optimization_needed v4.0：基于有意义对话数判断，不再用工具调用次数
+  ModelScope 云端 / 远程服务器:
+    python server.py 7860          # 强制 Streamable HTTP + /mcp 端点
+    Docker构建后自动启动 (端口固定为7860)
 
-启动方式：
-    python server.py          # stdio 模式（推荐本地）
-    python server.py sse      # SSE 模式（远程部署，默认 7860）
-    python server.py sse 8080 # SSE 模式指定端口（7860 或 8080）
+📂 关键目录:
+  data/        运行时数据 (数据库、日志、记忆等)
+  models/      LLM 推理模型 (Qwen3.5-9B-Q4_1.gguf ~5.7GB)
+  deploy/      部署配置文档 (Dockerfile已复制到根目录供ModelScope使用)
 
-数据存储（统一在 data/ 根目录下）：
-    ./data/databases/     - SQLite 数据库（WAL模式，高性能）
-    ./data/logs/          - 应用日志
-    ./data/logs_archive/  - 日志归档
-    ./data/memories/      - 记忆文件（文件监控源）
-    ./data/backups/       - 进化备份
-    ./data/reports/       - 每日总结报告
-    ./data/temp/          - 临时协同文件
+⚙️ 端口说明:
+  本地stdio模式: 无需端口 (标准输入输出通信)
+  云端HTTP模式:  7860 (ModelScope要求, MCP端点: /mcp)
 
 作者：DevPartner Team
-版本：5.1.0
+版本：6.0.0 | 更新: 2026-07-03
 """
 
 import sys
@@ -4063,17 +4045,113 @@ if __name__ == "__main__":
     print("        [NEW v5.2] 会话管理 | 异步任务队列 | 知识库 | Web Dashboard")
     print("=" * 60)
 
-    if len(sys.argv) > 1 and sys.argv[1] == "sse":
-        port = int(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_PORT
-        if port not in ALLOWED_PORTS:
-            print(f"[ERROR] 不允许的端口 {port}，仅支持: {sorted(ALLOWED_PORTS)}")
-            sys.exit(1)
+    # ============================================================
+    # v6.0: 统一启动逻辑 - 支持多种部署模式
+    # ============================================================
+    #
+    # 系统架构:
+    #   devpartner_tools/  → 工具层 (21个纯工具)
+    #   devpartner_agent/  → 智能管家层 (67+个智能工具)
+    #
+    # 部署模式:
+    #   1. 本地开发 (stdio)     - IDE集成，通过标准输入输出通信
+    #   2. ModelScope云端 (/mcp) - Docker容器，通过HTTP端点对外提供MCP服务
+    #   3. 远程服务器 (/mcp)     - 自建服务器，通过HTTP端点对外提供MCP服务
+    #
+    # 协议变更 (v6.0):
+    #   ❌ 旧版: SSE协议 (Server-Sent Events)
+    #   ✅ 新版: Streamable HTTP + /mcp 端点
+    #
+    # ============================================================
+
+    def _detect_environment():
+        """检测当前运行环境"""
+        import os
+
+        # 检查是否在 Docker 容器中
+        if os.path.exists("/.dockerenv"):
+            return "docker"
+
+        # 检查 ModelScope 环境变量
+        if os.environ.get("MODELSCOPE_ENVIRONMENT") == "true":
+            return "modelscope"
+
+        # 默认为本地环境
+        return "local"
+
+    def _run_streamable_http(port):
+        """使用 Streamable HTTP 模式启动服务（/mcp 端点）"""
+        print(f"  启动模式: Streamable HTTP (MCP 服务)")
         print(f"  监听端口: {port}")
-        print("  待命状态: 等待 AI 客户端连接...")
+        print(f"  MCP端点: http://localhost:{port}/mcp")
+        print("")
+        print("  📋 可用功能:")
+        print("     🔗 MCP客户端调用: POST http://localhost:{}/mcp".format(port))
+        print("     📊 Web Dashboard: http://localhost:{}/dashboard".format(port))
+        print("     🔧 API文档:       http://localhost:{}/docs".format(port))
+        print("     📈 健康检查:      http://localhost:{}/health".format(port))
+        print("")
+        print("  待命状态: 等待 MCP 客户端连接...")
         print("=" * 60)
-        # v5.2: Streamable HTTP + json_response + stateless，/mcp 端点
-        mcp.run(transport="streamable-http", host="0.0.0.0", port=port, json_response=True, stateless_http=True)
-    else:
-        print("  待命状态: 等待 AI 客户端连接...")
+        mcp.run(transport="streamable-http", host="0.0.0.0", port=port,
+                json_response=True, stateless_http=True)
+
+    def _run_stdio():
+        """使用 stdio 模式启动服务（本地开发）"""
+        print("  启动模式: stdio (本地开发)")
+        print("")
+        print("  📋 系统架构:")
+        print("     🛠️ 工具层 (devpartner_tools): 21个纯工具")
+        print("     🤖 智能层 (devpartner_agent): 67+个智能工具")
+        print("")
+        print("  待命状态: 等待 AI 客户端连接 (stdio)...")
         print("=" * 60)
         mcp.run()
+
+    # 判断启动模式
+    if len(sys.argv) > 1:
+        arg = sys.argv[1]
+
+        # 模式1: 提供端口号 → 强制使用 Streamable HTTP 模式
+        if arg.isdigit():
+            port = int(arg)
+            if port not in ALLOWED_PORTS:
+                print(f"[ERROR] 不允许的端口 {port}，仅支持: {sorted(ALLOWED_PORTS)}")
+                sys.exit(1)
+            _run_streamable_http(port)
+
+        # 模式2: 兼容旧的 "sse" 参数（已废弃，保留向后兼容）
+        elif arg.lower() in ["sse", "streamable"]:
+            port = int(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_PORT
+            if port not in ALLOWED_PORTS:
+                print(f"[ERROR] 不允许的端口 {port}，仅支持: {sorted(ALLOWED_PORTS)}")
+                sys.exit(1)
+            print(f"  ⚠️ 已弃用: '{arg}' 参数将在未来版本移除")
+            print(f"  请直接使用端口号: python server.py {port}")
+            _run_streamable_http(port)
+
+        else:
+            print(f"[ERROR] 未知参数: {arg}")
+            print("")
+            print("  用法:")
+            print("    python server.py              # 自动检测环境（推荐）")
+            print("    python server.py 7860          # 强制使用 Streamable HTTP + /mcp 端点")
+            print("")
+            print("  说明:")
+            print("    本地开发: 自动使用 stdio 模式")
+            print("    云端部署: 自动使用 Streamable HTTP 模式 (端口7860, /mcp端点)")
+            sys.exit(1)
+    else:
+        # 无参数: 自动检测环境并选择最佳模式
+        env = _detect_environment()
+
+        if env in ["docker", "modelscope"]:
+            # 云端/Docker环境: 使用 Streamable HTTP 模式
+            print(f"  [INFO] 检测到运行环境: {env}")
+            print(f"  [INFO] 自动选择: Streamable HTTP 模式")
+            _run_streamable_http(DEFAULT_PORT)
+        else:
+            # 本地环境: 使用 stdio 模式
+            print(f"  [INFO] 检测到运行环境: 本地开发")
+            print(f"  [INFO] 自动选择: stdio 模式")
+            _run_stdio()
