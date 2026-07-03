@@ -358,31 +358,94 @@ class TaskQueue:
     
     def _execute_step_analysis(self, payload: dict) -> dict:
         """
-        执行单步骤分析任务（v5.3 新增）
+        执行单步骤分析任务（v7.1 增强 — 系统 LLM 深度分析）
         
         分析单个子任务的内容，提取：
-          - 技能领域标签
-          - 知识点（如果客户端提供了 knowledge_points）
+          - 思考模式：AI/开发者如何分析问题、推理决策
+          - 使用的命令：便于复现和学习
+          - 语法知识点：涉及的编程语言特性和模式
+          - 客户端提供的 knowledge_points 写入 DB
           - 文件变更记录
-          - 步骤级别的质量评估
+        
+        用户未来可以按图索骥，通过知识点搜索快速找到解决方案。
         """
         conversation_id = payload.get("conversation_id", "")
         step_id = payload.get("step_id", "")
+        step_name = payload.get("step_name", "")
         content = payload.get("content", "")
         knowledge_points = payload.get("knowledge_points", [])
         files_changed = payload.get("files_changed", [])
         step_type = payload.get("step_type", "general")
-        
+        symptom = payload.get("symptom", "")
+        root_cause = payload.get("root_cause", "")
+        solution = payload.get("solution", "")
+
         from devpartner_agent.core.database import get_db
         db = get_db()
-        
+
         results = {
             "step_id": step_id,
             "knowledge_points_created": 0,
             "skill_domains": [],
             "files_indexed": len(files_changed),
+            "llm_analyzed": False,
         }
-        
+
+        # ════ 0. 系统 LLM 深度分析步骤内容 ════
+        try:
+            from devpartner_agent.services.llm_service import get_llm_service
+            llm = get_llm_service()
+            if llm and llm.is_available():
+                llm_result = llm.analyze_step_content(
+                    step_name=step_name,
+                    step_type=step_type,
+                    content=content,
+                    symptom=symptom,
+                    root_cause=root_cause,
+                    solution=solution,
+                )
+                if llm_result:
+                    results["llm_analyzed"] = True
+                    
+                    # 存储 LLM 提取的思考模式
+                    thinking_patterns = llm_result.get("thinking_patterns", [])
+                    results["thinking_patterns"] = thinking_patterns
+                    
+                    # 存储 LLM 提取的命令
+                    commands_used = llm_result.get("commands_used", [])
+                    results["commands_used"] = commands_used
+                    
+                    # 存储 LLM 提取的语法知识点
+                    syntax_points = llm_result.get("syntax_points", [])
+                    results["syntax_points"] = syntax_points
+                    
+                    # 存储复杂度评估
+                    results["complexity_level"] = llm_result.get("complexity_level", "simple")
+                    
+                    # 存储关键决策
+                    results["key_decision"] = llm_result.get("key_decision", "")
+                    
+                    # LLM 提取的知识点也写入 knowledge_points 表
+                    extracted_kp = llm_result.get("extracted_knowledge", [])
+                    if extracted_kp:
+                        from devpartner_agent.services.conversation_manager import ConversationManager
+                        mgr = ConversationManager()
+                        for kp in extracted_kp:
+                            mgr._create_knowledge_point(
+                                title=kp.get("title", "LLM提取知识点"),
+                                content=kp.get("desc", ""),
+                                category="llm_extracted",
+                                domain=kp.get("domain", "General"),
+                                tags=kp.get("tags", [step_type]),
+                                source_type="step_llm",
+                                source_id=step_id,
+                            )
+                        results["llm_knowledge_points"] = len(extracted_kp)
+                    else:
+                        results["llm_knowledge_points"] = 0
+        except Exception as e:
+            logger.warning(f"LLM 步骤分析失败（非致命）: {e}")
+
         # 1. 如果提供了知识点，写入 knowledge_points 表
         if knowledge_points:
             from devpartner_agent.services.conversation_manager import ConversationManager
@@ -402,7 +465,7 @@ class TaskQueue:
                     kp_ids.append(kp_id)
             results["knowledge_points_created"] = len(kp_ids)
         
-        # 2. 更新步骤状态为已完成
+        # 2. 更新步骤状态为已完成（output_data 记录 LLM 分析详情）
         db.query_local("""
             UPDATE conversation_steps SET
                 status = 'completed', output_data = ?,
@@ -420,14 +483,15 @@ class TaskQueue:
         mgr = ConversationManager()
         mgr._update_completed_steps(conversation_id)
         
-        logger.info(f"📋 Step analysis done: {step_id} | KP: {results['knowledge_points_created']}")
+        logger.info(f"📋 Step analysis done: {step_id} | KP: {results['knowledge_points_created']} | LLM: {results['llm_analyzed']}")
         return results
     
     def _execute_conversation_finalize(self, payload: dict) -> dict:
         """
-        执行对话全局分析任务（v5.3 新增）
+        执行对话全局分析任务（v7.1 增强 — 系统 LLM 深层分析）
         
         总分总的「总」环节，在对话所有步骤完成后执行：
+          0. 🆕 系统 LLM 深层分析：系统问题/反复模式/系统不足/用户洞察
           1. 聚合所有步骤的分析结果
           2. 更新用户画像（user_skills + improvement_log）
           3. 构建/更新知识图谱
@@ -451,7 +515,108 @@ class TaskQueue:
             "knowledge_graph_updated": 0,
             "optimization_suggestions": 0,
             "quality_score": 0,
+            "llm_deep_analyzed": False,
         }
+        
+        # ════ 0. 系统 LLM 深层对话分析 ════
+        try:
+            from devpartner_agent.services.llm_service import get_llm_service
+            llm = get_llm_service()
+            if llm and llm.is_available():
+                # 收集所有已完成步骤的摘要
+                steps_rows = db.query_local(
+                    "SELECT step_name, step_type, status, output_data, created_at "
+                    "FROM conversation_steps WHERE conversation_id = ? ORDER BY step_order",
+                    (conversation_id,)
+                )
+                steps_summary = []
+                for row in (steps_rows or []):
+                    step_info = {
+                        "name": row.get("step_name", ""),
+                        "type": row.get("step_type", ""),
+                        "status": row.get("status", ""),
+                        "created_at": row.get("created_at", ""),
+                    }
+                    # 尝试解析 output_data 中的关键信息
+                    output = row.get("output_data", "")
+                    if output:
+                        try:
+                            output_dict = json.loads(output)
+                            step_info["thinking_patterns"] = output_dict.get("thinking_patterns", [])
+                            step_info["complexity"] = output_dict.get("complexity_level", "")
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+                    steps_summary.append(step_info)
+                
+                # 调用系统 LLM 深层分析
+                deep_result = llm.analyze_conversation_deep(
+                    summary=summary,
+                    self_reflection=self_reflection,
+                    user_traits=user_traits,
+                    key_decisions=key_decisions,
+                    steps_summary=steps_summary,
+                )
+                
+                if deep_result:
+                    results["llm_deep_analyzed"] = True
+                    
+                    # 存储系统问题分析
+                    system_issues = deep_result.get("system_issues", [])
+                    results["system_issues"] = system_issues
+                    
+                    # 存储系统不足分析
+                    system_deficiencies = deep_result.get("system_deficiencies", [])
+                    results["system_deficiencies"] = system_deficiencies
+                    
+                    # 存储用户洞察
+                    user_insights = deep_result.get("user_insights", [])
+                    results["user_insights"] = user_insights
+                    
+                    # 存储反复出现的模式
+                    recurring_patterns = deep_result.get("recurring_patterns", [])
+                    results["recurring_patterns"] = recurring_patterns
+                    
+                    # 存储综合评估
+                    results["overall_assessment"] = deep_result.get("overall_assessment", "")
+                    
+                    # 存储风险领域
+                    results["risk_areas"] = deep_result.get("risk_areas", [])
+                    
+                    # 存储好做法
+                    results["positive_patterns"] = deep_result.get("positive_patterns", [])
+                    
+                    # 将 LLM 分析的系统问题写入 improvement_log
+                    if system_issues:
+                        for issue in system_issues[:5]:  # 限制数量
+                            db.query_local("""
+                                INSERT INTO improvement_log (
+                                    timestamp, category, suggestion, priority, status, conversations_id
+                                ) VALUES (?, 'system_issue', ?, ?, 'pending',
+                                    (SELECT id FROM conversations WHERE conversation_id = ?)
+                                )
+                            """, (
+                                datetime.now().isoformat(),
+                                f"系统问题: {issue.get('issue', '')} | 根因: {issue.get('root_cause', '')} | 重复: {issue.get('is_recurring', False)}",
+                                issue.get("severity", "medium"),
+                                conversation_id,
+                            ))
+                    
+                    # 将用户洞察写入 improvement_log
+                    if user_insights:
+                        for insight in user_insights[:5]:
+                            db.query_local("""
+                                INSERT INTO improvement_log (
+                                    timestamp, category, suggestion, priority, status, conversations_id
+                                ) VALUES (?, 'user_insight', ?, 'low', 'pending',
+                                    (SELECT id FROM conversations WHERE conversation_id = ?)
+                                )
+                            """, (
+                                datetime.now().isoformat(),
+                                f"用户观察: {insight.get('observation', '')} | 模式: {insight.get('pattern', '')} | 建议: {insight.get('suggestion', '')}",
+                                conversation_id,
+                            ))
+        except Exception as e:
+            logger.warning(f"LLM 深层对话分析失败（非致命）: {e}")
         
         # 1. 用户画像更新
         if user_traits:
@@ -496,7 +661,6 @@ class TaskQueue:
                 if nodes or edges:
                     from devpartner_agent.services.conversation_manager import ConversationManager
                     mgr = ConversationManager()
-                    # 将知识图谱节点写入 knowledge_points 表
                     kp_count = 0
                     for node in nodes:
                         kp_id = mgr._create_knowledge_point(
@@ -514,45 +678,67 @@ class TaskQueue:
             except Exception as e:
                 logger.error(f"知识图谱更新失败: {e}")
         
-        # 4. 系统优化建议（基于对话复盘）
-        if self_reflection:
+        # 4. 系统优化建议（基于对话复盘 + LLM 分析）
+        if self_reflection or results.get("llm_deep_analyzed"):
             try:
                 from devpartner_agent.services.conversation_manager import ConversationManager, StepConfig, StepType
                 mgr = ConversationManager()
                 
-                # 创建一个系统优化步骤
+                # 将 LLM 深层分析结果也传入系统优化步骤
+                enhanced_system_data = {
+                    "reflection": self_reflection,
+                    "summary": summary,
+                    "conversation_id": conversation_id,
+                    "llm_deep_analysis": {
+                        "system_issues": results.get("system_issues", []),
+                        "system_deficiencies": results.get("system_deficiencies", []),
+                        "recurring_patterns": results.get("recurring_patterns", []),
+                        "risk_areas": results.get("risk_areas", []),
+                        "overall_assessment": results.get("overall_assessment", ""),
+                    },
+                }
+                
                 fake_step = {
                     "step_id": f"optimize_{conversation_id}",
                     "conversation_id": conversation_id,
                     "step_type": "system_optimize",
                     "input_data": json.dumps({
-                        "system_data": {
-                            "reflection": self_reflection,
-                            "summary": summary,
-                            "conversation_id": conversation_id,
-                        }
+                        "system_data": enhanced_system_data
                     }, ensure_ascii=False),
                 }
                 
                 opt_result = mgr._execute_system_optimize_step(
                     fake_step,
-                    {"system_data": {
-                        "reflection": self_reflection,
-                        "summary": summary,
-                        "conversation_id": conversation_id,
-                    }}
+                    {"system_data": enhanced_system_data}
                 )
                 results["optimization_suggestions"] = opt_result.get("output", {}).get("suggestions_generated", 0)
             except Exception as e:
                 logger.error(f"系统优化建议生成失败: {e}")
         
-        # 5. 标记 conversations 表 analyzed=1
-        db.query_local("""
-            UPDATE conversations SET analyzed = 1, updated_at = ?
-            WHERE conversation_id = ?
-        """, (datetime.now().isoformat(), conversation_id))
+        # 5. 标记 conversations 表 analyzed=1 + 存储 LLM 深层分析结果
+        llm_deep_result_json = json.dumps({
+            "system_issues": results.get("system_issues", []),
+            "system_deficiencies": results.get("system_deficiencies", []),
+            "user_insights": results.get("user_insights", []),
+            "recurring_patterns": results.get("recurring_patterns", []),
+            "overall_assessment": results.get("overall_assessment", ""),
+            "risk_areas": results.get("risk_areas", []),
+            "positive_patterns": results.get("positive_patterns", []),
+        }, ensure_ascii=False)
         
-        logger.info(f"🎉 对话全局分析完成: {conversation_id} | {json.dumps(results, ensure_ascii=False)}")
+        db.query_local("""
+            UPDATE conversations SET analyzed = 1, updated_at = ?,
+                actions = CASE WHEN actions IS NULL OR actions = '' 
+                    THEN ? ELSE actions || ' | LLM_DEEP: ' || ? END
+            WHERE conversation_id = ?
+        """, (
+            datetime.now().isoformat(),
+            f"LLM深层分析: {results.get('overall_assessment', '')[:500]}",
+            f"系统问题={len(results.get('system_issues', []))}个, 不足={len(results.get('system_deficiencies', []))}个, 风险={len(results.get('risk_areas', []))}个",
+            conversation_id
+        ))
+        
+        logger.info(f"🎉 对话全局分析完成: {conversation_id} | LLM深层: {results['llm_deep_analyzed']} | {json.dumps({k: v for k, v in results.items() if k not in ('system_issues', 'system_deficiencies', 'user_insights', 'recurring_patterns')}, ensure_ascii=False)}")
         return results
     
     def _execute_conversation_analysis(self, payload: dict) -> dict:

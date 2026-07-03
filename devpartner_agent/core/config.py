@@ -4,12 +4,49 @@ DevPartner Agent 配置管理系统
 - YAML 配置文件加载
 - 环境变量覆盖
 - 单例模式 + 热重载支持
+- v6.0: pyproject.toml 作为版本号单一来源
 """
 
 import os
+import sys
 from pathlib import Path
 from typing import Any, Optional
 from dataclasses import dataclass, field
+
+
+def get_project_version() -> str:
+    """
+    从 pyproject.toml 读取版本号（单一来源）
+    
+    回退策略：
+    1. pyproject.toml（项目根目录）
+    2. 环境变量 DEVPARTNER_VERSION
+    3. 硬编码默认值
+    
+    版本号变动只需修改 pyproject.toml，所有引用处自动同步。
+    """
+    # 尝试从环境变量获取
+    env_version = os.environ.get("DEVPARTNER_VERSION")
+    if env_version:
+        return env_version
+
+    # 寻找 pyproject.toml
+    try:
+        # 从当前文件向上找项目根目录
+        current = Path(__file__).resolve().parent.parent.parent
+        toml_path = current / "pyproject.toml"
+        if toml_path.exists():
+            content = toml_path.read_text(encoding="utf-8")
+            for line in content.splitlines():
+                line = line.strip()
+                if line.startswith("version"):
+                    # version = "x.y.z"
+                    version = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    return version
+    except Exception:
+        pass
+
+    return "0.0.0"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -119,12 +156,15 @@ class LLMConfig:
     - Docker部署: 通过 volume 挂载 ./models:/app/models
     - ModelScope云端: 上传到 Dataset 或打包进镜像
     """
+    # ── 功能开关 ──
+    enabled: bool = True                                # LLM 总开关（关闭后所有智能分析降级为规则引擎）
+
     # ── 模型路径（v6.0: 统一使用 models/ 目录）──
     model_path: str = "./models/Qwen3.5-9B-Q4_1.gguf"   # GGUF 模型文件路径
     
     # ── 推理参数（针对 Q4_1 量化模型优化）──
     n_ctx: int = 8192                                  # 上下文窗口大小（8K 平衡内存与性能）
-    n_gpu_layers: int = -1                             # GPU 加速层数（-1=全部GPU, 0=纯CPU）
+    n_gpu_layers: int = 0                              # GPU 加速层数（0=纯CPU, -1=全部GPU）
     n_threads: int = 8                                 # CPU 线程数（建议设为核心数）
     n_batch: int = 512                                 # 批处理大小（影响推理速度）
     
@@ -158,7 +198,7 @@ class LLMConfig:
 class AgentConfig:
     """Agent 总配置"""
     name: str = "devpartner-agent"
-    version: str = "5.2.0"
+    version: str = field(default_factory=get_project_version)
     description: str = "DevPartner 智能管家 - 会话管理 + 异步任务 + 知识图谱 + Web Dashboard"
     server: ServerConfig = field(default_factory=ServerConfig)
     data: DataConfig = field(default_factory=DataConfig)

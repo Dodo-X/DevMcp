@@ -108,13 +108,11 @@ DevPartner 会自动在以下位置查找模型：
 ```yaml
 llm:
   model_path: "./models/Qwen3.5-9B-Q4_1.gguf"
-  # 或使用绝对路径:
-  # model_path: "D:/WorkSpace/AI_model/Qwen3.5-9B-Q4_1.gguf"
   
   # 模型参数
   n_ctx: 4096          # 上下文窗口大小
   n_batch: 512         # 批处理大小
-  n_gpu_layers: -1     # GPU 加速 (-1=全部加载到GPU)
+  n_gpu_layers: 0      # GPU 加速 (0=纯CPU, 无显卡保持0)
 ```
 
 或通过环境变量：

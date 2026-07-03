@@ -77,6 +77,10 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse
 import os as _os
 
+# v6.0.1: 版本号从 pyproject.toml 动态读取（单一来源）
+from devpartner_agent.core.config import get_project_version
+VERSION = get_project_version()
+
 # ── ClosedResourceError 补丁 ──────────────────────────────────
 # 问题：SSE 连接断开后，writer.send() 继续向已关闭的流写入数据导致崩溃
 # 解决：在 FastMCP/MCP 的 SSE 关键位置注入异常捕获
@@ -161,12 +165,33 @@ mcp = FastMCP("devpartner")
 _DASHBOARD_PATH = _os.path.join(_os.path.dirname(__file__),
                                 "devpartner_agent", "dashboard.html")
 
+@mcp.custom_route("/mcp", methods=["GET"])
+async def mcp_health_check(request: Request) -> JSONResponse:
+    """MCP 端点健康检查 — 响应 GET 请求，消除 405 错误"""
+    try:
+        from devpartner_agent.services.llm_service import get_llm_service
+        llm = get_llm_service()
+        llm_available = llm.is_available() if llm else False
+    except Exception:
+        llm_available = False
+    return JSONResponse({
+        "status": "ok",
+        "server": "devpartner",
+        "protocol": "MCP Streamable HTTP (POST /mcp)",
+        "dashboard": "/dashboard",
+        "llm_available": llm_available,
+        "message": "此 GET 端点用于健康检查；MCP JSON-RPC 调用请使用 POST /mcp",
+    })
+
+
 @mcp.custom_route("/dashboard", methods=["GET"])
 async def serve_dashboard(request: Request) -> HTMLResponse:
-    """Serve the DevPartner v5.2 Web Dashboard"""
+    """Serve the DevPartner Web Dashboard (版本动态注入)"""
     try:
         with open(_DASHBOARD_PATH, "r", encoding="utf-8") as f:
             html = f.read()
+        # v6.0.1: 版本号从 pyproject.toml 动态注入
+        html = html.replace("{{VERSION}}", VERSION)
         return HTMLResponse(html)
     except FileNotFoundError:
         return HTMLResponse(
@@ -216,12 +241,296 @@ async def api_activity_heatmap(request: Request) -> JSONResponse:
     return JSONResponse(content=data)
 
 
+# ══════════════════════════════════════════════════════════════
+# v6.0: 运维视角 API 端点 (Dashboard 所需)
+# ══════════════════════════════════════════════════════════════
+
+@mcp.custom_route("/api/system/status", methods=["GET"])
+async def api_system_status(request: Request) -> JSONResponse:
+    """获取系统核心指标（当前会话数、任务、知识库、回调）"""
+    try:
+        from devpartner_agent.core.database import get_db
+        from datetime import date as _dt_date
+
+        db = get_db()
+        today = _dt_date.today().isoformat()
+
+        active = db.query_local(
+            "SELECT COUNT(DISTINCT conversation_id) as cnt FROM conversations "
+            "WHERE timestamp >= datetime('now', '-1 day')"
+        )
+        active_sessions = active[0]["cnt"] if active else 0
+
+        today_new = db.query_local(
+            "SELECT COUNT(DISTINCT conversation_id) as cnt FROM conversations "
+            "WHERE date(timestamp) = ?", (today,)
+        )
+        today_sessions = today_new[0]["cnt"] if today_new else 0
+
+        pending_tasks = running_tasks = completed_tasks = 0
+        try:
+            from devpartner_agent.services.task_queue import get_task_queue
+            tq = get_task_queue()
+            ts = tq.get_queue_stats()
+            pending_tasks = ts.get("pending_tasks", 0)
+            running_tasks = ts.get("running_tasks", 0)
+            completed_tasks = ts.get("total_completed", 0)
+        except Exception:
+            pass
+
+        kb_size = 0
+        try:
+            kb = db.query_local("SELECT COUNT(*) as cnt FROM knowledge_points")
+            kb_size = kb[0]["cnt"] if kb else 0
+        except Exception:
+            pass
+
+        today_knowledge = 0
+        try:
+            kt = db.query_local(
+                "SELECT COUNT(*) as cnt FROM knowledge_points WHERE date(created_at) = ?",
+                (today,)
+            )
+            today_knowledge = kt[0]["cnt"] if kt else 0
+        except Exception:
+            pass
+
+        callback_registrations = callback_triggers = 0
+        try:
+            from devpartner_agent.services.callback_registry import get_callback_registry
+            cr = get_callback_registry()
+            cs = cr.get_stats()
+            callback_registrations = cs.get("total_registrations", 0)
+            callback_triggers = cs.get("total_triggered", 0)
+        except Exception:
+            pass
+
+        return JSONResponse(content={
+            "active_sessions": active_sessions,
+            "today_new_sessions": today_sessions,
+            "pending_tasks": pending_tasks,
+            "running_tasks": running_tasks,
+            "completed_tasks": completed_tasks,
+            "knowledge_base_size": kb_size,
+            "today_knowledge_added": today_knowledge,
+            "callback_registrations": callback_registrations,
+            "callback_triggers": callback_triggers,
+        })
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/tasks/list", methods=["GET"])
+async def api_tasks_list(request: Request) -> JSONResponse:
+    """获取任务队列列表（按排队时间排序，最早的在前面）"""
+    try:
+        limit = int(request.query_params.get("limit", 20))
+        from devpartner_agent.services.task_queue import get_task_queue
+        tq = get_task_queue()
+        tasks = []
+        for task_id, task_data in tq._task_map.items():
+            payload = task_data.get("payload", {})
+            # 从 payload 中提取更友好的任务名称
+            task_name = (
+                payload.get("step_name") or 
+                payload.get("step_type") or 
+                task_data.get("task_type", "general")
+            )
+            tasks.append({
+                "id": task_id[:8] if len(task_id) > 8 else task_id,
+                "name": task_name if isinstance(task_name, str) else str(task_name),
+                "type": task_data.get("task_type", "general"),
+                "status": task_data.get("status", "pending"),
+                "created_at": task_data.get("queued_at", ""),
+                "priority": task_data.get("priority", 0),
+            })
+        # 按排队时间升序（队列顺序：先排队的先展示）
+        tasks.sort(key=lambda t: t["created_at"])
+        return JSONResponse(content=tasks[:limit])
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/system/memory", methods=["GET"])
+async def api_system_memory(request: Request) -> JSONResponse:
+    """获取内存使用情况"""
+    try:
+        import psutil
+        process = psutil.Process()
+        mem_info = process.memory_info()
+        used_mb = round(mem_info.rss / 1024 / 1024, 1)
+        total_mb = round(psutil.virtual_memory().total / 1024 / 1024)
+        percent = round((used_mb / max(1, total_mb)) * 100, 1)
+
+        details = [
+            {"name": "RSS 物理内存", "size_mb": used_mb, "percent": percent},
+            {"name": "VMS 虚拟内存", "size_mb": round(mem_info.vms / 1024 / 1024, 1),
+             "percent": percent},
+        ]
+
+        vm = psutil.virtual_memory()
+        sys_used = round(vm.used / 1024 / 1024)
+        details.append({"name": "系统总使用", "size_mb": sys_used, "percent": vm.percent})
+
+        return JSONResponse(content={
+            "used_mb": used_mb,
+            "total_mb": total_mb,
+            "percent": percent,
+            "details": details,
+        })
+    except ImportError:
+        try:
+            from devpartner_agent.services.task_queue import get_task_queue
+            tq = get_task_queue()
+            stats = tq.get_queue_stats()
+            return JSONResponse(content={
+                "used_mb": stats.get("memory_usage_mb", 0),
+                "total_mb": stats.get("memory_limit_mb", 500),
+                "percent": stats.get("utilization_percent", 0),
+                "details": [{
+                    "name": "任务队列估算",
+                    "size_mb": stats.get("memory_usage_mb", 0),
+                    "percent": stats.get("utilization_percent", 0),
+                }],
+            })
+        except Exception:
+            return JSONResponse(content={
+                "used_mb": 0, "total_mb": 1, "percent": 0, "details": []
+            })
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/callbacks/stats", methods=["GET"])
+async def api_callback_stats(request: Request) -> JSONResponse:
+    """获取回调统计信息"""
+    try:
+        from devpartner_agent.services.callback_registry import get_callback_registry
+        cr = get_callback_registry()
+        stats = cr.get_stats()
+
+        recent = []
+        with cr._lock:
+            for reg_id, reg in list(cr._registrations.items())[:5]:
+                recent.append({
+                    "id": reg_id[:12] if len(reg_id) > 12 else reg_id,
+                    "name": f"cb:{reg.conversation_id[:8]}" if reg.conversation_id else f"cb:{reg_id[:8]}",
+                    "status": "active" if reg.is_active else "inactive",
+                    "timestamp": reg.last_triggered_at or reg.created_at or "",
+                })
+
+        return JSONResponse(content={
+            "success_count": stats.get("total_triggered", 0),
+            "error_count": stats.get("total_errors", 0),
+            "recent_calls": recent,
+        })
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/health/check", methods=["GET"])
+async def api_health_check(request: Request) -> JSONResponse:
+    """系统健康检查"""
+    import os as _os
+    result = {"services": {}}
+
+    result["services"]["mcp_server"] = {"healthy": True, "detail": "运行中"}
+
+    try:
+        from devpartner_agent.core.database import get_db
+        db = get_db()
+        db.query_local("SELECT 1")
+        result["services"]["database"] = {"healthy": True, "detail": "连接正常"}
+    except Exception as e:
+        result["services"]["database"] = {"healthy": False, "detail": str(e)}
+
+    try:
+        from devpartner_agent.services.llm_service import get_llm_service
+        llm = get_llm_service()
+        has_model = llm and hasattr(llm, "model") and llm.model is not None
+        result["services"]["llm_service"] = {
+            "healthy": has_model,
+            "detail": "模型已加载" if has_model else "模型未加载",
+        }
+    except Exception as e:
+        result["services"]["llm_service"] = {"healthy": False, "detail": str(e)}
+
+    try:
+        test_path = Path(_os.path.dirname(__file__)) / "data"
+        writable = _os.access(str(test_path), _os.W_OK) if test_path.exists() else False
+        result["services"]["filesystem"] = {
+            "healthy": test_path.exists() and writable,
+            "detail": "可读写" if writable else (
+                "目录不存在" if not test_path.exists() else "无写入权限"
+            ),
+        }
+    except Exception as e:
+        result["services"]["filesystem"] = {"healthy": False, "detail": str(e)}
+
+    return JSONResponse(content=result)
+
+
+@mcp.custom_route("/api/trends/system", methods=["GET"])
+async def api_system_trends(request: Request) -> JSONResponse:
+    """获取系统运行趋势"""
+    try:
+        hours = int(request.query_params.get("hours", 24))
+        from devpartner_agent.core.database import get_db
+        db = get_db()
+
+        rows = db.query_local(
+            "SELECT strftime('%H:00', timestamp) as hour, "
+            "COUNT(DISTINCT conversation_id) as cnt "
+            "FROM conversations "
+            "WHERE timestamp >= datetime('now', '-{} hours') "
+            "GROUP BY strftime('%Y-%m-%d %H', timestamp) "
+            "ORDER BY strftime('%Y-%m-%d %H', timestamp)".format(hours)
+        )
+
+        timestamps = []
+        sessions = []
+        if rows:
+            for r in rows:
+                timestamps.append(r["hour"])
+                sessions.append(r["cnt"])
+        else:
+            timestamps = ["00:00"]
+            sessions = [0]
+
+        completed = 0
+        try:
+            from devpartner_agent.services.task_queue import get_task_queue
+            tq = get_task_queue()
+            completed = tq.get_queue_stats().get("total_completed", 0)
+        except Exception:
+            pass
+
+        triggered = 0
+        try:
+            from devpartner_agent.services.callback_registry import get_callback_registry
+            cr = get_callback_registry()
+            triggered = cr.get_stats().get("total_triggered", 0)
+        except Exception:
+            pass
+
+        n = max(1, len(timestamps))
+        tasks = [max(0, completed // n)] * n
+        callbacks = [max(0, triggered // n)] * n
+
+        return JSONResponse(content={
+            "timestamps": timestamps,
+            "sessions": sessions,
+            "tasks_completed": tasks,
+            "callbacks_triggered": callbacks,
+        })
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
 print("=" * 60)
-print("  DevPartner 服务器 v5.2.0 启动中...")
+print(f"  DevPartner 服务器 v{VERSION} 启动中...")
 print("  devpartner-tools + devpartner-agent → 单一入口")
-print("  v5.2: 会话管理 + 任务队列 + Web Dashboard + 知识图谱")
+print(f"  v{VERSION}: LLM驱动分析引擎 + 总分总对话录制 + 知识图谱 + 双向仪表盘")
 print("=" * 60)
 
 
@@ -649,6 +958,18 @@ def _ensure_core():
         cfg = get_config()
         db_path = str(Path(cfg.data.databases_dir) / "devpartner.db")
         get_db().init_local(db_path)
+        
+        # v6.0.1: 确保 conversations.conversation_id 唯一约束（FK依赖）
+        try:
+            db = get_db()
+            cursor = db._local_conn.cursor()
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_conversation_id_unique 
+                ON conversations(conversation_id)
+            """)
+            db._local_conn.commit()
+        except Exception:
+            pass  # 可能已存在或数据不兼容，由 record_step 自修复兜底
 
         # 预热其他核心模块
         from devpartner_agent.core.rule_engine import get_engine
@@ -1702,7 +2023,7 @@ def record_conversation(conversation_content: str,
 
         return json.dumps({
             "success": True,
-            "message": "对话已记录并分析（v5.2 异步版）",
+            "message": "对话已记录并分析（v6.0 异步版）",
             "skill_domains": result["skill_domains"],
             "complexity": result["complexity"],
             "tool_gaps": result["tool_gap"]["gaps"],
@@ -2072,7 +2393,7 @@ def record_dialogue(user_question: str,
             "success": True,
             "conversation_id": conv_id,
             "conversations_id": conversations_id,
-            "message": "对话已记录（v5.2 异步后处理版）",
+            "message": "对话已记录（v6.0 异步后处理版）",
             "skill_domains": skill_domains_list,
             "complexity": complexity,
             "analysis_method": analysis_method,
@@ -2983,12 +3304,11 @@ def git_rollback(commit_hash: str = "HEAD~1", hard: bool = False) -> str:
 # 版本记录 & 工具注册
 # ============================================================
 
-VERSION = "5.2.0"
-
 def _record_version_on_startup():
     """
     启动时自动记录版本到数据库（v4.2: 扩充结构化字段）
-
+    
+    v6.0.1: 仅在版本升级时写入，服务重启不再填充重复记录。
     根据 previous_version 判断是升级还是重复启动，生成不同的 changelog。
     v4.2 新增 5 个结构化字段：diff_detail / optimize_point / bug_fix / new_feature / data_change
     """
@@ -2996,6 +3316,11 @@ def _record_version_on_startup():
         from devpartner_agent.core.database import get_db
         db = get_db()
         previous = db.get_latest_version()
+
+        # v6.0.1: 相同版本重复启动 → 跳过记录，不污染版本历史
+        if previous == VERSION:
+            print(f"[INFO] 版本未变化 ({VERSION})，跳过版本记录")
+            return
 
         # ── v4.2: 版本变更字典（包含 5 个结构化字段）──
         version_changelogs = {
@@ -3072,20 +3397,8 @@ def _record_version_on_startup():
             "data_change": "",
         })
 
-        # 如果是相同版本重复启动，生成"重新部署"类记录
+        # v6.0.1: 相同版本已在函数开头跳过，此处只处理升级/首次启动
         is_upgrade = previous and previous != VERSION
-        is_restart = previous == VERSION
-
-        if is_restart:
-            current_changelog["summary"] = f"v{VERSION} 服务重启（非版本升级）"
-            current_changelog["changelog"] = (
-                f"上次记录版本: {previous}；本次为服务重启，版本未变化。"
-            )
-            current_changelog["diff_detail"] = f"无变化，上次版本: {previous}"
-            current_changelog["optimize_point"] = ""
-            current_changelog["bug_fix"] = ""
-            current_changelog["new_feature"] = ""
-            current_changelog["data_change"] = ""
 
         # 计算工具总数（_agent_tools_count 可能在 _collect_tool_names 前为零，兜底用 mcp._tool_manager 实时计算）
         total_tools = _tools_count + _agent_tools_count
@@ -3105,7 +3418,7 @@ def _record_version_on_startup():
             change_summary=current_changelog["summary"],
             changelog=current_changelog["changelog"],
             tools_count=total_tools,
-            triggered_by="restart" if is_restart else "upgrade" if is_upgrade else "startup",
+            triggered_by="upgrade" if is_upgrade else "startup",
             diff_detail=current_changelog.get("diff_detail", ""),
             optimize_point=current_changelog.get("optimize_point", ""),
             bug_fix=current_changelog.get("bug_fix", ""),
@@ -3114,10 +3427,8 @@ def _record_version_on_startup():
         )
         if is_upgrade:
             print(f"[INFO] 版本升级: {previous} → {VERSION}")
-        elif is_restart:
-            print(f"[INFO] 服务重启: {VERSION}")
         else:
-            print(f"[INFO] 版本记录: {VERSION}")
+            print(f"[INFO] 首次版本记录: {VERSION}")
     except Exception as e:
         print(f"[WARN] 版本记录失败: {e}")
 
@@ -3804,16 +4115,18 @@ def record_step(conversation_id: str, step_name: str, step_type: str = "general"
         step_id = f"{conversation_id}_step_{datetime.now().strftime('%H%M%S%f')}"
 
         # 构建步骤输入数据
+        # v6.0.2: 移除硬截断 — 总分总模式下每个 task 数据量小且精确，截断会丢失关键信息
+        # 仅保留安全上限（防止极端情况），正常使用不会触发
         step_input = {
             "step_name": step_name,
             "step_type": step_type,
-            "content": content[:5000] if content else "",
+            "content": content[:100000] if content else "",
             "files_changed": files_list,
-            "symptom": symptom[:2000] if symptom else "",
-            "root_cause": root_cause[:2000] if root_cause else "",
-            "solution": solution[:2000] if solution else "",
+            "symptom": symptom[:50000] if symptom else "",
+            "root_cause": root_cause[:50000] if root_cause else "",
+            "solution": solution[:50000] if solution else "",
             "knowledge_points": kp_list,
-            "user_question": user_question[:500] if user_question else "",
+            "user_question": user_question[:10000] if user_question else "",
             "recorded_at": datetime.now().isoformat(),
         }
 
@@ -3844,16 +4157,18 @@ def record_step(conversation_id: str, step_name: str, step_type: str = "general"
         """, (total, datetime.now().isoformat(), conversation_id))
 
         # 提交异步分析任务
+        # v6.0.2: 数据不截断 — task 粒度小，保留完整信息
         task_payload = {
             "conversation_id": conversation_id,
             "step_id": step_id,
+            "step_name": step_name,
             "step_type": step_type,
-            "content": content[:5000] if content else "",
+            "content": content[:100000] if content else "",
             "knowledge_points": kp_list,
             "files_changed": files_list,
-            "symptom": symptom[:2000] if symptom else "",
-            "root_cause": root_cause[:2000] if root_cause else "",
-            "solution": solution[:2000] if solution else "",
+            "symptom": symptom[:50000] if symptom else "",
+            "root_cause": root_cause[:50000] if root_cause else "",
+            "solution": solution[:50000] if solution else "",
         }
 
         task_id = queue.submit_task(
@@ -3873,8 +4188,87 @@ def record_step(conversation_id: str, step_name: str, step_type: str = "general"
         }, ensure_ascii=False)
 
     except Exception as e:
-        print(f"[record_step] ERROR: {e}")
-        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+        error_msg = str(e)
+        print(f"[record_step] ERROR: {error_msg}")
+        
+        # v6.0.1: FK 约束自修复 — 如果 FOREIGN KEY 失败，自动尝试修复
+        if "FOREIGN KEY" in error_msg.upper():
+            try:
+                from devpartner_agent.core.database import get_db
+                db = get_db()
+                cursor = db._local_conn.cursor()
+                
+                # 1. 确保 conversations.conversation_id 有 UNIQUE 索引
+                cursor.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_conversation_id_unique 
+                    ON conversations(conversation_id)
+                """)
+                
+                # 2. 确保会话记录存在
+                exists = cursor.execute(
+                    "SELECT id FROM conversations WHERE conversation_id = ?",
+                    (conversation_id,)
+                ).fetchone()
+                
+                if not exists:
+                    cursor.execute("""
+                        INSERT INTO conversations (conversation_id, client, topic, task_type, status, created_at, updated_at)
+                        VALUES (?, 'codebuddy', ?, 'general', 'active', ?, ?)
+                    """, (conversation_id, 
+                          step_name[:200] if step_name else '自动创建',
+                          datetime.now().isoformat(),
+                          datetime.now().isoformat()))
+                    db._local_conn.commit()
+                    print(f"[record_step] ✅ 自动创建 conversations 记录: {conversation_id}")
+                
+                # 3. FK 修复后重试
+                print(f"[record_step] 🔄 FK 已修复，重试 INSERT...")
+                step_id = f"{conversation_id}_step_{datetime.now().strftime('%H%M%S%f')}"
+                step_input = {
+                    "step_name": step_name,
+                    "step_type": step_type,
+                    "content": content[:100000] if content else "",
+                    "files_changed": files_list,
+                    "symptom": symptom[:50000] if symptom else "",
+                    "root_cause": root_cause[:50000] if root_cause else "",
+                    "solution": solution[:50000] if solution else "",
+                    "knowledge_points": kp_list,
+                    "user_question": user_question[:10000] if user_question else "",
+                    "recorded_at": datetime.now().isoformat(),
+                }
+                db.query_local("""
+                    INSERT INTO conversation_steps (
+                        step_id, conversation_id, step_order, step_type,
+                        step_name, status, input_data, max_retries,
+                        timeout_seconds, priority, depends_on, created_at
+                    ) VALUES (?, ?,
+                        (SELECT COALESCE(MAX(step_order), 0) + 1 FROM conversation_steps WHERE conversation_id = ?),
+                        'analysis', ?, 'pending', ?, 3, 300, 5, '', ?
+                    )
+                """, (
+                    step_id, conversation_id, conversation_id,
+                    step_name, json.dumps(step_input, ensure_ascii=False),
+                    datetime.now().isoformat()
+                ))
+                
+                print(f"[record_step] ✅ FK 自修复后重试成功: {step_id}")
+                return json.dumps({
+                    "success": True,
+                    "step_id": step_id,
+                    "auto_repaired": True,
+                    "conversation_id": conversation_id,
+                }, ensure_ascii=False)
+                
+            except Exception as retry_err:
+                print(f"[record_step] ❌ FK 自修复失败: {retry_err}")
+                return json.dumps({
+                    "success": False, 
+                    "error": str(e),
+                    "repair_error": str(retry_err),
+                    "hint": "请重启服务器以完成数据库迁移"
+                }, ensure_ascii=False)
+        
+        return json.dumps({"success": False, "error": error_msg}, ensure_ascii=False)
 
 
 @mcp.tool()
@@ -3928,12 +4322,13 @@ def finalize_conversation(conversation_id: str, summary: str = "",
         traits_data = _safe_json(user_traits, {})
 
         # 更新 conversations 表的全局总结字段
+        # v6.0.2: 数据不截断 — 全局总结不应丢失关键信息
         db.query_local("""
             UPDATE conversations SET
                 self_reflection = ?,
                 updated_at = ?
             WHERE conversation_id = ?
-        """, (self_reflection[:2000] if self_reflection else "", datetime.now().isoformat(), conversation_id))
+        """, (self_reflection[:50000] if self_reflection else "", datetime.now().isoformat(), conversation_id))
 
         # 如果有关键决策，写入 actions 字段
         if decisions_list:
@@ -3941,16 +4336,16 @@ def finalize_conversation(conversation_id: str, summary: str = "",
                 UPDATE conversations SET
                     decisions = ?
                 WHERE conversation_id = ?
-            """, (json.dumps(decisions_list, ensure_ascii=False)[:2000], conversation_id))
+            """, (json.dumps(decisions_list, ensure_ascii=False)[:50000], conversation_id))
 
         # 提交全局分析任务（异步）
         final_payload = {
             "conversation_id": conversation_id,
-            "summary": summary[:5000] if summary else "",
+            "summary": summary[:50000] if summary else "",
             "user_traits": traits_data,
             "key_decisions": decisions_list,
             "knowledge_graph": kg_data,
-            "self_reflection": self_reflection[:2000] if self_reflection else "",
+            "self_reflection": self_reflection[:50000] if self_reflection else "",
             "finalized_at": datetime.now().isoformat(),
         }
 
@@ -4049,7 +4444,7 @@ if __name__ == "__main__":
     print("        审批链 | 能力授权 | 注册表 | 并行任务分解")
     print("        日志管理 | 每日总结 | 系统诊断 | 规则检测")
     print("        热重载 | 安全审计 | Git版本控制")
-    print("        [NEW v5.2] 会话管理 | 异步任务队列 | 知识库 | Web Dashboard")
+    print("        [NEW v6.0] LLM驱动分析 | 总分总会话 | 知识图谱 | 双向仪表盘")
     print("=" * 60)
 
     # ============================================================

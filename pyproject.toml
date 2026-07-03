@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "devpartner"
-version = "5.2.0"
+version = "6.0.0"
 description = "DevPartner MCP 服务器 - 会话管理 + 异步任务 + 知识图谱 + Web Dashboard"
 requires-python = ">=3.10"
 dependencies = [

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DevPartner v6.0 · 智能仪表盘</title>
+<title>DevPartner v{{VERSION}} · 智能仪表盘</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
   :root {
@@ -550,7 +550,7 @@
      Header - 导航栏
      ============================================================ -->
 <div class="header">
-  <h1>⚡ DevPartner v6.0</h1>
+  <h1>⚡ DevPartner v{{VERSION}}</h1>
   <div class="header-right">
     <div class="tab-buttons" id="view-tabs">
       <button class="tab-btn active" data-view="growth" onclick="switchView('growth')">
@@ -560,7 +560,7 @@
         ⚙️ 运维视角
       </button>
     </div>
-    <span class="version-badge">v6.0</span>
+    <span class="version-badge">v{{VERSION}}</span>
     <span class="refresh-indicator" id="refresh-status">● 自动刷新中</span>
   </div>
 </div>
@@ -604,12 +604,13 @@
         <div class="metric-trend" id="version-trend" style="color:var(--text-muted);">--</div>
       </div>
 
-      <!-- 系统指标：自迭代采纳率 -->
+      <!-- 系统指标：采纳率 + 迭代次数 -->
       <div class="card metric-card" style="border-left-color: var(--green);">
         <div class="metric-icon">⚡</div>
         <div class="metric-value" id="iteration-count">--</div>
-        <div class="metric-label">自迭代采纳率</div>
+        <div class="metric-label">系统迭代次数</div>
         <div class="circle-progress" id="adoption-circle" style="--pct:0%" data-pct="--%"></div>
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">采纳率: <span id="adoption-text">--%</span></div>
       </div>
 
       <!-- 用户指标：学习效率 -->
@@ -664,12 +665,22 @@
             <div class="circle-progress" id="adoption-rate-circle" style="--pct:0%" data-pct="--%"></div>
           </div>
 
-          <!-- 引擎调用分布（LLM vs 规则引擎）-->
+          <!-- LLM 分析引擎统计（v6.0: 已全面转 LLM）-->
           <div class="evo-item full-width">
-            <span class="evo-label">引擎调用分布</span>
-            <div class="stacked-bar">
-              <div class="bar-segment llm" id="llm-ratio-bar" style="width:50%">LLM 50%</div>
-              <div class="bar-segment rules" id="rules-ratio-bar" style="width:50%">规则 50%</div>
+            <span class="evo-label">🤖 LLM 分析引擎统计（近30天）</span>
+            <div style="display:flex;justify-content:space-around;margin-top:8px;">
+              <div style="text-align:center;">
+                <div style="font-size:1.3rem;font-weight:700;color:var(--accent);" id="llm-step-count">--</div>
+                <div style="font-size:0.75rem;color:var(--text-muted);">Step分析</div>
+              </div>
+              <div style="text-align:center;">
+                <div style="font-size:1.3rem;font-weight:700;color:var(--purple);" id="llm-conv-count">--</div>
+                <div style="font-size:0.75rem;color:var(--text-muted);">对话总结</div>
+              </div>
+              <div style="text-align:center;">
+                <div style="font-size:1.3rem;font-weight:700;color:var(--green);" id="llm-success-rate">--%</div>
+                <div style="font-size:0.75rem;color:var(--text-muted);">成功率</div>
+              </div>
             </div>
           </div>
 
@@ -786,6 +797,7 @@
           <thead>
             <tr>
               <th>ID</th>
+              <th>任务名称</th>
               <th>类型</th>
               <th>状态</th>
               <th>创建时间</th>
@@ -794,7 +806,7 @@
           </thead>
           <tbody id="task-list-body">
             <tr>
-              <td colspan="5" style="text-align:center;color:var(--text-muted);">加载中...</td>
+              <td colspan="6" style="text-align:center;color:var(--text-muted);">加载中...</td>
             </tr>
           </tbody>
         </table>
@@ -973,15 +985,19 @@ function updateGrowthMetrics(userGrowth, systemEvo) {
   document.getElementById('mastery-bar').style.width = `${mastery}%`;
 
   // 系统指标
-  document.getElementById('system-version').textContent = `v${systemEvo.current_version || '?.?.?'}`;
+  // v6.0.1: 从 recent_changes 推导当前版本，兼容后端字段名
+  const latestChange = systemEvo.recent_changes?.[0];
+  const currentVersion = systemEvo.current_version || latestChange?.version || '?.?.?';
+  document.getElementById('system-version').textContent = `v${currentVersion}`;
   document.getElementById('version-trend').textContent = `${systemEvo.total_iterations || 0} 次迭代`;
 
   const iterCount = systemEvo.total_iterations || 0;
   document.getElementById('iteration-count').textContent = iterCount;
   
-  const adoptionRate = systemEvo.optimization_adoption_rate || 0;
+  const adoptionRate = systemEvo.suggestion_adoption_rate || systemEvo.optimization_adoption_rate || 0;
   document.getElementById('adoption-circle').style.setProperty('--pct', `${adoptionRate}%`);
   document.getElementById('adoption-circle').dataset.pct = `${adoptionRate}%`;
+  document.getElementById('adoption-text').textContent = `${adoptionRate}%`;
 
   // 学习效率
   const efficiency = userGrowth.learning_efficiency || 0;
@@ -1054,38 +1070,46 @@ function updateRadarChart(radarData) {
 function updateEvolutionPanel(systemEvo) {
   if (!systemEvo) return;
 
+  // v6.0.1: 兼容后端字段名映射
   // 迭代次数
   document.getElementById('total-iterations').textContent = systemEvo.total_iterations || 0;
+  // 周迭代率（30天内平均）
+  const iterPerWeek = systemEvo.total_iterations ? 
+    (systemEvo.total_iterations / Math.max(1, (systemEvo.days_since_first_iteration || 30) / 7)).toFixed(1) :
+    '0.0';
   document.getElementById('iteration-rate').textContent = systemEvo.iteration_rate_per_week ? 
-    `↑ ${systemEvo.iteration_rate_per_week} 次/周` : '--';
+    `↑ ${systemEvo.iteration_rate_per_week} 次/周` : `↑ ${iterPerWeek} 次/周`;
 
   // 采纳率
-  const adoptionRate = systemEvo.optimization_adoption_rate || 0;
+  const adoptionRate = systemEvo.suggestion_adoption_rate || systemEvo.optimization_adoption_rate || 0;
   document.getElementById('adoption-rate-circle').style.setProperty('--pct', `${adoptionRate}%`);
   document.getElementById('adoption-rate-circle').dataset.pct = `${adoptionRate}%`;
 
-  // LLM vs 规则引擎占比
-  const llmRatio = systemEvo.llm_call_ratio || 50;
-  const rulesRatio = 100 - llmRatio;
-  document.getElementById('llm-ratio-bar').style.width = `${llmRatio}%`;
-  document.getElementById('llm-ratio-bar').textContent = `LLM ${llmRatio}%`;
-  document.getElementById('rules-ratio-bar').style.width = `${rulesRatio}%`;
-  document.getElementById('rules-ratio-bar').textContent = `规则 ${rulesRatio}%`;
+  // v6.0: LLM 分析引擎统计（不再展示虚假的规则引擎占比）
+  const llmStats = systemEvo.llm_analysis_stats || {};
+  document.getElementById('llm-step-count').textContent = llmStats.step_analyses ?? '--';
+  document.getElementById('llm-conv-count').textContent = llmStats.conv_analyses ?? '--';
+  document.getElementById('llm-success-rate').textContent = llmStats.success_rate ?? '--';
 
   // 知识库增长
-  document.getElementById('kb-growth-rate').textContent = `+${systemEvo.knowledge_base_growth_rate || 0}%`;
+  const kbGrowth = systemEvo.knowledge_growth_rate || systemEvo.knowledge_base_growth_rate || 0;
+  document.getElementById('kb-growth-rate').textContent = `+${kbGrowth}%`;
 
   // 最近变更
-  document.getElementById('latest-change').innerHTML = systemEvo.latest_change ?
-    `<strong>${systemEvo.latest_change.title || '未知变更'}</strong><br>` +
-    `<span style="color:var(--text-muted);font-size:0.8rem;">${systemEvo.latest_change.time_ago || ''}</span>` :
+  const latestChangeObj = systemEvo.latest_change || systemEvo.recent_changes?.[0];
+  document.getElementById('latest-change').innerHTML = latestChangeObj ?
+    `<strong>${latestChangeObj.title || latestChangeObj.description || '未知变更'}</strong><br>` +
+    `<span style="color:var(--text-muted);font-size:0.8rem;">${latestChangeObj.time_ago || latestChangeObj.timestamp || ''}</span>` :
     '<span style="color:var(--text-muted);">暂无记录</span>';
 }
 
 function updateTimeline(timelineData) {
   const container = document.getElementById('timeline-container');
   
-  if (!timelineData || timelineData.length === 0) {
+  // v6.0.1: 兼容后端返回 {events: [...], ...} 对象格式
+  const events = Array.isArray(timelineData) ? timelineData : (timelineData?.events || []);
+  
+  if (!events || events.length === 0) {
     container.innerHTML = `
       <div style="text-align:center;color:var(--text-muted);padding:40px 0;">
         暂无成长事件
@@ -1093,7 +1117,7 @@ function updateTimeline(timelineData) {
     return;
   }
 
-  container.innerHTML = timelineData.map(event => `
+  container.innerHTML = events.map(event => `
     <div class="timeline-item ${event.type}">
       <div class="timeline-icon">${event.icon}</div>
       <div class="timeline-content">
@@ -1187,19 +1211,43 @@ function updateTaskQueue(taskData) {
   const tbody = document.getElementById('task-list-body');
   
   if (!taskData || taskData.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">暂无任务</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">暂无任务</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = taskData.map(task => `
+  tbody.innerHTML = taskData.map(task => {
+    // 格式化创建时间
+    let timeDisplay = '--';
+    if (task.created_at) {
+      try {
+        const d = new Date(task.created_at);
+        if (!isNaN(d.getTime())) {
+          timeDisplay = d.toLocaleString('zh-CN', { 
+            month:'2-digit', day:'2-digit', 
+            hour:'2-digit', minute:'2-digit', second:'2-digit' 
+          });
+        }
+      } catch(e) { timeDisplay = task.created_at; }
+    }
+
+    // 任务类型中文映射
+    const typeLabels = {
+      'step_analysis': '📝 步骤分析',
+      'conversation_finalize': '🏁 对话收尾',
+      'general': '🔧 通用任务',
+    };
+    const typeLabel = typeLabels[task.type] || task.type;
+
+    return `
     <tr>
-      <td>${task.id}</td>
-      <td>${task.type || '--'}</td>
+      <td title="${task.id}">${task.id}</td>
+      <td>${task.name || '--'}</td>
+      <td>${typeLabel}</td>
       <td><span class="status-badge status-${task.status || 'pending'}">${task.status || 'pending'}</span></td>
-      <td>${task.created_at || '--'}</td>
+      <td>${timeDisplay}</td>
       <td>${task.priority || '--'}</td>
-    </tr>
-  `).join('');
+    </tr>`;
+  }).join('');
 }
 
 function updateMemoryUsage(memoryData) {

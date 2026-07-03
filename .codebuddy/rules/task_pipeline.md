@@ -1,4 +1,4 @@
-# CodeBuddy 任务管道规范 v5.0
+# CodeBuddy 任务管道规范 v6.0
 
 ## 📋 概述
 本规则定义了 CodeBuddy 客户端与 DevPartner 系统交互时的**任务执行流程**和**数据落地规范**。
@@ -9,6 +9,52 @@
 - ✅ **异步优先**：耗时操作（LLM推理、数据分析）必须异步执行
 - ✅ **有序落地**：知识点按步骤顺序写入知识库
 - ✅ **资源友好**：控制内存占用，避免阻塞客户端交互
+
+---
+
+## ⚡ v6.0 强制约束：总分总 N×Task 模式
+
+### 🚨 硬性要求（AI 每次对话必须遵守）
+
+```
+1. 分析用户请求 → 生成 TODO 列表（todo_write）
+2. 调用 create_conversation() → 获取 conversation_id
+3. 每完成一个 TODO 项 → 立即调用 record_step()（一个子任务 = 一个 step）
+4. 所有 TODO 完成后 → 调用 finalize_conversation()
+```
+
+### ❌ 严禁行为
+- ❌ 整个对话只调用一次 record_dialogue() 替代 N 次 record_step()
+- ❌ 等待所有任务完成后再一次性提交
+- ❌ 跳过 record_step 直接 finalize
+- ❌ 数据截断导致关键信息丢失（v6.0.2: 截断上限提升至 100K/50K 字符）
+
+### ✅ 正确示例
+```
+对话开始:
+  create_conversation(client="codebuddy", topic="修复3个Bug", task_type="debug")
+      → conv_abc123
+
+子任务1完成 (修复 LLM 导入路径):
+  record_step(conversation_id="conv_abc123", step_name="修复LLM导入路径",
+              step_type="debug", content="...", files_changed='["llm_service.py"]')
+
+子任务2完成 (修复记录截断):
+  record_step(conversation_id="conv_abc123", step_name="移除数据截断限制",
+              step_type="code_change", ...)
+
+子任务3完成 (更新录制规则):
+  record_step(conversation_id="conv_abc123", step_name="强制N×Task模式",
+              step_type="config", ...)
+
+对话结束:
+  finalize_conversation(conversation_id="conv_abc123", summary="...")
+```
+
+### 📊 预期效果
+- 1 个对话 → 3-7 个 steps（不是 1 个）
+- 每个 step 数据量小（<5000 字符），精确且不截断
+- 知识图谱按 step 维度构建，更精细
 
 ---
 

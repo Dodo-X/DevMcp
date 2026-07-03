@@ -1,29 +1,63 @@
 # DevPartner 项目记忆
 
-## 项目结构（2026-06-28 重构后）
-- **server.py** — 唯一启动入口，同时注册 tools + agent 共 79+ 个 MCP 工具
-- **devpartner_tools/** — 纯工具层（无状态），6 大类 25 个工具
-- **devpartner_agent/** — 智能管家层（有状态），48+ 个工具
-- 端口限制：仅 7860 和 8080
+## 当前版本：v6.0.0（2026-07-03）
+
+## 启动方式（v6.0 关键变更）
+- **正确启动**：`python server.py 7860`（纯端口号）
+- **废弃写法**：`python server.py sse 7860`（仍兼容，但标记废弃会提示）
+- **无参数**：默认启动在 7860 端口
+
+## 项目结构（v6.0）
+- **server.py** (4433行) — 唯一启动入口，FastMCP + Streamable HTTP
+- **devpartner_tools/** — 纯工具层（无状态），6 个模块 21 个工具（含 growth_analytics）
+- **devpartner_agent/** — 智能管家层（有状态），core(11py)+services(15py)+skills(3py)
+- 端口：**仅 7860**（8080 已不用，Dashboard 也在 7860 上的 /dashboard）
+
+## 架构层次
+```
+server.py (FastMCP, /mcp 端点)
+├── 工具层：21个（filesystem, git, web, system, growth_analytics）
+└── 智能层：67+个（core引擎 + 15个service + 3个skill）
+    ├── core/       LLM统一分析器 + 数据库 + 配置
+    ├── services/   对话分析、任务队列、知识图谱、用户画像、回调注册...
+    └── skills/     每日总结、自我迭代
+```
+
+## v6.0 新能力
+- **LLM 驱动架构**：LLMUnifiedAnalyzer 替代 3646 行硬编码
+- **双向成长仪表盘**：/dashboard（Chart.js），成长视角 + 运维视角
+- **总分总对话录制**：create_conversation → record_step → finalize_conversation
+- **知识图谱**：自动构建节点边，BFS 路径发现，Jaccard 相似度
+- **ClosedResourceError 补丁**：3 层防护（handle_post_message / connect_sse / MemoryObjectSendStream）
+
+## Docker 双份策略
+- 根目录 Dockerfile → ModelScope 云端自动构建用
+- deploy/Dockerfile → 备用（内容几乎相同）
+- docker-compose.yml 也在根目录
+
+## 待同步的文档（v6.0 更新遗漏）
+- README.md：端口 8082 → 7860，启动命令不完整
+- DEPLOYMENT_GUIDE.md：多处 `python server.py sse 7860` → `python server.py 7860`
+- pyproject.toml：version 5.2.0 → 6.0.0
+- PROJECT_STRUCTURE.md：Dashboard 端口 8082 → 7860
+- deploy/README.md：启动命令需更新
 
 ## 关键决策
 - 目录名从 `devpartner-tools`/`devpartner-agent` 改为 `devpartner_tools`/`devpartner_agent`（Python 包名不能含连字符）
 - 使用包导入替代 `sys.path.insert` hack，IDE 能正确识别
-- 修复了 `get_rule_engine` → `get_engine`、`get_dialogue_service` → `get_dialogue` 等函数名不一致问题
-- 每个子包有 `pyproject.toml`，项目根也有 `pyproject.toml`
 - **数据存储原则**：系统独立于客户端，所有数据写入 `data/` 目录，不使用 `.codebuddy/memory/`
 
 ## 技术栈
-- FastMCP 框架
+- FastMCP 框架（streamable-http transport）
 - SQLite（WAL 模式）
 - Python 3.10+
+- LLM：llama-cpp-python + Qwen3.5-9B-Q4_1.gguf (~5.7GB)
 
-## Transport 选择（2026-07-02 更新）
-- **使用 `streamable-http` transport**，非 `sse`
-- 默认端点路径为 `/mcp`，无需显式指定 path
-- Dashboard 前端直接 POST 到 `/mcp` 调用 JSON-RPC
-- streamable-http 同时支持 GET/POST/DELETE，兼容性更好，无 405 问题
-- SSE transport 已被废弃，相关补丁代码保留但不生效
+## Transport（v6.0 最终确认）
+- **使用 `streamable-http` transport**，`sse` 已废弃
+- MCP 端点：`/mcp`（POST JSON-RPC）
+- Dashboard：`/dashboard`
+- API 端点：`/api/growth/*` + `/api/system/*` 共 11 个
 
 ## self_iterate 自动触发机制（2026-07-01 v4.0.0）
 

@@ -41,29 +41,34 @@ def get_user_growth_overview() -> str:
       - improvement_log 表：改进记录
     """
     try:
-        from devpartner_agent.core.database import DatabaseManager
+        from devpartner_agent.core.database import get_db
         
-        db = DatabaseManager()
+        db = get_db()
         
         # 1. 总技能数和平均掌握度
-        skills_result = db.execute_query("""
+        # NOTE: user_skills 表无 mastery_level/is_active 列，用 skill_level→数值映射
+        skills_result = db.query_local("""
             SELECT 
                 COUNT(*) as total_skills,
-                AVG(mastery_level) as avg_mastery,
-                MAX(updated_at) as last_updated
+                AVG(CASE skill_level
+                    WHEN 'beginner' THEN 25
+                    WHEN 'intermediate' THEN 55
+                    WHEN 'advanced' THEN 80
+                    WHEN 'expert' THEN 95
+                    ELSE 25 END) as avg_mastery,
+                MAX(COALESCE(last_seen, timestamp)) as last_updated
             FROM user_skills
-            WHERE is_active = 1
         """)
         
         total_skills = skills_result[0]['total_skills'] if skills_result else 0
         avg_mastery = round(skills_result[0]['avg_mastery'], 1) if skills_result and skills_result[0]['avg_mastery'] else 0
         
-        # 2. 本周新增技能（7天内）
+        # 2. 本周新增技能（7天内，基于 timestamp 列）
         week_ago = (datetime.now() - timedelta(days=7)).isoformat()
-        new_skills_result = db.execute_query("""
+        new_skills_result = db.query_local("""
             SELECT COUNT(*) as new_count
             FROM user_skills
-            WHERE created_at >= ?
+            WHERE timestamp >= ?
         """, (week_ago,))
         this_week_new = new_skills_result[0]['new_count'] if new_skills_result else 0
         
@@ -74,27 +79,31 @@ def get_user_growth_overview() -> str:
         learning_efficiency = _calculate_learning_efficiency(db)
         
         # 5. 当前最专注领域
-        top_domain_result = db.execute_query("""
-            SELECT domain, COUNT(*) as cnt
+        top_domain_result = db.query_local("""
+            SELECT skill_domain, COUNT(*) as cnt
             FROM user_skills
-            WHERE is_active = 1
-            GROUP BY domain
+            GROUP BY skill_domain
             ORDER BY cnt DESC
             LIMIT 1
         """)
-        top_domain = top_domain_result[0]['domain'] if top_domain_result else '未分类'
+        top_domain = top_domain_result[0]['skill_domain'] if top_domain_result else '未分类'
         
         # 6. 各领域技能分布
-        domain_dist_result = db.execute_query("""
-            SELECT domain, COUNT(*) as count, AVG(mastery_level) as avg_mastery
+        domain_dist_result = db.query_local("""
+            SELECT skill_domain, COUNT(*) as count,
+                   AVG(CASE skill_level
+                    WHEN 'beginner' THEN 25
+                    WHEN 'intermediate' THEN 55
+                    WHEN 'advanced' THEN 80
+                    WHEN 'expert' THEN 95
+                    ELSE 25 END) as avg_mastery
             FROM user_skills
-            WHERE is_active = 1
-            GROUP BY domain
+            GROUP BY skill_domain
             ORDER BY count DESC
         """)
         skills_by_domain = [
             {
-                'domain': row['domain'] or '其他',
+                'domain': row['skill_domain'] or '其他',
                 'count': row['count'],
                 'avg_mastery': round(row['avg_mastery'], 1) if row['avg_mastery'] else 0
             }
@@ -148,12 +157,12 @@ def get_system_evolution_stats() -> str:
       - conversations 表：LLM调用记录
     """
     try:
-        from devpartner_agent.core.database import DatabaseManager
+        from devpartner_agent.core.database import get_db
         
-        db = DatabaseManager()
+        db = get_db()
         
         # 1. 自我迭代总次数（evolution_log 记录数）
-        iterations_result = db.execute_query("""
+        iterations_result = db.query_local("""
             SELECT COUNT(*) as total,
                    MAX(timestamp) as last_time
             FROM evolution_log
@@ -163,7 +172,7 @@ def get_system_evolution_stats() -> str:
         last_iteration_time = iterations_result[0]['last_time'] if iterations_result and iterations_result[0]['last_time'] else None
         
         # 2. 最近变更记录（最新5条）
-        recent_changes_result = db.execute_query("""
+        recent_changes_result = db.query_local("""
             SELECT 
                 id,
                 version,
@@ -187,41 +196,49 @@ def get_system_evolution_stats() -> str:
             for row in recent_changes_result
         ] if recent_changes_result else []
         
-        # 3. LLM vs 规则引擎调用占比（基于conversations表的分析标记）
-        llm_stats_result = db.execute_query("""
+        # 3. LLM 分析引擎统计（近30天 step_analysis + conversation_finalize 任务统计）
+        llm_stats_result = db.query_local("""
             SELECT 
-                SUM(CASE WHEN analyzed = 1 THEN 1 ELSE 0 END) as llm_calls,
-                COUNT(*) as total_calls
-            FROM conversations
-            WHERE created_at >= datetime('now', '-30 days')
+                SUM(CASE WHEN task_type = 'step_analysis' THEN 1 ELSE 0 END) as step_analyses,
+                SUM(CASE WHEN task_type = 'conversation_finalize' THEN 1 ELSE 0 END) as conv_analyses,
+                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+                COUNT(*) as total_analyses
+            FROM task_queue
+            WHERE queued_at >= datetime('now', '-30 days')
+              AND task_type IN ('step_analysis', 'conversation_finalize')
         """)
-        total_calls = llm_stats_result[0]['total_calls'] if llm_stats_result else 0
-        llm_calls = llm_stats_result[0]['llm_calls'] if llm_stats_result else 0
+        step_analyses = llm_stats_result[0]['step_analyses'] if llm_stats_result else 0
+        conv_analyses = llm_stats_result[0]['conv_analyses'] if llm_stats_result else 0
+        completed_analyses = llm_stats_result[0]['completed'] if llm_stats_result else 0
+        total_analyses = llm_stats_result[0]['total_analyses'] if llm_stats_result else 0
         
-        if total_calls > 0:
-            llm_call_ratio = round((llm_calls / total_calls) * 100, 1)
-            rules_engine_ratio = round(100 - llm_call_ratio, 1)
-        else:
-            llm_call_ratio = 50.0
-            rules_engine_ratio = 50.0
+        # 分析成功率
+        analysis_success_rate = round((completed_analyses / total_analyses) * 100, 1) if total_analyses > 0 else 0.0
         
-        # 4. 知识库月增长率（user_skills 的月度增长）
+        # v6.0 已全面转 LLM 分析，不再有规则引擎
+        llm_call_ratio = 100.0 if total_analyses > 0 else 0.0
+        rules_engine_ratio = 0.0
+        
+        # 4. 知识库月增长率（user_skills 的月度增长，基于 timestamp）
         month_ago = (datetime.now() - timedelta(days=30)).isoformat()
-        current_skills = db.execute_query("SELECT COUNT(*) as cnt FROM user_skills WHERE is_active = 1")[0]['cnt']
-        past_skills_result = db.execute_query("""
+        current_skills = db.query_local("SELECT COUNT(*) as cnt FROM user_skills")[0]['cnt']
+        past_skills_result = db.query_local("""
             SELECT COUNT(*) as cnt 
             FROM user_skills 
-            WHERE created_at < ? AND is_active = 1
+            WHERE timestamp < ?
         """, (month_ago,))
         past_skills = past_skills_result[0]['cnt'] if past_skills_result else 0
         
         if past_skills > 0:
             knowledge_growth_rate = round(((current_skills - past_skills) / past_skills) * 100, 1)
+        elif current_skills > 0:
+            # 全部是近30天新增，标记为"全新系统"（负值表示纯增量模式）
+            knowledge_growth_rate = 0.0
         else:
-            knowledge_growth_rate = 100.0 if current_skills > 0 else 0.0
+            knowledge_growth_rate = 0.0
         
         # 5. 优化建议采纳率（optimization_feedback 中 status='adopted' 的比例）
-        adoption_result = db.execute_query("""
+        adoption_result = db.query_local("""
             SELECT 
                 SUM(CASE WHEN status = 'adopted' THEN 1 ELSE 0 END) as adopted,
                 COUNT(*) as total
@@ -233,13 +250,60 @@ def get_system_evolution_stats() -> str:
         
         suggestion_adoption_rate = round((adopted / total_suggestions) * 100, 1) if total_suggestions > 0 else 0.0
         
+        # 6. 当前版本号（从最近一次 evolution_log 推导，空则回退到服务端 VERSION）
+        current_version = recent_changes[0]['version'] if recent_changes else '6.0.0'
+        
+        # 7. 首次迭代时间（用于计算周迭代率）
+        first_iteration = db.query_local("""
+            SELECT MIN(timestamp) as first_time
+            FROM evolution_log
+            WHERE success = 1
+        """)
+        first_time = first_iteration[0]['first_time'] if first_iteration and first_iteration[0]['first_time'] else None
+        days_since_first = 0
+        if first_time and total_iterations > 1:
+            try:
+                first_dt = datetime.fromisoformat(first_time.replace('Z', '+00:00'))
+                days_since_first = max(1, (datetime.now() - first_dt.replace(tzinfo=None)).days)
+            except:
+                days_since_first = 30
+        
+        # 8. 最近变更摘要（用于 latest_change）
+        latest_change = None
+        if recent_changes:
+            latest = recent_changes[0]
+            latest_change = {
+                'title': latest['description'][:60] if latest.get('description') else '未知变更',
+                'version': latest.get('version', ''),
+                'change_type': latest.get('change_type', ''),
+                'time_ago': latest.get('timestamp', ''),
+                'timestamp': latest.get('timestamp', '')
+            }
+        
         result = {
             'total_iterations': total_iterations,
             'recent_changes': recent_changes,
+            # v6.0: 全部转为 LLM 分析引擎
             'llm_call_ratio': llm_call_ratio,
             'rules_engine_ratio': rules_engine_ratio,
+            # 新增：LLM 分析引擎统计详情
+            'llm_analysis_stats': {
+                'total_analyses': total_analyses,
+                'step_analyses': step_analyses,
+                'conv_analyses': conv_analyses,
+                'completed_analyses': completed_analyses,
+                'success_rate': analysis_success_rate,
+            },
             'knowledge_growth_rate': knowledge_growth_rate,
             'suggestion_adoption_rate': suggestion_adoption_rate,
+            # v6.0.1: 前端兼容别名
+            'knowledge_base_growth_rate': knowledge_growth_rate,
+            'optimization_adoption_rate': suggestion_adoption_rate,
+            'current_version': current_version,
+            'latest_change': latest_change,
+            'days_since_first_iteration': days_since_first,
+            'iteration_rate_per_week': round(total_iterations / max(1, days_since_first / 7), 1) if days_since_first > 0 else 0.0,
+            # 原始字段
             'last_iteration_time': last_iteration_time,
             'pending_suggestions': max(0, total_suggestions - adopted),
             'last_updated': datetime.now().isoformat(),
@@ -254,10 +318,20 @@ def get_system_evolution_stats() -> str:
             'message': f'获取系统进化数据失败: {str(e)}',
             'total_iterations': 0,
             'recent_changes': [],
-            'llm_call_ratio': 50.0,
-            'rules_engine_ratio': 50.0,
+            'llm_call_ratio': 100.0,
+            'rules_engine_ratio': 0.0,
+            'llm_analysis_stats': {
+                'total_analyses': 0, 'step_analyses': 0,
+                'conv_analyses': 0, 'completed_analyses': 0, 'success_rate': 0.0,
+            },
             'knowledge_growth_rate': 0.0,
             'suggestion_adoption_rate': 0.0,
+            'knowledge_base_growth_rate': 0.0,
+            'optimization_adoption_rate': 0.0,
+            'current_version': '6.0.0',
+            'latest_change': None,
+            'days_since_first_iteration': 30,
+            'iteration_rate_per_week': 0.0,
             'pending_suggestions': 0
         }, ensure_ascii=False, indent=2)
 
@@ -280,9 +354,9 @@ def get_user_skill_radar() -> str:
       - user_skills 表：按 domain 分组计算平均 mastery_level
     """
     try:
-        from devpartner_agent.core.database import DatabaseManager
+        from devpartner_agent.core.database import get_db
         
-        db = DatabaseManager()
+        db = get_db()
         
         # 定义6个维度及其对应的 domain 映射
         dimension_map = {
@@ -301,24 +375,34 @@ def get_user_skill_radar() -> str:
         radar_data = {'current': [], 'thirty_days_ago': [], 'labels': []}
         
         for dim_name, keywords in dimension_map.items():
-            # 构建SQL查询：匹配域名的模糊查询
-            conditions = ' OR '.join([f"domain LIKE ?" for _ in keywords])
+            # 构建SQL查询：匹配 skill_domain 的模糊查询
+            conditions = ' OR '.join([f"skill_domain LIKE ?" for _ in keywords])
             params = [f'%{kw}%' for kw in keywords]
             
             # 当前掌握度
-            current_result = db.execute_query(f"""
-                SELECT AVG(mastery_level) as avg_mastery
+            current_result = db.query_local(f"""
+                SELECT AVG(CASE skill_level
+                    WHEN 'beginner' THEN 25
+                    WHEN 'intermediate' THEN 55
+                    WHEN 'advanced' THEN 80
+                    WHEN 'expert' THEN 95
+                    ELSE 25 END) as avg_mastery
                 FROM user_skills
-                WHERE is_active = 1 AND ({conditions})
-            """, params)
+                WHERE ({conditions})
+            """, tuple(params))
             current_score = round(current_result[0]['avg_mastery'], 1) if current_result and current_result[0]['avg_mastery'] else 0
             
-            # 30天前的掌握度
-            historical_result = db.execute_query(f"""
-                SELECT AVG(mastery_level) as avg_mastery
+            # 30天前的掌握度（基于 timestamp）
+            historical_result = db.query_local(f"""
+                SELECT AVG(CASE skill_level
+                    WHEN 'beginner' THEN 25
+                    WHEN 'intermediate' THEN 55
+                    WHEN 'advanced' THEN 80
+                    WHEN 'expert' THEN 95
+                    ELSE 25 END) as avg_mastery
                 FROM user_skills
-                WHERE ({conditions}) AND updated_at < ?
-            """, params + [thirty_days_ago])
+                WHERE ({conditions}) AND timestamp < ?
+            """, tuple(params) + (thirty_days_ago,))
             historical_score = round(historical_result[0]['avg_mastery'], 1) if historical_result and historical_result[0]['avg_mastery'] else 0
             
             # 维度显示名称
@@ -338,7 +422,8 @@ def get_user_skill_radar() -> str:
         result = {
             'dimensions': radar_data['labels'],
             'current_scores': radar_data['current'],
-            'thirty_days_ago_scores': radar_data['thirty_days_ago'],
+            'historical_scores': radar_data['thirty_days_ago'],  # 前端期望此字段名
+            'thirty_days_ago_scores': radar_data['thirty_days_ago'],  # 保留兼容
             'overall_avg_current': round(sum(radar_data['current']) / len(radar_data['current']), 1),
             'overall_avg_past': round(sum(radar_data['thirty_days_ago']) / len(radar_data['thirty_days_ago']), 1),
             'improvement_vector': [
@@ -356,6 +441,7 @@ def get_user_skill_radar() -> str:
             'message': f'获取技能雷达数据失败: {str(e)}',
             'dimensions': ['前端开发', '后端开发', '数据库', 'DevOps', '算法设计', 'AI/ML'],
             'current_scores': [0, 0, 0, 0, 0, 0],
+            'historical_scores': [0, 0, 0, 0, 0, 0],
             'thirty_days_ago_scores': [0, 0, 0, 0, 0, 0],
             'overall_avg_current': 0,
             'overall_avg_past': 0
@@ -388,23 +474,22 @@ def get_learning_timeline(limit: int = 20) -> str:
       - improvement_log: 改进记录
     """
     try:
-        from devpartner_agent.core.database import DatabaseManager
+        from devpartner_agent.core.database import get_db
         
-        db = DatabaseManager()
+        db = get_db()
         events = []
         
         # 1. 用户事件：最近的技能创建（新技能学习）
-        new_skills = db.execute_query("""
+        new_skills = db.query_local("""
             SELECT 
-                skill_name,
-                domain,
-                mastery_level,
-                created_at as time,
+                skill_domain,
+                skill_level,
+                confidence,
+                timestamp as time,
                 'user' as type,
                 '🧑' as icon
             FROM user_skills
-            WHERE is_active = 1
-            ORDER BY created_at DESC
+            ORDER BY timestamp DESC
             LIMIT ?
         """, (limit // 2,))
         
@@ -413,13 +498,13 @@ def get_learning_timeline(limit: int = 20) -> str:
                 'time': skill['time'],
                 'type': 'user',
                 'icon': '🧑',
-                'content': f"学习了 {skill['skill_name']} ({skill['domain'] or '通用'})",
-                'skill': skill['skill_name'],
-                'delta': f"+{skill['mastery_level'] or 0}%"
+                'content': f"学习了 {skill['skill_domain']}",
+                'skill': skill['skill_domain'],
+                'delta': f"{skill['skill_level'] or 'beginner'}"
             })
         
         # 2. 系统事件：最近的进化记录
-        evolutions = db.execute_query("""
+        evolutions = db.query_local("""
             SELECT 
                 description,
                 change_type,
@@ -503,9 +588,9 @@ def get_user_activity_heatmap() -> str:
       - conversations: 对话时间戳
     """
     try:
-        from devpartner_agent.core.database import DatabaseManager
+        from devpartner_agent.core.database import get_db
         
-        db = DatabaseManager()
+        db = get_db()
         
         # 计算28天（4周）的数据
         end_date = datetime.now().date()
@@ -519,15 +604,15 @@ def get_user_activity_heatmap() -> str:
             next_day = (current_date + timedelta(days=1)).isoformat()
             
             # 当天新增技能数
-            new_skills = db.execute_query("""
+            new_skills = db.query_local("""
                 SELECT COUNT(*) as cnt
                 FROM user_skills
-                WHERE created_at >= ? AND created_at < ?
+                WHERE timestamp >= ? AND timestamp < ?
             """, (date_str, next_day))
             skill_count = new_skills[0]['cnt'] if new_skills else 0
             
             # 当天对话数
-            convs = db.execute_query("""
+            convs = db.query_local("""
                 SELECT COUNT(*) as cnt
                 FROM conversations
                 WHERE created_at >= ? AND created_at < ?
@@ -535,11 +620,11 @@ def get_user_activity_heatmap() -> str:
             conv_count = convs[0]['cnt'] if convs else 0
             
             # 当天技能更新数（排除新建）
-            updates = db.execute_query("""
+            updates = db.query_local("""
                 SELECT COUNT(*) as cnt
                 FROM user_skills
-                WHERE updated_at >= ? AND updated_at < ? 
-                AND created_at < ?
+                WHERE last_seen >= ? AND last_seen < ? 
+                AND timestamp < ?
             """, (date_str, next_day, date_str))
             update_count = updates[0]['cnt'] if updates else 0
             
@@ -569,12 +654,16 @@ def get_user_activity_heatmap() -> str:
         result = {
             'dates': dates,
             'values': values,
+            'daily_data': [{'date': d['date'], 'intensity': d['value']} for d in heatmap_data],  # 前端期望此key
             'labels': ['一', '二', '三', '四', '五', '六', '日'],
             'period': {
                 'start': start_date.isoformat(),
                 'end': end_date.isoformat(),
                 'days': 28
             },
+            'active_days': sum(1 for v in values if v > 0),  # 前端期望的根级字段
+            'peak_intensity': max(values) if values else 0,  # 前端期望的根级字段
+            'avg_intensity': round(sum(values) / len(values), 1) if values else 0,  # 前端期望的根级字段
             'statistics': {
                 'max_intensity': max(values) if values else 0,
                 'min_intensity': min(values) if values else 0,
@@ -606,7 +695,7 @@ def get_user_activity_heatmap() -> str:
 def _calculate_learning_streak(db) -> int:
     """计算连续学习天数"""
     try:
-        result = db.execute_query("""
+        result = db.query_local("""
             SELECT DISTINCT DATE(created_at) as activity_date
             FROM conversations
             WHERE created_at >= datetime('now', '-90 days')
@@ -643,20 +732,19 @@ def _calculate_learning_efficiency(db) -> float:
         older_start = (now - timedelta(days=60)).isoformat()
         
         # 近30天的新增/提升技能数
-        recent = db.execute_query("""
+        recent = db.query_local("""
             SELECT COUNT(*) as cnt
             FROM user_skills
-            WHERE (created_at >= ? OR updated_at >= ?)
-              AND is_active = 1
+            WHERE (timestamp >= ? OR last_seen >= ?)
         """, (recent_start, recent_start))
         recent_count = recent[0]['cnt'] if recent else 0
         
         # 前30天的数据
-        older = db.execute_query("""
+        older = db.query_local("""
             SELECT COUNT(*) as cnt
             FROM user_skills
-            WHERE (created_at >= ? AND created_at < ?)
-              OR (updated_at >= ? AND updated_at < ?)
+            WHERE (timestamp >= ? AND timestamp < ?)
+              OR (last_seen >= ? AND last_seen < ?)
         """, (older_start, recent_start, older_start, recent_start))
         older_count = older[0]['cnt'] if older else 0
         

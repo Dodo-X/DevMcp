@@ -192,8 +192,9 @@ deploy/
 ### **性能优化**
 
 ```bash
-# 启用 GPU 加速（如果有 GPU 实例）
-N_GPU_LAYERS=-1  # 全部层使用GPU
+# 启用 GPU 加速（如果有 GPU 实例，无显卡保持 0）
+N_GPU_LAYERS=-1  # 全部层使用GPU（需要GPU实例）
+N_GPU_LAYERS=0   # 纯CPU模式（无显卡默认）
 
 # 增加 CPU 并行度
 N_THREADS=8  # 根据 CPU 核心数调整

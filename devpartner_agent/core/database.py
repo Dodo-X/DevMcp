@@ -83,16 +83,30 @@ class Database:
             # v4.3: 启用外键约束运行时检查
             self._local_conn.execute("PRAGMA foreign_keys=ON")
 
+            # 总是建表（CREATE IF NOT EXISTS，幂等安全）
             self._create_local_tables()
-            self._migrate_old_tables()
-            self._migrate_text_to_json()
-            self._migrate_add_foreign_keys()
-            # v4.3: 存量数据回填 conversations_id
-            self._backfill_conversations_id()
-            # v5.3: 补全缺失列
-            self._migrate_v53()
-            # v6.0: 表结构优化（多维度 JSON + 技能追溯字段）
-            self._migrate_v60()
+
+            # v6.0.1: 检查 schema 版本，跳过已完成的迁移
+            from devpartner_agent.core.config import get_project_version
+            current_version = get_project_version()
+            schema_version = self._get_schema_version()
+
+            if schema_version == current_version:
+                print(f"[DB] Schema 已是最新 ({current_version})，跳过迁移")
+            else:
+                print(f"[DB] Schema 版本变更 {schema_version} → {current_version}，执行迁移...")
+                self._migrate_old_tables()
+                self._migrate_text_to_json()
+                self._migrate_add_foreign_keys()
+                # v4.3: 存量数据回填 conversations_id
+                self._backfill_conversations_id()
+                # v5.3: 补全缺失列
+                self._migrate_v53()
+                # v6.0: 表结构优化（多维度 JSON + 技能追溯字段）
+                self._migrate_v60()
+                # 记录当前 schema 版本
+                self._set_schema_version(current_version)
+                print(f"[DB] Schema 迁移完成 → {current_version}")
 
     def init_shared(self, db_path: str):
         """初始化共享数据库连接"""
@@ -449,6 +463,38 @@ class Database:
             except sqlite3.OperationalError:
                 pass
 
+        # v6.0.1: 元数据表 — 跟踪 schema 版本，避免每次重启重跑迁移
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        self._local_conn.commit()
+
+    # ══════════════════════════════════════════════════════════
+    # Schema 版本管理（v6.0.1）
+    # ══════════════════════════════════════════════════════════
+
+    def _get_schema_version(self) -> str:
+        """获取当前数据库 schema 版本号"""
+        try:
+            cursor = self._local_conn.cursor()
+            cursor.execute("SELECT value FROM meta WHERE key='schema_version'")
+            row = cursor.fetchone()
+            return row["value"] if row else "0.0.0"
+        except Exception:
+            return "0.0.0"
+
+    def _set_schema_version(self, version: str):
+        """设置数据库 schema 版本号"""
+        cursor = self._local_conn.cursor()
+        cursor.execute("""
+            INSERT INTO meta (key, value, updated_at) VALUES ('schema_version', ?, datetime('now'))
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
+        """, (version,))
         self._local_conn.commit()
 
     def _migrate_old_tables(self):
@@ -1003,7 +1049,24 @@ class Database:
             """)
             
             if not cursor.fetchone():
-                # 尝试创建唯一索引（等价于添加 UNIQUE 约束）
+                # ★ v6.0.1: 创建索引前先清理无效数据，否则 UNIQUE 索引会失败
+                #   NULL/空字符串 → 生成 UUID 填充
+                cursor.execute("""
+                    UPDATE conversations 
+                    SET conversation_id = 'conv_' || lower(hex(randomblob(16)))
+                    WHERE conversation_id IS NULL OR conversation_id = ''
+                """)
+                #   → 删除重复记录（保留最新的 id）
+                cursor.execute("""
+                    DELETE FROM conversations 
+                    WHERE id NOT IN (
+                        SELECT MAX(id) FROM conversations 
+                        WHERE conversation_id IS NOT NULL AND conversation_id != ''
+                        GROUP BY conversation_id
+                    )
+                """)
+                
+                # 创建唯一索引（等价于添加 UNIQUE 约束）
                 cursor.execute("""
                     CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_conversation_id_unique 
                     ON conversations(conversation_id)

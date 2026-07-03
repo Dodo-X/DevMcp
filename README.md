@@ -343,7 +343,7 @@ llm:
   # 模型参数
   model_path: "./models/qwen3.5-9b-q4_1.gguf"
   n_ctx: 8192              # 上下文窗口（增大可处理更长文本）
-  n_gpu_layers: -1         # GPU 加速层数
+  n_gpu_layers: 0          # GPU 加速层数（0=纯CPU, 无显卡保持0）
   n_batch: 512             # 批处理大小
   
   # 生成参数
@@ -364,7 +364,7 @@ llm:
 | 场景 | 推荐配置 | 预期效果 |
 |------|---------|---------|
 | **内存有限** (< 8GB) | `n_ctx: 4096`, `n_gpu_layers: 0` | 内存占用降低 50% |
-| **追求速度** | `n_ctx: 4096`, `n_gpu_layers: -1` | 推理速度提升 3-5x |
+| **追求速度** | `n_ctx: 4096`, `n_gpu_layers: 0`, `n_threads: 16` | CPU 多线程加速 |
 | **质量优先** | `n_ctx: 8192`, `temperature: 0.2` | 输出更确定、更精准 |
 | **批量处理** | `n_batch: 1024`, `n_threads: 16` | 吞吐量提升 2x |
 

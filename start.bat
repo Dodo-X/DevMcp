@@ -1,11 +1,13 @@
 @echo off
 chcp 65001 >nul
-title DevPartner v6.0 - 双向成长仪表盘
+for /f "tokens=2 delims= " %%v in ('python -c "from devpartner_agent.core.config import get_project_version; print(get_project_version())" 2^>nul') do set DEV_VERSION=%%v
+if "%DEV_VERSION%"=="" set DEV_VERSION=6.0.0
+title DevPartner v%DEV_VERSION% - 双向成长仪表盘
 color 0A
 
 echo.
 echo ╔══════════════════════════════════════════════════════════════╗
-echo ║       ⚡ DevPartner v6.0 · 双向成长仪表盘 启动器            ║
+echo ║       ⚡ DevPartner v%DEV_VERSION% · 双向成长仪表盘 启动器      ║
 echo ╠══════════════════════════════════════════════════════════════╣
 echo ║                                                              ║
 echo ║   🌱 成长视角: 用户技能 + 系统进化                           ║

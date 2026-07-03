@@ -67,7 +67,7 @@ class LLMUnifiedAnalyzer:
             return
         self._initialized = True
         self._llm_service = None
-        _service_ready = False
+        self._service_ready = False
 
     @property
     def is_available(self) -> bool:
