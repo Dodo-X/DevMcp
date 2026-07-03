@@ -3,9 +3,12 @@
 # ============================================================
 #
 # ⚠️ 重要提示:
-#   此 Dockerfile 仅供 ModelScope 云端部署使用！
-#   本地开发请直接运行: python server.py 或 start.bat
-#   本地不需要使用 Docker！
+#   此 Dockerfile 用于 ModelScope 云端部署！
+#   本地开发和云端部署的启动方式完全相同，都是 MCP 服务！
+#
+# 📍 区别仅在于访问地址:
+#   - 本地:  http://127.0.0.1:7860/mcp
+#   - 云端:  https://modelscope.cn/studios/Pisces43/Dev-partner/mcp
 #
 # 🎯 适用环境:
 #   ModelScope Docker 创空间（云端部署）
@@ -250,8 +253,15 @@ echo "   ║  🌐 协议:      Streamable HTTP                      ║"
 echo "   ╚════════════════════════════════════════════════════╝"
 echo ""
 echo "   💡 客户端连接方式:"
-echo "      POST http://localhost:${MCP_PORT}/mcp"
-echo "      Content-Type: application/json"
+echo ""
+echo "   📍 本地开发:"
+echo "      POST http://127.0.0.1:${MCP_PORT}/mcp"
+echo ""
+echo "   ☁️ ModelScope 云端:"
+echo "      POST https://modelscope.cn/studios/Pisces43/Dev-partner/mcp"
+echo ""
+echo "   ⚙️ 配置示例 (mcp.json):"
+echo '      { "url": "http://127.0.0.1:'"${MCP_PORT}"'/mcp" }'
 echo ""
 
 # ★ v6.0: 使用 Streamable HTTP 模式，通过 /mcp 端点对外提供服务

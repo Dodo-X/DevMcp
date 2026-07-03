@@ -29,24 +29,31 @@ DevPartner MCP 服务器 v6.0.0
     Content-Type: application/json
     Body: { "jsonrpc": "2.0", "method": "...", "params": {...} }
 
-🚀 启动方式:
+📍 访问地址（唯一区别）:
+  本地开发:  http://127.0.0.1:7860/mcp
+  云端部署:  https://modelscope.cn/studios/Pisces43/Dev-partner/mcp
 
-  本地开发 (推荐):
-    python server.py              # 自动检测环境 → stdio 模式
-    start.bat                     # Windows 一键启动
+🚀 启动方式（本地和云端完全一致）:
+  python server.py 7860       # 启动 MCP 服务（推荐）
+  start.bat                   # Windows 一键启动
 
-  ModelScope 云端 / 远程服务器:
-    python server.py 7860          # 强制 Streamable HTTP + /mcp 端点
-    Docker构建后自动启动 (端口固定为7860)
+  客户端配置示例 (本地):
+  {
+    "url": "http://127.0.0.1:7860/mcp"
+  }
+
+  客户端配置示例 (云端):
+  {
+    "url": "https://modelscope.cn/studios/Pisces43/Dev-partner/mcp"
+  }
+
+⚙️ 端口:
+  统一使用 7860（ModelScope要求）
 
 📂 关键目录:
   data/        运行时数据 (数据库、日志、记忆等)
   models/      LLM 推理模型 (Qwen3.5-9B-Q4_1.gguf ~5.7GB)
-  deploy/      部署配置文档 (Dockerfile已复制到根目录供ModelScope使用)
-
-⚙️ 端口说明:
-  本地stdio模式: 无需端口 (标准输入输出通信)
-  云端HTTP模式:  7860 (ModelScope要求, MCP端点: /mcp)
+  Dockerfile   ModelScope 云端部署配置（位于根目录）
 
 作者：DevPartner Team
 版本：6.0.0 | 更新: 2026-07-03
@@ -4046,81 +4053,86 @@ if __name__ == "__main__":
     print("=" * 60)
 
     # ============================================================
-    # v6.0: 统一启动逻辑 - 支持多种部署模式
+    # v6.0: 统一启动逻辑 - MCP 服务（本地和云端完全一致）
     # ============================================================
+    #
+    # 🎯 核心原则: 本地和云端都是 MCP 服务，无本质区别！
     #
     # 系统架构:
-    #   devpartner_tools/  → 工具层 (21个纯工具)
-    #   devpartner_agent/  → 智能管家层 (67+个智能工具)
+    #   devpartner_tools/  → 工具层 (21个纯工具, 无状态)
+    #   devpartner_agent/  → 智能管家层 (67+个智能工具, 有状态)
+    #   server.py          → MCP 服务入口 (统一对外接口)
     #
-    # 部署模式:
-    #   1. 本地开发 (stdio)     - IDE集成，通过标准输入输出通信
-    #   2. ModelScope云端 (/mcp) - Docker容器，通过HTTP端点对外提供MCP服务
-    #   3. 远程服务器 (/mcp)     - 自建服务器，通过HTTP端点对外提供MCP服务
+    # 部署方式:
+    #   1. 本地开发: python server.py 7860
+    #      → 访问地址: http://127.0.0.1:7860/mcp
     #
-    # 协议变更 (v6.0):
-    #   ❌ 旧版: SSE协议 (Server-Sent Events)
-    #   ✅ 新版: Streamable HTTP + /mcp 端点
+    #   2. ModelScope云端: Dockerfile自动构建
+    #      → 访问地址: https://modelscope.cn/studios/Pisces43/Dev-partner/mcp
+    #
+    # 协议 (v6.0):
+    #   ✅ Streamable HTTP + /mcp 端点（统一标准）
+    #   ❌ SSE协议已废弃
+    #
+    # 端口:
+    #   统一使用 7860（ModelScope要求）
     #
     # ============================================================
 
-    def _detect_environment():
-        """检测当前运行环境"""
+    def _run_mcp_service(port):
+        """启动 MCP 服务（Streamable HTTP + /mcp 端点）"""
+
         import os
 
-        # 检查是否在 Docker 容器中
-        if os.path.exists("/.dockerenv"):
-            return "docker"
+        # 检测当前环境
+        is_docker = os.path.exists("/.dockerenv")
+        is_modelscope = os.environ.get("MODELSCOPE_ENVIRONMENT") == "true"
 
-        # 检查 ModelScope 环境变量
-        if os.environ.get("MODELSCOPE_ENVIRONMENT") == "true":
-            return "modelscope"
+        if is_docker or is_modelscope:
+            env_name = "ModelScope 云端" if is_modelscope else "Docker 容器"
+            access_url = f"https://modelscope.cn/studios/Pisces43/Dev-partner/mcp"
+        else:
+            env_name = "本地开发"
+            access_url = f"http://127.0.0.1:{port}/mcp"
 
-        # 默认为本地环境
-        return "local"
-
-    def _run_streamable_http(port):
-        """使用 Streamable HTTP 模式启动服务（/mcp 端点）"""
-        print(f"  启动模式: Streamable HTTP (MCP 服务)")
+        print(f"  启动模式: MCP 服务 (Streamable HTTP)")
+        print(f"  运行环境: {env_name}")
         print(f"  监听端口: {port}")
-        print(f"  MCP端点: http://localhost:{port}/mcp")
+        print(f"  MCP端点: {access_url}")
+        print("")
+        print("  📋 系统架构:")
+        print("     🛠️ 工具层 (devpartner_tools): 21个纯工具 (无状态)")
+        print("     🤖 智能层 (devpartner_agent): 67+个智能工具 (有状态)")
         print("")
         print("  📋 可用功能:")
-        print("     🔗 MCP客户端调用: POST http://localhost:{}/mcp".format(port))
-        print("     📊 Web Dashboard: http://localhost:{}/dashboard".format(port))
-        print("     🔧 API文档:       http://localhost:{}/docs".format(port))
-        print("     📈 健康检查:      http://localhost:{}/health".format(port))
+        print(f"     🔗 MCP客户端调用: POST {access_url}")
+        print(f"     📊 Web Dashboard: http://localhost:{port}/dashboard")
+        print(f"     🔧 API文档:       http://localhost:{port}/docs")
+        print(f"     📈 健康检查:      http://localhost:{port}/health")
         print("")
         print("  待命状态: 等待 MCP 客户端连接...")
         print("=" * 60)
-        mcp.run(transport="streamable-http", host="0.0.0.0", port=port,
-                json_response=True, stateless_http=True)
 
-    def _run_stdio():
-        """使用 stdio 模式启动服务（本地开发）"""
-        print("  启动模式: stdio (本地开发)")
-        print("")
-        print("  📋 系统架构:")
-        print("     🛠️ 工具层 (devpartner_tools): 21个纯工具")
-        print("     🤖 智能层 (devpartner_agent): 67+个智能工具")
-        print("")
-        print("  待命状态: 等待 AI 客户端连接 (stdio)...")
-        print("=" * 60)
-        mcp.run()
+        # 启动 Streamable HTTP 服务
+        mcp.run(transport="streamable-http",
+                 host="0.0.0.0",
+                 port=port,
+                 json_response=True,
+                 stateless_http=True)
 
     # 判断启动模式
     if len(sys.argv) > 1:
         arg = sys.argv[1]
 
-        # 模式1: 提供端口号 → 强制使用 Streamable HTTP 模式
+        # 模式1: 提供端口号 → 启动 MCP 服务
         if arg.isdigit():
             port = int(arg)
             if port not in ALLOWED_PORTS:
                 print(f"[ERROR] 不允许的端口 {port}，仅支持: {sorted(ALLOWED_PORTS)}")
                 sys.exit(1)
-            _run_streamable_http(port)
+            _run_mcp_service(port)
 
-        # 模式2: 兼容旧的 "sse" 参数（已废弃，保留向后兼容）
+        # 模式2: 兼容旧的 "sse" 参数（已废弃）
         elif arg.lower() in ["sse", "streamable"]:
             port = int(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_PORT
             if port not in ALLOWED_PORTS:
@@ -4128,30 +4140,20 @@ if __name__ == "__main__":
                 sys.exit(1)
             print(f"  ⚠️ 已弃用: '{arg}' 参数将在未来版本移除")
             print(f"  请直接使用端口号: python server.py {port}")
-            _run_streamable_http(port)
+            _run_mcp_service(port)
 
         else:
             print(f"[ERROR] 未知参数: {arg}")
             print("")
             print("  用法:")
-            print("    python server.py              # 自动检测环境（推荐）")
-            print("    python server.py 7860          # 强制使用 Streamable HTTP + /mcp 端点")
+            print("    python server.py 7860          # 启动 MCP 服务（推荐）")
             print("")
             print("  说明:")
-            print("    本地开发: 自动使用 stdio 模式")
-            print("    云端部署: 自动使用 Streamable HTTP 模式 (端口7860, /mcp端点)")
+            print("    本地和云端都是 MCP 服务，统一使用 Streamable HTTP 协议")
+            print("    端口固定为 7860，MCP 端点为 /mcp")
             sys.exit(1)
     else:
-        # 无参数: 自动检测环境并选择最佳模式
-        env = _detect_environment()
-
-        if env in ["docker", "modelscope"]:
-            # 云端/Docker环境: 使用 Streamable HTTP 模式
-            print(f"  [INFO] 检测到运行环境: {env}")
-            print(f"  [INFO] 自动选择: Streamable HTTP 模式")
-            _run_streamable_http(DEFAULT_PORT)
-        else:
-            # 本地环境: 使用 stdio 模式
-            print(f"  [INFO] 检测到运行环境: 本地开发")
-            print(f"  [INFO] 自动选择: stdio 模式")
-            _run_stdio()
+        # 无参数: 默认启动 MCP 服务（端口 7860）
+        print("  [INFO] 未指定端口，使用默认配置")
+        print("  [INFO] 启动 MCP 服务 (端口: 7860)")
+        _run_mcp_service(DEFAULT_PORT)
