@@ -186,6 +186,52 @@ async def serve_dashboard(request: Request) -> HTMLResponse:
         )
 
 
+# ── v6.0: 双向成长仪表盘 API 端点 ──
+from devpartner_tools.tools.growth_analytics import (
+    get_user_growth_overview,
+    get_system_evolution_stats,
+    get_user_skill_radar,
+    get_learning_timeline,
+    get_user_activity_heatmap
+)
+
+@mcp.custom_route("/api/growth/user-overview", methods=["GET"])
+async def api_user_growth_overview(request: Request) -> JSONResponse:
+    """获取用户成长总览数据"""
+    from fastapi.responses import JSONResponse
+    data = json.loads(get_user_growth_overview())
+    return JSONResponse(content=data)
+
+@mcp.custom_route("/api/growth/system-evolution", methods=["GET"])
+async def api_system_evolution(request: Request) -> JSONResponse:
+    """获取系统进化统计数据"""
+    from fastapi.responses import JSONResponse
+    data = json.loads(get_system_evolution_stats())
+    return JSONResponse(content=data)
+
+@mcp.custom_route("/api/growth/skill-radar", methods=["GET"])
+async def api_skill_radar(request: Request) -> JSONResponse:
+    """获取用户技能六维雷达图数据"""
+    from fastapi.responses import JSONResponse
+    data = json.loads(get_user_skill_radar())
+    return JSONResponse(content=data)
+
+@mcp.custom_route("/api/growth/timeline", methods=["GET"])
+async def api_learning_timeline(request: Request) -> JSONResponse:
+    """获取融合时间线数据"""
+    from fastapi.responses import JSONResponse
+    limit = int(request.query_params.get("limit", 20))
+    data = json.loads(get_learning_timeline(limit=limit))
+    return JSONResponse(content=data)
+
+@mcp.custom_route("/api/growth/activity-heatmap", methods=["GET"])
+async def api_activity_heatmap(request: Request) -> JSONResponse:
+    """获取学习热力图数据"""
+    from fastapi.responses import JSONResponse
+    data = json.loads(get_user_activity_heatmap())
+    return JSONResponse(content=data)
+
+
 
 
 print("=" * 60)

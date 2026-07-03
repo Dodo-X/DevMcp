@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DevPartner v5.2 Dashboard</title>
+<title>DevPartner v6.0 · 智能仪表盘</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
   :root {
@@ -22,7 +22,9 @@
     --radius: 8px;
     --shadow: 0 1px 3px rgba(0,0,0,0.3);
   }
+  
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  
   body {
     background: var(--bg);
     color: var(--text);
@@ -30,6 +32,7 @@
     line-height: 1.5;
     min-height: 100vh;
   }
+
   .header {
     background: var(--card);
     border-bottom: 1px solid var(--border);
@@ -42,6 +45,7 @@
     z-index: 100;
     backdrop-filter: blur(8px);
   }
+
   .header h1 {
     font-size: 1.25rem;
     font-weight: 600;
@@ -49,719 +53,1383 @@
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
   }
+
   .header-right {
     display: flex;
     align-items: center;
     gap: 16px;
   }
+
+  .tab-buttons {
+    display: flex;
+    gap: 4px;
+    background: var(--bg);
+    padding: 4px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+  }
+
+  .tab-btn {
+    padding: 8px 20px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .tab-btn.active {
+    background: linear-gradient(135deg, var(--accent), var(--purple));
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(88,166,255,0.3);
+  }
+
+  .tab-btn:hover:not(.active) {
+    color: var(--text);
+    background: rgba(255,255,255,0.05);
+  }
+
   .version-badge {
-    background: var(--accent);
+    background: linear-gradient(135deg, var(--accent), var(--purple));
     color: #fff;
     font-size: 0.75rem;
-    padding: 2px 8px;
+    padding: 2px 10px;
     border-radius: 12px;
     font-weight: 500;
   }
+
   .refresh-indicator {
     font-size: 0.8rem;
     color: var(--text-muted);
+    min-width: 140px;
+    text-align: right;
   }
-  .refresh-dot {
-    display: inline-block;
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: var(--green);
-    margin-right: 6px;
-    animation: pulse 2s infinite;
-  }
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.3; }
-  }
+
   .container {
-    max-width: 1400px;
+    max-width: 1440px;
     margin: 0 auto;
     padding: 24px;
   }
-  .grid { display: grid; gap: 20px; }
-  .grid-4 { grid-template-columns: repeat(4, 1fr); }
-  .grid-3 { grid-template-columns: repeat(3, 1fr); }
-  .grid-2 { grid-template-columns: repeat(2, 1fr); }
-  .grid-1-2 { grid-template-columns: 1fr 2fr; }
+
+  /* ===== 视图容器 ===== */
+  .view-container {
+    display: none;
+  }
+  
+  .view-container.active {
+    display: block;
+    animation: fadeIn 0.3s ease-in-out;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ===== Grid 布局 ===== */
+  .grid {
+    display: grid;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  
+  .grid-5 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+  .grid-4 { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .grid-3 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .grid-2 { grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); }
+  .grid-1-1 { grid-template-columns: 1fr 1fr; }
+  .grid-2-1 { grid-template-columns: 2fr 1fr; }
+
+  /* ===== 卡片样式 ===== */
   .card {
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 20px;
     box-shadow: var(--shadow);
-    transition: border-color 0.2s;
   }
-  .card:hover { border-color: #484f58; }
+
   .card-title {
-    font-size: 0.85rem;
-    font-weight: 500;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 12px;
-  }
-  .metric-row {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 16px;
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 6px 0;
-    border-bottom: 1px solid var(--border);
+    gap: 8px;
+    color: var(--text);
   }
-  .metric-row:last-child { border-bottom: none; }
-  .metric-label { font-size: 0.85rem; color: var(--text-muted); }
-  .metric-value { font-size: 0.95rem; font-weight: 500; }
-  .metric-value.green { color: var(--green); }
-  .metric-value.yellow { color: var(--yellow); }
-  .metric-value.red { color: var(--red); }
-  .metric-value.cyan { color: var(--cyan); }
-  .metric-value.purple { color: var(--purple); }
-  .metric-big {
+
+  /* ===== 指标卡（成长视角）===== */
+  .metric-card {
+    position: relative;
+    overflow: hidden;
+    border-left: 3px solid var(--accent);
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+
+  .metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+
+  .metric-icon {
+    font-size: 2rem;
+    margin-bottom: 8px;
+  }
+
+  .metric-value {
     font-size: 2rem;
     font-weight: 700;
-    text-align: center;
+    line-height: 1.2;
+    color: var(--text);
   }
-  .metric-big-sub {
-    font-size: 0.8rem;
+
+  .metric-label {
+    font-size: 0.85rem;
     color: var(--text-muted);
-    text-align: center;
     margin-top: 4px;
   }
-  .progress-bar {
-    height: 6px;
-    background: var(--border);
-    border-radius: 3px;
+
+  .metric-trend {
+    font-size: 0.75rem;
     margin-top: 8px;
-    overflow: hidden;
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: inline-block;
   }
+
+  .metric-trend.positive {
+    color: var(--green);
+    background: rgba(63,185,80,0.1);
+  }
+
+  .metric-trend.negative {
+    color: var(--red);
+    background: rgba(248,81,73,0.1);
+  }
+
+  /* ===== 系统指标卡（运维视角）===== */
+  .stat-card {
+    position: relative;
+    overflow: hidden;
+    border-left: 3px solid var(--green);
+    transition: transform 0.2s;
+  }
+
+  .stat-card:hover {
+    transform: translateY(-2px);
+  }
+
+  .stat-icon {
+    font-size: 1.5rem;
+    margin-bottom: 12px;
+  }
+
+  .stat-value {
+    font-size: 2.5rem;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 8px;
+  }
+
+  .stat-label {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+  }
+
+  .stat-detail {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+
+  /* ===== 进度条 ===== */
+  .progress-bar {
+    width: 100%;
+    height: 8px;
+    background: var(--bg);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 8px;
+  }
+
   .progress-fill {
     height: 100%;
-    border-radius: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--purple));
+    border-radius: 4px;
     transition: width 0.5s ease;
   }
-  .progress-fill.green { background: var(--green); }
-  .progress-fill.yellow { background: var(--yellow); }
-  .progress-fill.red { background: var(--red); }
-  .progress-fill.accent { background: var(--accent); }
-  .status-dot {
-    display: inline-block;
-    width: 10px; height: 10px;
-    border-radius: 50%;
-    margin-right: 6px;
+
+  /* ===== 雷达图容器 ===== */
+  .chart-container {
+    position: relative;
+    height: 350px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
-  .status-dot.online { background: var(--green); }
-  .status-dot.warning { background: var(--yellow); }
-  .status-dot.offline { background: var(--red); }
-  .section-title {
-    font-size: 1.1rem;
-    font-weight: 600;
-    margin: 32px 0 16px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border);
+
+  /* ===== 系统进化面板 ===== */
+  .evolution-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
   }
-  .domain-tag {
-    display: inline-block;
-    padding: 2px 10px;
-    border-radius: 12px;
-    font-size: 0.75rem;
-    margin: 2px 4px;
-    background: rgba(88, 166, 255, 0.15);
+
+  .evo-item {
+    text-align: center;
+    padding: 16px;
+    background: var(--bg);
+    border-radius: 6px;
+  }
+
+  .evo-item.full-width {
+    grid-column: span 2;
+  }
+
+  .evo-label {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+
+  .evo-value {
+    font-size: 1.5rem;
+    font-weight: 700;
     color: var(--accent);
   }
-  .table-container {
-    max-height: 300px;
-    overflow-y: auto;
+
+  .evo-trend {
+    font-size: 0.75rem;
+    color: var(--green);
+    margin-top: 4px;
   }
-  table {
+
+  /* ===== 环形进度条 ===== */
+  .circle-progress {
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: conic-gradient(
+      var(--accent) calc(var(--pct) * 1%),
+      var(--border) calc(var(--pct) * 1%)
+    );
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 8px auto;
+    font-weight: 700;
+    font-size: 1.1rem;
+  }
+
+  .circle-progress::before {
+    content: attr(data-pct);
+    width: 64px;
+    height: 64px;
+    background: var(--bg);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* ===== 堆积进度条 ===== */
+  .stacked-bar {
     width: 100%;
-    border-collapse: collapse;
-    font-size: 0.85rem;
+    height: 32px;
+    background: var(--bg);
+    border-radius: 6px;
+    overflow: hidden;
+    display: flex;
+    margin-top: 8px;
   }
-  th {
-    text-align: left;
-    color: var(--text-muted);
+
+  .bar-segment {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
     font-weight: 500;
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--border);
-    position: sticky;
-    top: 0;
+    color: #fff;
+    transition: width 0.5s ease;
+  }
+
+  .bar-segment.llm { background: linear-gradient(135deg, var(--accent), var(--cyan)); }
+  .bar-segment.rules { background: linear-gradient(135deg, var(--purple), var(--orange)); }
+
+  /* ===== 时间线 ===== */
+  .timeline {
+    max-height: 400px;
+    overflow-y: auto;
+    padding-right: 8px;
+  }
+
+  .timeline::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .timeline::-webkit-scrollbar-track {
+    background: var(--bg);
+    border-radius: 3px;
+  }
+
+  .timeline::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+  }
+
+  .timeline-item {
+    display: flex;
+    gap: 12px;
+    padding: 12px 0;
+    border-left: 2px solid var(--border);
+    padding-left: 20px;
+    position: relative;
+    animation: slideIn 0.3s ease-out;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -7px;
+    top: 18px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
     background: var(--card);
+    border: 2px solid var(--border);
   }
-  td {
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--border);
+
+  .timeline-item.user::before { border-color: var(--green); }
+  .timeline-item.system::before { border-color: var(--accent); }
+
+  .timeline-icon {
+    font-size: 1.2rem;
+    margin-top: 2px;
   }
-  .badge {
+
+  .timeline-content {
+    flex: 1;
+  }
+
+  .timeline-time {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+
+  .timeline-text {
+    font-size: 0.9rem;
+    line-height: 1.4;
+  }
+
+  .timeline-badge {
     display: inline-block;
     padding: 2px 8px;
     border-radius: 10px;
-    font-size: 0.7rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    margin-top: 4px;
+  }
+
+  .timeline-badge.positive { 
+    background: rgba(63,185,80,0.15); 
+    color: var(--green); 
+  }
+  
+  .timeline-badge.info { 
+    background: rgba(88,166,255,0.15); 
+    color: var(--accent); 
+  }
+
+  /* ===== 表格样式（运维视角）===== */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+
+  th {
+    text-align: left;
+    padding: 12px;
+    background: var(--bg);
+    border-bottom: 2px solid var(--border);
+    font-weight: 600;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  tr:hover td {
+    background: rgba(88,166,255,0.04);
+  }
+
+  .status-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.8rem;
     font-weight: 500;
   }
-  .badge-success { background: rgba(63,185,80,0.2); color: var(--green); }
-  .badge-warning { background: rgba(210,153,34,0.2); color: var(--yellow); }
-  .badge-danger { background: rgba(248,81,73,0.2); color: var(--red); }
-  .badge-info { background: rgba(88,166,255,0.2); color: var(--accent); }
+
+  .status-running { background: rgba(63,185,80,0.15); color: var(--green); }
+  .status-pending { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  .status-completed { background: rgba(139,148,158,0.15); color: var(--text-muted); }
+  .status-failed { background: rgba(248,81,73,0.15); color: var(--red); }
+
+  /* ===== 可折叠面板 ===== */
+  .collapsible-panel {
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .collapsible-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .collapsible-toggle {
+    font-size: 1.2rem;
+    transition: transform 0.3s;
+  }
+
+  .collapsed .collapsible-toggle {
+    transform: rotate(-90deg);
+  }
+
+  .collapsed .collapsible-body {
+    display: none;
+  }
+
+  /* ===== 错误提示横幅 ===== */
   .error-banner {
     background: rgba(248,81,73,0.1);
     border: 1px solid var(--red);
-    border-radius: var(--radius);
-    padding: 12px 20px;
-    margin-bottom: 16px;
     color: var(--red);
-    font-size: 0.85rem;
+    padding: 12px 16px;
+    border-radius: var(--radius);
+    margin-bottom: 16px;
+    font-size: 0.9rem;
   }
-  canvas { max-height: 280px; }
-  @media (max-width: 1024px) {
-    .grid-4 { grid-template-columns: repeat(2, 1fr); }
-    .grid-3 { grid-template-columns: repeat(2, 1fr); }
-    .grid-2, .grid-1-2 { grid-template-columns: 1fr; }
+
+  /* ===== 响应式设计 ===== */
+  @media (max-width: 1200px) {
+    .grid-1-1, .grid-2-1 { grid-template-columns: 1fr; }
+    .container { padding: 16px; }
   }
-  @media (max-width: 640px) {
-    .grid-4 { grid-template-columns: 1fr; }
-    .grid-3 { grid-template-columns: 1fr; }
-    .container { padding: 12px; }
+
+  @media (max-width: 768px) {
+    .header { flex-direction: column; gap: 12px; align-items: flex-start; }
+    .tab-buttons { width: 100%; justify-content: center; }
+    .grid-5, .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
+    .evolution-grid { grid-template-columns: 1fr; }
+    .evo-item.full-width { grid-column: span 1; }
   }
 </style>
 </head>
 <body>
 
+<!-- ============================================================
+     Header - 导航栏
+     ============================================================ -->
 <div class="header">
-  <h1>⚡ DevPartner Dashboard</h1>
+  <h1>⚡ DevPartner v6.0</h1>
   <div class="header-right">
-    <span class="refresh-indicator"><span class="refresh-dot"></span>实时监控中</span>
-    <span class="version-badge" id="version-badge">v5.2.0</span>
+    <div class="tab-buttons" id="view-tabs">
+      <button class="tab-btn active" data-view="growth" onclick="switchView('growth')">
+        🌱 成长视角
+      </button>
+      <button class="tab-btn" data-view="ops" onclick="switchView('ops')">
+        ⚙️ 运维视角
+      </button>
+    </div>
+    <span class="version-badge">v6.0</span>
+    <span class="refresh-indicator" id="refresh-status">● 自动刷新中</span>
   </div>
 </div>
 
 <div class="container">
 
-  <!-- Error Banner -->
-  <div class="error-banner" id="error-banner" style="display:none;"></div>
+  <!-- ============================================================
+       视图1: 🌱 成长视角（双向成长仪表盘）
+       ============================================================ -->
+  <div id="view-growth" class="view-container active">
 
-  <!-- Key Metrics Row -->
-  <div class="grid grid-4">
-    <div class="card" style="text-align:center;">
-      <div class="card-title">活跃会话</div>
-      <div class="metric-big green" id="metric-active-conv">0</div>
-      <div class="metric-big-sub">ConversationManager</div>
-    </div>
-    <div class="card" style="text-align:center;">
-      <div class="card-title">运行中任务</div>
-      <div class="metric-big cyan" id="metric-running-tasks">0</div>
-      <div class="metric-big-sub" id="metric-concurrency">/ 3 并发槽位</div>
-    </div>
-    <div class="card" style="text-align:center;">
-      <div class="card-title">知识库条目</div>
-      <div class="metric-big purple" id="metric-kp-total">0</div>
-      <div class="metric-big-sub">knowledge_points</div>
-    </div>
-    <div class="card" style="text-align:center;">
-      <div class="card-title">回调注册</div>
-      <div class="metric-big orange" id="metric-callbacks">0</div>
-      <div class="metric-big-sub">CallbackRegistry</div>
-    </div>
-  </div>
+    <!-- 错误提示横幅 -->
+    <div id="error-banner-growth" class="error-banner" style="display:none;"></div>
 
-  <!-- Health & Resources -->
-  <div class="grid grid-2" style="margin-top: 20px;">
-    <div class="card">
-      <div class="card-title">系统健康状态</div>
-      <div id="health-metrics">
-        <div class="metric-row">
-          <span class="metric-label">会话管理器</span>
-          <span class="metric-value green">✓ 正常</span>
+    <!-- 第1行：融合核心指标（用户 + 系统）-->
+    <div class="grid grid-5" id="metrics-row-growth">
+      
+      <!-- 用户指标：技能总数 -->
+      <div class="card metric-card" style="border-left-color: var(--accent);">
+        <div class="metric-icon">🧠</div>
+        <div class="metric-value" id="total-skills">--</div>
+        <div class="metric-label">技能总数</div>
+        <div class="metric-trend positive" id="skills-trend">加载中...</div>
+      </div>
+
+      <!-- 用户指标：平均掌握率 -->
+      <div class="card metric-card" style="border-left-color: var(--purple);">
+        <div class="metric-icon">📈</div>
+        <div class="metric-value" id="avg-mastery">--%</div>
+        <div class="metric-label">平均掌握率</div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="mastery-bar" style="width: 0%"></div>
         </div>
-        <div class="metric-row">
-          <span class="metric-label">任务队列</span>
-          <span class="metric-value green">✓ 正常</span>
+      </div>
+
+      <!-- 系统指标：版本/迭代 -->
+      <div class="card metric-card" style="border-left-color: var(--cyan);">
+        <div class="metric-icon">🔄</div>
+        <div class="metric-value" id="system-version">--</div>
+        <div class="metric-label">系统版本 / 迭代次数</div>
+        <div class="metric-trend" id="version-trend" style="color:var(--text-muted);">--</div>
+      </div>
+
+      <!-- 系统指标：自迭代采纳率 -->
+      <div class="card metric-card" style="border-left-color: var(--green);">
+        <div class="metric-icon">⚡</div>
+        <div class="metric-value" id="iteration-count">--</div>
+        <div class="metric-label">自迭代采纳率</div>
+        <div class="circle-progress" id="adoption-circle" style="--pct:0%" data-pct="--%"></div>
+      </div>
+
+      <!-- 用户指标：学习效率 -->
+      <div class="card metric-card" style="border-left-color: var(--orange);">
+        <div class="metric-icon">📊</div>
+        <div class="metric-value" id="learning-efficiency">--</div>
+        <div class="metric-label">学习效率指数</div>
+        <div class="metric-trend positive" id="efficiency-trend">--</div>
+      </div>
+    </div>
+
+    <!-- 第2行：用户成长视角（左） + 系统进化视角（右）-->
+    <div class="grid grid-1-1" id="main-row-growth">
+      
+      <!-- 左侧：用户技能六维雷达 -->
+      <div class="card">
+        <div class="card-title">📊 用户技能六维雷达</div>
+        <div class="chart-container">
+          <canvas id="skill-radar-chart"></canvas>
         </div>
-        <div class="metric-row">
-          <span class="metric-label">回调注册表</span>
-          <span class="metric-value green">✓ 正常</span>
+        <div style="margin-top: 16px; display: flex; justify-content: space-around; text-align: center;">
+          <div>
+            <span style="color: var(--text-muted); font-size: 0.8rem;">当前平均分</span><br>
+            <strong id="radar-current-avg" style="color: var(--accent); font-size: 1.2rem;">--</strong>
+          </div>
+          <div>
+            <span style="color: var(--text-muted); font-size: 0.8rem;">30天前平均分</span><br>
+            <strong id="radar-history-avg" style="color: var(--purple); font-size: 1.2rem;">--</strong>
+          </div>
+          <div>
+            <span style="color: var(--text-muted); font-size: 0.8rem;">整体提升</span><br>
+            <strong id="radar-improvement" style="color: var(--green); font-size: 1.2rem;">--</strong>
+          </div>
         </div>
-        <div class="metric-row">
-          <span class="metric-label">数据库连接</span>
-          <span class="metric-value green">✓ 正常</span>
+      </div>
+
+      <!-- 右侧：系统进化面板 -->
+      <div class="card">
+        <div class="card-title">🤖 系统进化面板</div>
+        <div class="evolution-grid">
+          
+          <!-- 自迭代总次数 -->
+          <div class="evo-item">
+            <span class="evo-label">自迭代总次数</span>
+            <span class="evo-value" id="total-iterations">--</span>
+            <span class="evo-trend" id="iteration-rate">--</span>
+          </div>
+
+          <!-- 优化建议采纳率 -->
+          <div class="evo-item">
+            <span class="evo-label">优化建议采纳率</span>
+            <div class="circle-progress" id="adoption-rate-circle" style="--pct:0%" data-pct="--%"></div>
+          </div>
+
+          <!-- 引擎调用分布（LLM vs 规则引擎）-->
+          <div class="evo-item full-width">
+            <span class="evo-label">引擎调用分布</span>
+            <div class="stacked-bar">
+              <div class="bar-segment llm" id="llm-ratio-bar" style="width:50%">LLM 50%</div>
+              <div class="bar-segment rules" id="rules-ratio-bar" style="width:50%">规则 50%</div>
+            </div>
+          </div>
+
+          <!-- 知识库增长率 -->
+          <div class="evo-item full-width">
+            <span class="evo-label">知识库月增长率</span>
+            <span class="evo-value" id="kb-growth-rate" style="font-size:1.2rem;">--</span>
+          </div>
+
+          <!-- 最近变更 -->
+          <div class="evo-item full-width">
+            <span class="evo-label">📌 最近变更</span>
+            <div id="latest-change" style="padding: 8px; background: var(--bg); border-radius: 4px; font-size: 0.85rem; margin-top: 4px;">
+              加载中...
+            </div>
+          </div>
         </div>
       </div>
     </div>
-    <div class="card">
-      <div class="card-title">内存使用</div>
-      <div style="display:flex; justify-content:space-between; margin-bottom: 8px;">
-        <span id="mem-usage-text">0 MB</span>
-        <span id="mem-limit-text">/ 2048 MB</span>
-      </div>
-      <div class="progress-bar">
-        <div class="progress-fill green" id="mem-bar" style="width:0%"></div>
-      </div>
-      <div style="margin-top: 16px; display:flex; gap:24px;">
-        <div>
-          <div class="metric-label">并发槽位</div>
-          <div class="metric-value" id="mem-concurrency">3/3 可用</div>
-        </div>
-        <div>
-          <div class="metric-label">利用率</div>
-          <div class="metric-value" id="mem-util">0%</div>
+
+    <!-- 第3行：融合时间线 + 学习热力图 -->
+    <div class="grid grid-1-1" id="bottom-row-growth">
+      
+      <!-- 左侧：双向成长时间线 -->
+      <div class="card">
+        <div class="card-title">⏱️ 双向成长时间线</div>
+        <div class="timeline" id="timeline-container">
+          <div style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+            加载中...
+          </div>
         </div>
       </div>
-    </div>
-  </div>
 
-  <!-- Task Queue Section -->
-  <div class="section-title">📋 任务队列</div>
-  <div class="grid grid-3">
-    <div class="card">
-      <div class="card-title">待处理</div>
-      <div class="metric-big yellow" id="queue-pending">0</div>
+      <!-- 右侧：近4周学习热力图 -->
+      <div class="card">
+        <div class="card-title">🔥 近4周学习活跃度</div>
+        <div style="position: relative; height: 280px;">
+          <canvas id="activity-heatmap-chart"></canvas>
+        </div>
+        <div style="margin-top: 16px; display: flex; justify-content: space-around; text-align: center;">
+          <div>
+            <span style="color: var(--text-muted); font-size: 0.8rem;">活跃天数</span><br>
+            <strong id="heatmap-active-days" style="color: var(--green); font-size: 1.2rem;">--</strong>
+          </div>
+          <div>
+            <span style="color: var(--text-muted); font-size: 0.8rm;">峰值强度</span><br>
+            <strong id="heatmap-peak" style="color: var(--red); font-size: 1.2rem;">--</strong>
+          </div>
+          <div>
+            <span style="color: var(--text-muted); font-size: 0.8rem;">平均强度</span><br>
+            <strong id="heatmap-avg" style="color: var(--accent); font-size: 1.2rem;">--</strong>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="card">
-      <div class="card-title">运行中</div>
-      <div class="metric-big cyan" id="queue-running">0</div>
-    </div>
-    <div class="card">
-      <div class="card-title">已完成</div>
-      <div class="metric-big green" id="queue-completed">0</div>
-    </div>
-  </div>
 
-  <!-- Recent Tasks -->
-  <div class="card" style="margin-top: 20px;">
-    <div class="card-title">最近任务</div>
-    <div class="table-container" id="recent-tasks">
-      <table>
-        <thead>
-          <tr><th>任务ID</th><th>类型</th><th>状态</th><th>优先级</th><th>进度</th><th>队列时间</th></tr>
-        </thead>
-        <tbody id="task-table-body">
-          <tr><td colspan="6" style="text-align:center; color:var(--text-muted);">暂无任务</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
+  </div> <!-- end view-growth -->
 
-  <!-- Knowledge Base Section -->
-  <div class="section-title">💡 知识库</div>
-  <div class="grid grid-1-2">
-    <div class="card">
-      <div class="card-title">按领域分布</div>
-      <canvas id="domain-chart"></canvas>
+  <!-- ============================================================
+       视图2: ⚙️ 运维视角（原有完整监控面板）
+       ============================================================ -->
+  <div id="view-ops" class="view-container">
+
+    <!-- 错误提示横幅 -->
+    <div id="error-banner-ops" class="error-banner" style="display:none;"></div>
+
+    <!-- 第1行：核心系统指标 -->
+    <div class="grid grid-4" id="metrics-row-ops">
+      
+      <div class="card stat-card" style="border-left-color: var(--green);">
+        <div class="stat-icon">💬</div>
+        <div class="stat-value" id="active-sessions">--</div>
+        <div class="stat-label">当前会话数</div>
+        <div class="stat-detail">
+          今日新增: <span id="today-sessions">--</span>
+        </div>
+      </div>
+
+      <div class="card stat-card" style="border-left-color: var(--accent);">
+        <div class="stat-icon">📋</div>
+        <div class="stat-value" id="pending-tasks">--</div>
+        <div class="stat-label">待处理任务</div>
+        <div class="stat-detail">
+          运行中: <span id="running-tasks">--</span> | 已完成: <span id="completed-tasks">--</span>
+        </div>
+      </div>
+
+      <div class="card stat-card" style="border-left-color: var(--purple);">
+        <div class="stat-icon">📚</div>
+        <div class="stat-value" id="knowledge-base-size">--</div>
+        <div class="stat-label">知识库技能数</div>
+        <div class="stat-detail">
+          今日新增: <span id="today-knowledge">--</span>
+        </div>
+      </div>
+
+      <div class="card stat-card" style="border-left-color: var(--yellow);">
+        <div class="stat-icon">🔗</div>
+        <div class="stat-value" id="callback-registrations">--</div>
+        <div class="stat-label">回调注册数</div>
+        <div class="stat-detail">
+          总触发: <span id="callback-triggers">--</span>
+        </div>
+      </div>
     </div>
-    <div class="card">
-      <div class="card-title">知识点详情</div>
-      <div id="domain-tags" style="margin-bottom:12px;"></div>
-      <div class="table-container" style="max-height:250px;">
+
+    <!-- 第2行：任务队列 + 内存使用 + 回调统计 -->
+    <div class="grid grid-1-1" id="main-row-ops">
+      
+      <!-- 左侧：任务队列详情 -->
+      <div class="card">
+        <div class="card-title">📋 任务队列详情</div>
         <table>
           <thead>
-            <tr><th>标题</th><th>领域</th><th>置信度</th><th>使用次数</th></tr>
+            <tr>
+              <th>ID</th>
+              <th>类型</th>
+              <th>状态</th>
+              <th>创建时间</th>
+              <th>优先级</th>
+            </tr>
           </thead>
-          <tbody id="kp-table-body">
-            <tr><td colspan="4" style="text-align:center; color:var(--text-muted);">暂无知识点</td></tr>
+          <tbody id="task-list-body">
+            <tr>
+              <td colspan="5" style="text-align:center;color:var(--text-muted);">加载中...</td>
+            </tr>
           </tbody>
         </table>
       </div>
-    </div>
-  </div>
 
-  <!-- Callback Registry Section -->
-  <div class="section-title">📞 回调注册表</div>
-  <div class="grid grid-3">
-    <div class="card">
-      <div class="card-title">活跃注册</div>
-      <div class="metric-big cyan" id="cb-active">0</div>
-    </div>
-    <div class="card">
-      <div class="card-title">总触发次数</div>
-      <div class="metric-big green" id="cb-triggered">0</div>
-    </div>
-    <div class="card">
-      <div class="card-title">错误次数</div>
-      <div class="metric-big red" id="cb-errors">0</div>
-    </div>
-  </div>
+      <!-- 右侧：内存使用 + 回调统计 -->
+      <div class="grid grid-2-1" style="gap: 16px;">
+        
+        <!-- 内存使用 -->
+        <div class="card">
+          <div class="card-title">💾 内存使用情况</div>
+          <div style="margin: 20px 0;">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;font-size:0.9rem;">
+              <span>已使用</span>
+              <span id="memory-used">-- MB</span>
+            </div>
+            <div class="progress-bar" style="height: 24px;">
+              <div class="progress-fill" id="memory-bar" style="width:0%"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:0.8rem;color:var(--text-muted);">
+              <span id="memory-percent">--%</span>
+              <span id="memory-total">总计 -- MB</span>
+            </div>
+          </div>
+          <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
+            <div style="font-size:0.85rem;margin-bottom:8px;color:var(--text-muted);">详细分配:</div>
+            <div id="memory-details" style="font-size:0.8rem;line-height:1.8;">
+              加载中...
+            </div>
+          </div>
+        </div>
 
-  <!-- Trend Chart -->
-  <div class="card" style="margin-top: 20px;">
-    <div class="card-title">实时指标趋势（最近 30 次采样）</div>
-    <canvas id="trend-chart"></canvas>
-  </div>
+        <!-- 回调统计 -->
+        <div class="card">
+          <div class="card-title">🔗 回调统计</div>
+          <div style="margin: 20px 0;">
+            <div style="display:flex;justify-content:space-around;text-align:center;">
+              <div>
+                <div style="font-size:2rem;font-weight:700;color:var(--green);" id="callback-success">--</div>
+                <div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">成功</div>
+              </div>
+              <div>
+                <div style="font-size:2rem;font-weight:700;color:var(--red);" id="callback-errors">--</div>
+                <div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">错误</div>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
+            <div style="font-size:0.85rem;margin-bottom:8px;color:var(--text-muted);">最近回调记录:</div>
+            <div id="recent-callbacks" style="font-size:0.8rem;max-height:150px;overflow-y:auto;">
+              加载中...
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
-</div>
+    <!-- 第3行：健康状态 + 系统趋势 -->
+    <div class="grid grid-1-1" id="bottom-row-ops">
+      
+      <!-- 左侧：系统健康状态 -->
+      <div class="card collapsible-panel" onclick="togglePanel(this)">
+        <div class="card-title collapsible-header">
+          <span>❤️ 系统健康状态</span>
+          <span class="collapsible-toggle">▼</span>
+        </div>
+        <div class="collapsible-body" style="margin-top: 16px;">
+          <div id="health-status-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">
+            <div style="padding:12px;background:var(--bg);border-radius:6px;border-left:3px solid var(--green);">
+              <div style="font-size:0.85rem;color:var(--text-muted);">MCP Server</div>
+              <div style="font-weight:600;margin-top:4px;" id="health-mcp">检测中...</div>
+            </div>
+            <div style="padding:12px;background:var(--bg);border-radius:6px;border-left:3px solid var(--green);">
+              <div style="font-size:0.85rem;color:var(--text-muted);">数据库连接</div>
+              <div style="font-weight:600;margin-top:4px;" id="health-db">检测中...</div>
+            </div>
+            <div style="padding:12px;background:var(--bg);border-radius:6px;border-left:3px solid var(--green);">
+              <div style="font-size:0.85rem;color:var(--text-muted);">LLM 服务</div>
+              <div style="font-weight:600;margin-top:4px;" id="health-llm">检测中...</div>
+            </div>
+            <div style="padding:12px;background:var(--bg);border-radius:6px;border-left:3px solid var(--green);">
+              <div style="font-size:0.85rem;color:var(--text-muted);">文件系统</div>
+              <div style="font-weight:600;margin-top:4px;" id="health-fs">检测中...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右侧：系统运行趋势 -->
+      <div class="card">
+        <div class="card-title">📈 系统运行趋势 (最近24小时)</div>
+        <div style="position:relative;height:250px;">
+          <canvas id="system-trend-chart"></canvas>
+        </div>
+      </div>
+    </div>
+
+  </div> <!-- end view-ops -->
+
+</div> <!-- end container -->
 
 <script>
-// ── Configuration ──
-const MCP_BASE = window.location.origin;
-const MCP_MESSAGE_PATH = '/mcp';  // Streamable HTTP transport endpoint
-const REFRESH_INTERVAL = 3000; // 3 seconds
+// ============================================================
+// 全局配置与常量
+// ============================================================
+const API_BASE = '/api';
+const REFRESH_INTERVAL = 5000;
 
-// ── State ──
-let trendData = { active: [], running: [], kp: [], timestamps: [] };
-let maxTrendPoints = 30;
-let domainChart = null;
-let trendChart = null;
+let radarChartInstance = null;
+let heatmapChartInstance = null;
+let trendChartInstance = null;
 
-// ── MCP API Call ──
-async function callMCPTool(toolName, args = {}) {
+// ============================================================
+// 视图切换功能
+// ============================================================
+function switchView(viewName) {
+  // 更新按钮状态
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.view === viewName);
+  });
+
+  // 切换视图显示
+  document.querySelectorAll('.view-container').forEach(view => {
+    view.classList.toggle('active', view.id === `view-${viewName}`);
+  });
+
+  // 触发对应视图的数据刷新
+  if (viewName === 'growth') {
+    refreshGrowthData();
+  } else if (viewName === 'ops') {
+    refreshOpsData();
+  }
+}
+
+// ============================================================
+// 数据获取函数
+// ============================================================
+async function fetchJSON(url) {
   try {
-    const resp = await fetch(`${MCP_BASE}${MCP_MESSAGE_PATH}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: Date.now(),
-        method: 'tools/call',
-        params: { name: toolName, arguments: args }
-      })
-    });
+    const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    if (data.error) throw new Error(data.error.message);
-    // Parse JSON result
-    const content = data.result?.content;
-    if (content && content.length > 0 && content[0].text) {
-      return JSON.parse(content[0].text);
-    }
-    return data.result;
-  } catch (e) {
-    console.warn(`MCP call failed [${toolName}]:`, e.message);
+    return await resp.json();
+  } catch (error) {
+    console.error(`[API] ${url} failed:`, error);
     return null;
   }
 }
 
-// ── Data Fetching ──
-async function fetchSystemHealth() {
-  const data = await callMCPTool('get_system_health');
-  if (!data) return null;
-  return data;
+// 成长视角数据接口
+async function getUserGrowth() { return await fetchJSON(`${API_BASE}/growth/user-overview`); }
+async function getSystemEvolution() { return await fetchJSON(`${API_BASE}/growth/system-evolution`); }
+async function getSkillRadar() { return await fetchJSON(`${API_BASE}/growth/skill-radar`); }
+async function getTimeline() { return await fetchJSON(`${API_BASE}/growth/timeline?limit=15`); }
+async function getActivityHeatmap() { return await fetchJSON(`${API_BASE}/growth/activity-heatmap`); }
+
+// 运维视角数据接口
+async function getSystemStatus() { return await fetchJSON(`${API_BASE}/system/status`); }
+async function getTaskQueue() { return await fetchJSON(`${API_BASE}/tasks/list?limit=10`); }
+async function getMemoryUsage() { return await fetchJSON(`${API_BASE}/system/memory`); }
+async function getCallbackStats() { return await fetchJSON(`${API_BASE}/callbacks/stats`); }
+async function getHealthCheck() { return await fetchJSON(`${API_BASE}/health/check`); }
+async function getSystemTrends() { return await fetchJSON(`${API_BASE}/trends/system?hours=24`); }
+
+// ============================================================
+// 成长视角 UI 更新函数
+// ============================================================
+function updateGrowthMetrics(userGrowth, systemEvo) {
+  if (!userGrowth || !systemEvo) return;
+
+  // 用户指标
+  document.getElementById('total-skills').textContent = userGrowth.total_skills || 0;
+  document.getElementById('skills-trend').textContent = `↑ +${userGrowth.this_week_new || 0} 本周新增`;
+  
+  const mastery = userGrowth.avg_mastery || 0;
+  document.getElementById('avg-mastery').textContent = `${mastery}%`;
+  document.getElementById('mastery-bar').style.width = `${mastery}%`;
+
+  // 系统指标
+  document.getElementById('system-version').textContent = `v${systemEvo.current_version || '?.?.?'}`;
+  document.getElementById('version-trend').textContent = `${systemEvo.total_iterations || 0} 次迭代`;
+
+  const iterCount = systemEvo.total_iterations || 0;
+  document.getElementById('iteration-count').textContent = iterCount;
+  
+  const adoptionRate = systemEvo.optimization_adoption_rate || 0;
+  document.getElementById('adoption-circle').style.setProperty('--pct', `${adoptionRate}%`);
+  document.getElementById('adoption-circle').dataset.pct = `${adoptionRate}%`;
+
+  // 学习效率
+  const efficiency = userGrowth.learning_efficiency || 0;
+  document.getElementById('learning-efficiency').textContent = efficiency.toFixed(2);
+  document.getElementById('efficiency-trend').textContent = efficiency > 0 ? `↑ ${Math.round(efficiency * 100)}% 超前` : '--';
 }
 
-async function fetchQueueStats() {
-  const data = await callMCPTool('get_queue_stats');
-  if (!data) return null;
-  return data;
-}
+function updateRadarChart(radarData) {
+  if (!radarData) return;
 
-async function fetchV5Status() {
-  const data = await callMCPTool('get_v5_status');
-  if (!data) return null;
-  return data;
-}
+  const ctx = document.getElementById('skill-radar-chart').getContext('2d');
+  
+  if (radarChartInstance) radarChartInstance.destroy();
 
-async function fetchCallbackStats() {
-  const data = await callMCPTool('get_callback_stats');
-  if (!data) return null;
-  return data;
-}
-
-async function fetchKnowledgePoints(domain = null, limit = 20) {
-  const data = await callMCPTool('list_knowledge_points', { domain: domain || '', limit: String(limit) });
-  if (!data) return [];
-  if (Array.isArray(data)) return data;
-  if (data.points) return data.points;
-  if (data.error) return [];
-  return [];
-}
-
-async function fetchRecentTasks(limit = 10) {
-  const data = await callMCPTool('get_queue_stats');
-  if (!data) return { tasks: [] };
-  // get_queue_stats returns aggregated stats, not individual tasks
-  // We'll use get_task_status for the dashboard overview
-  return data;
-}
-
-// ── UI Updates ──
-function updateErrorBanner(msg) {
-  const banner = document.getElementById('error-banner');
-  if (msg) {
-    banner.textContent = '⚠️ ' + msg;
-    banner.style.display = 'block';
-  } else {
-    banner.style.display = 'none';
-  }
-}
-
-function updateKeyMetrics(health, queueStats, v5Status, cbStats) {
-  if (health) {
-    document.getElementById('metric-active-conv').textContent =
-      health.conversation_manager?.active_conversations ?? 0;
-    document.getElementById('metric-running-tasks').textContent =
-      health.conversation_manager?.running_tasks ?? 0;
-    document.getElementById('metric-concurrency').textContent =
-      `/ ${health.conversation_manager?.concurrency_limit ?? 3} 并发槽位`;
-
-    // Memory
-    const memUsed = health.conversation_manager?.estimated_memory_usage_mb ?? 0;
-    const memMax = health.conversation_manager?.max_memory_limit_mb ?? 2048;
-    const memPct = health.conversation_manager?.memory_utilization_percent ?? 0;
-    document.getElementById('mem-usage-text').textContent = `${memUsed.toFixed(0)} MB`;
-    document.getElementById('mem-limit-text').textContent = `/ ${memMax} MB`;
-    document.getElementById('mem-util').textContent = `${memPct.toFixed(1)}%`;
-
-    const memBar = document.getElementById('mem-bar');
-    memBar.style.width = `${Math.min(memPct, 100)}%`;
-    memBar.className = 'progress-fill ' + (memPct > 80 ? 'red' : memPct > 60 ? 'yellow' : 'green');
-
-    const running = health.conversation_manager?.running_tasks ?? 0;
-    const limit = health.conversation_manager?.concurrency_limit ?? 3;
-    document.getElementById('mem-concurrency').textContent =
-      `${limit - running}/${limit} 可用`;
-
-    // Health status indicators
-    const healthMetrics = document.getElementById('health-metrics');
-    const allGood = health.conversation_manager && health.task_queue;
-    healthMetrics.innerHTML = `
-      <div class="metric-row">
-        <span class="metric-label">会话管理器</span>
-        <span class="metric-value ${allGood ? 'green' : 'red'}">
-          ${allGood ? '✓ 正常' : '✗ 异常'}
-        </span>
-      </div>
-      <div class="metric-row">
-        <span class="metric-label">任务队列</span>
-        <span class="metric-value ${queueStats ? 'green' : 'red'}">
-          ${queueStats ? '✓ 正常' : '✗ 异常'}
-        </span>
-      </div>
-      <div class="metric-row">
-        <span class="metric-label">回调注册表</span>
-        <span class="metric-value ${cbStats ? 'green' : 'red'}">
-          ${cbStats ? '✓ 正常' : '✗ 异常'}
-        </span>
-      </div>
-      <div class="metric-row">
-        <span class="metric-label">数据库</span>
-        <span class="metric-value ${v5Status ? 'green' : 'red'}">
-          ${v5Status ? '✓ 正常' : '✗ 异常'}
-        </span>
-      </div>
-    `;
-  }
-
-  // Knowledge base total
-  if (v5Status && v5Status.new_tables) {
-    document.getElementById('metric-kp-total').textContent =
-      v5Status.new_tables.knowledge_points?.count ?? 0;
-  }
-
-  // Callback stats
-  if (cbStats) {
-    document.getElementById('metric-callbacks').textContent =
-      cbStats.active_registrations ?? 0;
-    document.getElementById('cb-active').textContent = cbStats.active_registrations ?? 0;
-    document.getElementById('cb-triggered').textContent = cbStats.total_triggered ?? 0;
-    document.getElementById('cb-errors').textContent = cbStats.total_errors ?? 0;
-  }
-
-  // Queue stats
-  if (queueStats) {
-    document.getElementById('queue-pending').textContent = queueStats.pending_tasks ?? 0;
-    document.getElementById('queue-running').textContent = queueStats.running_tasks ?? 0;
-    document.getElementById('queue-completed').textContent = queueStats.completed_tasks ?? 0;
-  }
-}
-
-function updateKnowledgeBase(v5Status) {
-  if (!v5Status) return;
-
-  // Domain distribution
-  const byDomain = v5Status.knowledge_base?.by_domain || {};
-  const domains = Object.keys(byDomain);
-  const counts = Object.values(byDomain);
-
-  // Domain tags
-  const tagContainer = document.getElementById('domain-tags');
-  tagContainer.innerHTML = domains.map(d =>
-    `<span class="domain-tag">${d} (${byDomain[d]})</span>`
-  ).join('') || '<span style="color:var(--text-muted);">暂无领域数据</span>';
-
-  // Domain chart
-  const ctx = document.getElementById('domain-chart').getContext('2d');
-  if (domainChart) domainChart.destroy();
-
-  const colors = ['#58a6ff','#a371f7','#3fb950','#d29922','#f85149','#39d2c0','#db6d28','#8b949e'];
-  domainChart = new Chart(ctx, {
-    type: 'doughnut',
+  radarChartInstance = new Chart(ctx, {
+    type: 'radar',
     data: {
-      labels: domains,
+      labels: radarData.dimensions || ['前端开发', '后端开发', '数据库', 'DevOps', '算法设计', 'AI/ML'],
       datasets: [{
-        data: counts,
-        backgroundColor: colors.slice(0, domains.length),
-        borderColor: '#161b22',
-        borderWidth: 2
+        label: '当前掌握度',
+        data: radarData.current_scores || [0, 0, 0, 0, 0, 0],
+        backgroundColor: 'rgba(88,166,255,0.15)',
+        borderColor: '#58a6ff',
+        pointBackgroundColor: '#58a6ff',
+        pointBorderColor: '#fff',
+        pointHoverBackgroundColor: '#fff',
+        pointHoverBorderColor: '#58a6ff'
+      }, {
+        label: '30天前',
+        data: radarData.historical_scores || [0, 0, 0, 0, 0, 0],
+        backgroundColor: 'rgba(163,113,247,0.1)',
+        borderColor: '#a371f7',
+        borderDash: [5, 5],
+        pointBackgroundColor: '#a371f7',
+        pointBorderColor: '#fff'
       }]
     },
     options: {
       responsive: true,
-      maintainAspectRatio: true,
+      maintainAspectRatio: false,
+      scales: {
+        r: {
+          angleLines: { color: 'rgba(48,54,61,0.5)' },
+          grid: { color: 'rgba(48,54,61,0.5)' },
+          pointLabels: { color: '#8b949e', font: { size: 11 } },
+          ticks: { color: '#8b949e', backdropColor: 'transparent' },
+          suggestedMin: 0,
+          suggestedMax: 100
+        }
+      },
       plugins: {
         legend: {
-          position: 'right',
-          labels: { color: '#8b949e', padding: 12, font: { size: 11 } }
+          position: 'bottom',
+          labels: { color: '#8b949e', usePointStyle: true }
         }
       }
     }
   });
 
-  // Knowledge points table
-  updateKPGrid(byDomain);
+  // 更新统计数据
+  const currentAvg = (radarData.current_scores || []).reduce((a,b)=>a+b,0) / 6;
+  const historyAvg = (radarData.historical_scores || []).reduce((a,b)=>a+b,0) / 6;
+  const improvement = currentAvg - historyAvg;
+
+  document.getElementById('radar-current-avg').textContent = currentAvg.toFixed(1);
+  document.getElementById('radar-history-avg').textContent = historyAvg.toFixed(1);
+  document.getElementById('radar-improvement').textContent = improvement > 0 ? `+${improvement.toFixed(1)}` : improvement.toFixed(1);
 }
 
-async function updateKPGrid(byDomain) {
-  // Fetch top knowledge points
-  const kps = await fetchKnowledgePoints(null, 10);
-  const tbody = document.getElementById('kp-table-body');
-  if (!kps || kps.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted);">暂无知识点</td></tr>';
+function updateEvolutionPanel(systemEvo) {
+  if (!systemEvo) return;
+
+  // 迭代次数
+  document.getElementById('total-iterations').textContent = systemEvo.total_iterations || 0;
+  document.getElementById('iteration-rate').textContent = systemEvo.iteration_rate_per_week ? 
+    `↑ ${systemEvo.iteration_rate_per_week} 次/周` : '--';
+
+  // 采纳率
+  const adoptionRate = systemEvo.optimization_adoption_rate || 0;
+  document.getElementById('adoption-rate-circle').style.setProperty('--pct', `${adoptionRate}%`);
+  document.getElementById('adoption-rate-circle').dataset.pct = `${adoptionRate}%`;
+
+  // LLM vs 规则引擎占比
+  const llmRatio = systemEvo.llm_call_ratio || 50;
+  const rulesRatio = 100 - llmRatio;
+  document.getElementById('llm-ratio-bar').style.width = `${llmRatio}%`;
+  document.getElementById('llm-ratio-bar').textContent = `LLM ${llmRatio}%`;
+  document.getElementById('rules-ratio-bar').style.width = `${rulesRatio}%`;
+  document.getElementById('rules-ratio-bar').textContent = `规则 ${rulesRatio}%`;
+
+  // 知识库增长
+  document.getElementById('kb-growth-rate').textContent = `+${systemEvo.knowledge_base_growth_rate || 0}%`;
+
+  // 最近变更
+  document.getElementById('latest-change').innerHTML = systemEvo.latest_change ?
+    `<strong>${systemEvo.latest_change.title || '未知变更'}</strong><br>` +
+    `<span style="color:var(--text-muted);font-size:0.8rem;">${systemEvo.latest_change.time_ago || ''}</span>` :
+    '<span style="color:var(--text-muted);">暂无记录</span>';
+}
+
+function updateTimeline(timelineData) {
+  const container = document.getElementById('timeline-container');
+  
+  if (!timelineData || timelineData.length === 0) {
+    container.innerHTML = `
+      <div style="text-align:center;color:var(--text-muted);padding:40px 0;">
+        暂无成长事件
+      </div>`;
     return;
   }
-  tbody.innerHTML = kps.map(kp => `
+
+  container.innerHTML = timelineData.map(event => `
+    <div class="timeline-item ${event.type}">
+      <div class="timeline-icon">${event.icon}</div>
+      <div class="timeline-content">
+        <div class="timeline-time">${event.time}</div>
+        <div class="timeline-text">${event.content}</div>
+        ${event.delta ? `<span class="timeline-badge positive">${event.delta}</span>` : ''}
+        ${event.impact ? `<span class="timeline-badge info">${event.impact}</span>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+function updateHeatmap(heatmapData) {
+  if (!heatmapData) return;
+
+  const ctx = document.getElementById('activity-heatmap-chart').getContext('2d');
+  
+  if (heatmapChartInstance) heatmapChartInstance.destroy();
+
+  heatmapChartInstance = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: (heatmapData.daily_data || []).map(d => d.date),
+      datasets: [{
+        label: '活动强度',
+        data: (heatmapData.daily_data || []).map(d => d.intensity),
+        backgroundColor: (heatmapData.daily_data || []).map(d => {
+          const intensity = d.intensity;
+          if (intensity >= 8) return 'rgba(248,81,73,0.7)';
+          if (intensity >= 6) return 'rgba(210,153,34,0.7)';
+          if (intensity >= 4) return 'rgba(63,185,80,0.7)';
+          return 'rgba(88,166,255,0.5)';
+        }),
+        borderRadius: 4,
+        barThickness: 10
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `强度: ${ctx.raw}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#8b949e', maxRotation: 45, font: { size: 10 } },
+          grid: { display: false }
+        },
+        y: {
+          beginAtZero: true,
+          max: 10,
+          ticks: { color: '#8b949e', stepSize: 2 },
+          grid: { color: 'rgba(48,54,61,0.3)' }
+        }
+      }
+    }
+  });
+
+  // 更新统计
+  document.getElementById('heatmap-active-days').textContent = heatmapData.active_days || 0;
+  document.getElementById('heatmap-peak').textContent = heatmapData.peak_intensity || 0;
+  document.getElementById('heatmap-avg').textContent = (heatmapData.avg_intensity || 0).toFixed(1);
+}
+
+// ============================================================
+// 运维视角 UI 更新函数
+// ============================================================
+function updateOpsMetrics(statusData) {
+  if (!statusData) return;
+
+  document.getElementById('active-sessions').textContent = statusData.active_sessions || 0;
+  document.getElementById('today-sessions').textContent = statusData.today_new_sessions || 0;
+
+  document.getElementById('pending-tasks').textContent = statusData.pending_tasks || 0;
+  document.getElementById('running-tasks').textContent = statusData.running_tasks || 0;
+  document.getElementById('completed-tasks').textContent = statusData.completed_tasks || 0;
+
+  document.getElementById('knowledge-base-size').textContent = statusData.knowledge_base_size || 0;
+  document.getElementById('today-knowledge').textContent = statusData.today_knowledge_added || 0;
+
+  document.getElementById('callback-registrations').textContent = statusData.callback_registrations || 0;
+  document.getElementById('callback-triggers').textContent = statusData.callback_triggers || 0;
+}
+
+function updateTaskQueue(taskData) {
+  const tbody = document.getElementById('task-list-body');
+  
+  if (!taskData || taskData.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">暂无任务</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = taskData.map(task => `
     <tr>
-      <td>${kp.title || 'N/A'}</td>
-      <td><span class="domain-tag">${kp.domain || 'General'}</span></td>
-      <td>${((kp.confidence || 0) * 100).toFixed(0)}%</td>
-      <td>${kp.usage_count || 0}</td>
+      <td>${task.id}</td>
+      <td>${task.type || '--'}</td>
+      <td><span class="status-badge status-${task.status || 'pending'}">${task.status || 'pending'}</span></td>
+      <td>${task.created_at || '--'}</td>
+      <td>${task.priority || '--'}</td>
     </tr>
   `).join('');
 }
 
-function updateRecentTasks(queueStats) {
-  const tbody = document.getElementById('task-table-body');
-  const tasks = queueStats?.recent_tasks || [];
-  if (tasks.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:var(--text-muted);">暂无任务</td></tr>';
-    return;
-  }
-  tbody.innerHTML = tasks.slice(0, 10).map(t => {
-    const statusClass = t.status === 'completed' ? 'badge-success' :
-                        t.status === 'running' ? 'badge-info' :
-                        t.status === 'failed' ? 'badge-danger' : 'badge-warning';
-    return `
-      <tr>
-        <td><code>${(t.task_id || '').slice(0, 16)}...</code></td>
-        <td>${t.task_type || 'N/A'}</td>
-        <td><span class="badge ${statusClass}">${t.status || 'pending'}</span></td>
-        <td>${t.priority || 0}</td>
-        <td>
-          <div class="progress-bar"><div class="progress-fill accent" style="width:${t.progress || 0}%"></div></div>
-          <span style="font-size:0.7rem;">${(t.progress || 0).toFixed(0)}%</span>
-        </td>
-        <td>${(t.queued_at || '').slice(0, 19)}</td>
-      </tr>
-    `;
-  }).join('');
+function updateMemoryUsage(memoryData) {
+  if (!memoryData) return;
+
+  const usedMB = memoryData.used_mb || 0;
+  const totalMB = memoryData.total_mb || 1000;
+  const percent = Math.round((usedMB / totalMB) * 100);
+
+  document.getElementById('memory-used').textContent = `${usedMB} MB`;
+  document.getElementById('memory-total').textContent = `总计 ${totalMB} MB`;
+  document.getElementById('memory-percent').textContent = `${percent}%`;
+  document.getElementById('memory-bar').style.width = `${percent}%`;
+
+  const details = memoryData.details || [];
+  document.getElementById('memory-details').innerHTML = details.length > 0 ?
+    details.map(d => `
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+        <span>${d.name}</span>
+        <span style="color:${d.percent > 70 ? 'var(--red)' : 'var(--text-muted)'}">${d.percent}% (${d.size_mb}MB)</span>
+      </div>
+    `).join('') :
+    '<span style="color:var(--text-muted);">无详细信息</span>';
 }
 
-function updateTrendChart(health, queueStats, v5Status) {
-  const now = new Date().toLocaleTimeString();
-  trendData.timestamps.push(now);
-  trendData.active.push(health?.conversation_manager?.active_conversations ?? 0);
-  trendData.running.push(health?.conversation_manager?.running_tasks ?? 0);
-  trendData.kp.push(v5Status?.new_tables?.knowledge_points?.count ?? 0);
+function updateCallbackStats(callbackData) {
+  if (!callbackData) return;
 
-  if (trendData.timestamps.length > maxTrendPoints) {
-    trendData.timestamps.shift();
-    trendData.active.shift();
-    trendData.running.shift();
-    trendData.kp.shift();
-  }
+  document.getElementById('callback-success').textContent = callbackData.success_count || 0;
+  document.getElementById('callback-errors').textContent = callbackData.error_count || 0;
 
-  const ctx = document.getElementById('trend-chart').getContext('2d');
-  if (trendChart) trendChart.destroy();
+  const recent = callbackData.recent_calls || [];
+  document.getElementById('recent-callbacks').innerHTML = recent.length > 0 ?
+    recent.slice(0, 5).map(c => `
+      <div style="padding:4px 0;border-bottom:1px solid var(--border);">
+        <strong>${c.name || c.id}</strong>: ${c.status}
+        <span style="float:right;color:var(--text-muted);font-size:0.75rem;">${c.timestamp}</span>
+      </div>
+    `).join('') :
+    '<span style="color:var(--text-muted);">暂无记录</span>';
+}
 
-  trendChart = new Chart(ctx, {
+function updateHealthCheck(healthData) {
+  if (!healthData) return;
+
+  const services = healthData.services || {};
+  
+  document.getElementById('health-mcp').innerHTML = services.mcp_server?.healthy ?
+    '✅ 正常' : '❌ 异常';
+  document.getElementById('health-mcp').parentElement.style.borderLeftColor = 
+    services.mcp_server?.healthy ? 'var(--green)' : 'var(--red)';
+    
+  document.getElementById('health-db').innerHTML = services.database?.healthy ?
+    '✅ 正常' : '❌ 异常';
+  document.getElementById('health-db').parentElement.style.borderLeftColor = 
+    services.database?.healthy ? 'var(--green)' : 'var(--red)';
+
+  document.getElementById('health-llm').innerHTML = services.llm_service?.healthy ?
+    '✅ 正常' : '❌ 异常';
+  document.getElementById('health-llm').parentElement.style.borderLeftColor = 
+    services.llm_service?.healthy ? 'var(--green)' : 'var(--red)';
+
+  document.getElementById('health-fs').innerHTML = services.filesystem?.healthy ?
+    '✅ 正常' : '❌ 异常';
+  document.getElementById('health-fs').parentElement.style.borderLeftColor = 
+    services.filesystem?.healthy ? 'var(--green)' : 'var(--red)';
+}
+
+function updateTrends(trendData) {
+  if (!trendData) return;
+
+  const ctx = document.getElementById('system-trend-chart').getContext('2d');
+  
+  if (trendChartInstance) trendChartInstance.destroy();
+
+  trendChartInstance = new Chart(ctx, {
     type: 'line',
     data: {
-      labels: trendData.timestamps,
+      labels: (trendData.timestamps || []).slice(-24),
       datasets: [
         {
-          label: '活跃会话',
-          data: trendData.active,
+          label: '会话数',
+          data: (trendData.sessions || []).slice(-24),
+          borderColor: '#58a6ff',
+          backgroundColor: 'rgba(88,166,255,0.1)',
+          tension: 0.3,
+          fill: true
+        },
+        {
+          label: '任务完成',
+          data: (trendData.tasks_completed || []).slice(-24),
           borderColor: '#3fb950',
           backgroundColor: 'rgba(63,185,80,0.1)',
           tension: 0.3,
           fill: true
         },
         {
-          label: '运行中任务',
-          data: trendData.running,
-          borderColor: '#39d2c0',
-          backgroundColor: 'rgba(57,210,192,0.1)',
-          tension: 0.3,
-          fill: true
-        },
-        {
-          label: '知识库条目',
-          data: trendData.kp,
+          label: '回调触发',
+          data: (trendData.callbacks_triggered || []).slice(-24),
           borderColor: '#a371f7',
           backgroundColor: 'rgba(163,113,247,0.1)',
           tension: 0.3,
-          fill: true,
-          yAxisID: 'y1'
+          fill: true
         }
       ]
     },
     options: {
       responsive: true,
-      maintainAspectRatio: true,
-      interaction: { intersect: false, mode: 'index' },
-      scales: {
-        x: { ticks: { color: '#8b949e', maxTicksLimit: 10 }, grid: { color: '#21262d' } },
-        y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' }, beginAtZero: true,
-             title: { display: true, text: '会话/任务数', color: '#8b949e' } },
-        y1: { position: 'right', ticks: { color: '#a371f7' }, grid: { display: false },
-              beginAtZero: true, title: { display: true, text: '知识库条目', color: '#a371f7' } }
-      },
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { labels: { color: '#8b949e', usePointStyle: true } }
+        legend: {
+          position: 'top',
+          labels: { color: '#8b949e', usePointStyle: true }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#8b949e', maxRotation: 45, font: { size: 10 } },
+          grid: { display: false }
+        },
+        y: {
+          beginAtZero: true,
+          ticks: { color: '#8b949e' },
+          grid: { color: 'rgba(48,54,61,0.3)' }
+        }
       }
     }
   });
 }
 
-// ── Main Refresh Loop ──
-async function refresh() {
-  try {
-    const [health, queueStats, v5Status, cbStats] = await Promise.all([
-      fetchSystemHealth(),
-      fetchQueueStats(),
-      fetchV5Status(),
-      fetchCallbackStats()
-    ]);
+// ============================================================
+// 辅助功能
+// ============================================================
+function togglePanel(panelElement) {
+  panelElement.classList.toggle('collapsed');
+}
 
-    // Check for errors
-    const errors = [];
-    if (!health) errors.push('系统健康检查失败');
-    if (!v5Status) errors.push('v5 状态查询失败');
-
-    if (errors.length > 0) {
-      updateErrorBanner(errors.join('; '));
-    } else {
-      updateErrorBanner(null);
-    }
-
-    updateKeyMetrics(health, queueStats, v5Status, cbStats);
-    updateKnowledgeBase(v5Status);
-    updateRecentTasks(queueStats);
-    updateTrendChart(health, queueStats, v5Status);
-
-    // Update refresh indicator
-    const dot = document.querySelector('.refresh-dot');
-    dot.style.background = errors.length > 0 ? 'var(--red)' : 'var(--green)';
-
-  } catch (e) {
-    console.error('Dashboard refresh error:', e);
-    updateErrorBanner('数据获取失败: ' + e.message);
+function showError(viewId, message) {
+  const banner = document.getElementById(`error-banner-${viewId}`);
+  if (banner) {
+    banner.textContent = message;
+    banner.style.display = 'block';
   }
 }
 
-// ── Startup ──
+function clearError(viewId) {
+  const banner = document.getElementById(`error-banner-${viewId}`);
+  if (banner) {
+    banner.style.display = 'none';
+  }
+}
+
+// ============================================================
+// 数据刷新循环
+// ============================================================
+
+// 刷新成长视角数据
+async function refreshGrowthData() {
+  try {
+    const [userGrowth, systemEvo, radarData, timelineData, heatmapData] = await Promise.all([
+      getUserGrowth(),
+      getSystemEvolution(),
+      getSkillRadar(),
+      getTimeline(),
+      getActivityHeatmap()
+    ]);
+
+    updateGrowthMetrics(userGrowth, systemEvo);
+    updateRadarChart(radarData);
+    updateEvolutionPanel(systemEvo);
+    updateTimeline(timelineData);
+    updateHeatmap(heatmapData);
+
+    clearError('growth');
+  } catch (error) {
+    console.error('[Dashboard Growth] Refresh error:', error);
+    showError('growth', `刷新失败: ${error.message}`);
+  }
+}
+
+// 刷新运维视角数据
+async function refreshOpsData() {
+  try {
+    const [statusData, taskData, memoryData, callbackData, healthData, trendData] = await Promise.all([
+      getSystemStatus(),
+      getTaskQueue(),
+      getMemoryUsage(),
+      getCallbackStats(),
+      getHealthCheck(),
+      getSystemTrends()
+    ]);
+
+    updateOpsMetrics(statusData);
+    updateTaskQueue(taskData);
+    updateMemoryUsage(memoryData);
+    updateCallbackStats(callbackData);
+    updateHealthCheck(healthData);
+    updateTrends(trendData);
+
+    clearError('ops');
+  } catch (error) {
+    console.error('[Dashboard Ops] Refresh error:', error);
+    showError('ops', `刷新失败: ${error.message}`);
+  }
+}
+
+// 主刷新函数（仅刷新当前活动视图）
+async function refresh() {
+  const activeView = document.querySelector('.view-container.active');
+  if (activeView) {
+    const viewId = activeView.id.replace('view-', '');
+    if (viewId === 'growth') {
+      await refreshGrowthData();
+    } else if (viewId === 'ops') {
+      await refreshOpsData();
+    }
+  }
+
+  document.getElementById('refresh-status').textContent = `最后更新: ${new Date().toLocaleTimeString()}`;
+}
+
+// ============================================================
+// 初始化
+// ============================================================
 document.addEventListener('DOMContentLoaded', () => {
+  // 初始加载当前视图数据
   refresh();
+  
+  // 自动刷新（仅刷新活动视图）
   setInterval(refresh, REFRESH_INTERVAL);
 });
 </script>
