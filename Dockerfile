@@ -16,12 +16,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # 系统依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential curl git \
+    build-essential curl git cmake \
     && rm -rf /var/lib/apt/lists/*
 
 # Python 依赖
+# ⚠️ 关键: llama-cpp-python 必须禁用高级 CPU 指令集优化，否则在 ModelScope 云端会报 "Illegal instruction"
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+# 先安装 llama-cpp-python (使用通用编译参数，兼容所有 CPU)
+RUN CMAKE_ARGS="-DLLAMA_NATIVE=off" pip install --no-cache-dir llama-cpp-python>=0.3.20
+
+# 再安装其他依赖
+RUN grep -v "llama-cpp-python" requirements.txt | pip install --no-cache-dir -r /dev/stdin
 
 # 应用代码
 COPY server.py pyproject.toml ./

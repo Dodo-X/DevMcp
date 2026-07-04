@@ -985,6 +985,12 @@ try:
 
     _tools_count = 21
     print(f"[INFO] devpartner-tools: {_tools_count} 个纯工具已注册")
+    # 调试: 验证工具是否在 mcp 实例上
+    try:
+        _reg_tools = [t.name for t in mcp._tool_manager._tools.values()]
+        print(f"[DEBUG] mcp 实例上注册的工具: {_reg_tools}")
+    except Exception as de:
+        print(f"[DEBUG] 无法列出工具: {de}")
 
 except Exception as e:
     print(f"[WARN] devpartner-tools 加载失败: {e}")
@@ -4546,20 +4552,20 @@ if __name__ == "__main__":
             env_name = "本地开发"
             access_url = f"http://127.0.0.1:{port}/mcp"
 
-        print(f"  启动模式: MCP 服务 (Streamable HTTP)")
+        print("  启动模式: MCP 服务 (Streamable HTTP)")
         print(f"  运行环境: {env_name}")
         print(f"  监听端口: {port}")
         print(f"  MCP端点: {access_url}")
         print("")
-        print("  📋 系统架构:")
-        print("     🛠️ 工具层 (devpartner_tools): 21个纯工具 (无状态)")
-        print("     🤖 智能层 (devpartner_agent): 67+个智能工具 (有状态)")
+        print("  [系统架构]")
+        print("     [工具层] devpartner_tools: 21个纯工具 (无状态)")
+        print("     [智能层] devpartner_agent: 67+个智能工具 (有状态)")
         print("")
-        print("  📋 可用功能:")
-        print(f"     🔗 MCP客户端调用: POST {access_url}")
-        print(f"     📊 Web Dashboard: http://localhost:{port}/dashboard")
-        print(f"     🔧 API文档:       http://localhost:{port}/docs")
-        print(f"     📈 健康检查:      http://localhost:{port}/health")
+        print("  [可用功能]")
+        print(f"     [MCP] POST {access_url}")
+        print(f"     [仪表盘] http://localhost:{port}/dashboard")
+        print(f"     [API文档] http://localhost:{port}/docs")
+        print(f"     [健康检查] http://localhost:{port}/health")
         print("")
         print("  待命状态: 等待 MCP 客户端连接...")
         print("=" * 60)
@@ -4569,6 +4575,22 @@ if __name__ == "__main__":
         # 使用 starlette.middleware.Middleware 包装，符合 Starlette 中间件注册规范
         from starlette.middleware import Middleware as _Middleware
         from starlette.middleware.cors import CORSMiddleware as _CORSMiddleware
+        
+        # v6.0.4: 禁用 Accept header 强制检查
+        # CodeBuddy 等 MCP 客户端可能不发送 Accept: application/json
+        # 但 mcp 0.x 内部严格要求，否则返回 406 Not Acceptable
+        try:
+            from mcp.server.streamable_http import StreamableHTTPSessionManager as _SM
+            if not getattr(_SM._validate_accept_header, '_patched', False):
+                _orig = _SM._validate_accept_header
+                async def _patched_validate(self, request, scope, send):
+                    return True
+                _SM._validate_accept_header = _patched_validate
+                _SM._validate_accept_header._patched = True
+                print("[INFO] Accept header 检查已禁用 (兼容 CodeBuddy 等 MCP 客户端)")
+        except Exception as _e:
+            print(f"[WARN] Accept header 补丁失败: {_e}")
+        
         mcp.run(transport="streamable-http",
                  host="0.0.0.0",
                  port=port,
