@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [6.0.4] - 2026-07-05
+
+### 🐛 修复: CodeBuddy 连接后不显示工具列表
+
+#### 根因
+CodeBuddy 等 MCP 客户端发起 `tools/list` 请求时**不发送 `Accept: application/json` 头**，但 mcp SDK 的 `StreamableHTTPServerTransport._validate_accept_header()` 严格要求该头，否则返回 `406 Not Acceptable` → 客户端显示"没有工具"。
+
+#### 修复
+- `server.py`: 在 `_run_mcp_service()` 中 monkey-patch 掉 `_validate_accept_header`，使其始终返回 True
+- 修复补丁目标类名：`StreamableHTTPSessionManager` → `StreamableHTTPServerTransport`（mcp 0.x 实际类名）
+
+---
+
 ## [6.0.3] - 2026-07-04
 
 ### 🐛 修复: ModelScope 容器崩溃重启 → 重复下载模型

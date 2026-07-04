@@ -4580,13 +4580,12 @@ if __name__ == "__main__":
         # CodeBuddy 等 MCP 客户端可能不发送 Accept: application/json
         # 但 mcp 0.x 内部严格要求，否则返回 406 Not Acceptable
         try:
-            from mcp.server.streamable_http import StreamableHTTPSessionManager as _SM
-            if not getattr(_SM._validate_accept_header, '_patched', False):
-                _orig = _SM._validate_accept_header
+            from mcp.server.streamable_http import StreamableHTTPServerTransport as _ST
+            if not getattr(_ST._validate_accept_header, '_patched', False):
                 async def _patched_validate(self, request, scope, send):
                     return True
-                _SM._validate_accept_header = _patched_validate
-                _SM._validate_accept_header._patched = True
+                _ST._validate_accept_header = _patched_validate
+                _ST._validate_accept_header._patched = True
                 print("[INFO] Accept header 检查已禁用 (兼容 CodeBuddy 等 MCP 客户端)")
         except Exception as _e:
             print(f"[WARN] Accept header 补丁失败: {_e}")
