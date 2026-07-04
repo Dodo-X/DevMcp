@@ -84,15 +84,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # 步骤 2: 安装 Python 依赖
 # ============================================================
 
-# 先复制依赖文件（利用Docker缓存层优化）
+# 复制统一依赖文件（单一数据源，避免重复）
 COPY requirements.txt .
-COPY devpartner_agent/requirements.txt devpartner_agent/
-COPY devpartner_tools/requirements.txt devpartner_tools/
 
-# 安装核心依赖
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir -r devpartner_agent/requirements.txt && \
-    pip install --no-cache-dir -r devpartner_tools/requirements.txt
+# 安装所有依赖（包含 Agent、Tools、LLM 推理引擎）
+RUN pip install --no-cache-dir -r requirements.txt
 
 # ============================================================
 # 步骤 3: 复制应用代码

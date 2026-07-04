@@ -8,10 +8,16 @@ version = "6.0.0"
 description = "DevPartner MCP 服务器 - 会话管理 + 异步任务 + 知识图谱 + Web Dashboard"
 requires-python = ">=3.10"
 dependencies = [
-    "fastmcp",
-    "httpx",
-    "pyyaml",
+    "fastmcp>=0.3.0",
+    "httpx>=0.24.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
-llm = ["llama-cpp-python>=0.2.0"]
+llm = ["llama-cpp-python>=0.3.20"]
+
+# 开发/测试依赖
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+]
