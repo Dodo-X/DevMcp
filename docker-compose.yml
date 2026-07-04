@@ -27,10 +27,10 @@ version: "3.8"
 services:
   devpartner:
     build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     image: devpartner:v6.0-modelscope
-    container_name: devpartner-modelspace
+    container_name: devpartner-modelscope
     restart: unless-stopped
 
     # ModelScope 创空间标准端口
@@ -53,16 +53,9 @@ services:
       # v6.0: Streamable HTTP 模式标识
       - TRANSPORT_MODE=streamable-http
 
-    # 健康检查
+    # 健康检查（使用独立脚本）
     healthcheck:
-      test: ["CMD", "python", "-c", "
-import urllib.request
-try:
-    urllib.request.urlopen('http://localhost:7860/dashboard', timeout=5)
-    exit(0)
-except:
-    exit(1)
-"]
+      test: ["CMD", "python", "/app/healthcheck.py"]
       interval: 60s
       timeout: 10s
       retries: 3
