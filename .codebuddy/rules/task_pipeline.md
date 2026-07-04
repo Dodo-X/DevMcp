@@ -1,3 +1,11 @@
+---
+description: 
+alwaysApply: false
+enabled: false
+updatedAt: 2026-07-04T14:35:24.377Z
+provider: 
+---
+
 # CodeBuddy 任务管道规范 v6.0
 
 ## 📋 概述

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [6.0.3] - 2026-07-04
+
+### 🐛 修复: ModelScope 容器崩溃重启 → 重复下载模型
+
+#### 根因
+1. `server.py` 第 173 行 `mcp._app.add_middleware()` — FastMCP 0.3.x 无 `_app` 属性，直接崩溃
+2. 崩溃后容器重启，模型文件丢失，启动脚本重新下载 → 无限循环
+
+#### 修复
+- `server.py`: 移除 `mcp._app` 语法错误，改为在 `_run_mcp_service()` 中通过 `mcp.run(middleware=[CORSMiddleware(...)])` 注入
+- `start_modelscope.sh`: 新增持久化缓存目录 `/mnt/workspace/modelscope_cache` 检测，下载后优先从缓存恢复
+- `Dockerfile`: 注释掉模型构建时下载方案（可选），当前依赖启动脚本下载到持久化缓存
+
+---
+
 ## [6.0.2] - 2026-07-04
 
 ### 🔧 ModelScope MCP 连接修复

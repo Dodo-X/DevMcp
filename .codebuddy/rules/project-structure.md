@@ -1,3 +1,11 @@
+---
+description: 
+alwaysApply: false
+enabled: false
+updatedAt: 2026-07-04T14:35:21.887Z
+provider: 
+---
+
 # DevPartner 项目结构规范 - CodeBuddy 规则
 
 > **适用范围**: CodeBuddy 环境下的所有开发活动  

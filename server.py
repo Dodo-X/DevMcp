@@ -75,7 +75,6 @@ from fastmcp import FastMCP
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
-from starlette.middleware.cors import CORSMiddleware
 import os as _os
 import logging
 
@@ -170,15 +169,9 @@ mcp = FastMCP("devpartner")
 # ── v6.0.2: CORS 中间件 ──────────────────────────────────────────
 # ModelScope 创空间的代理层可能跨域转发 MCP 请求，
 # 缺少 CORS 头会导致客户端 preflight 失败 → 连接不上
-mcp._app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["Mcp-Session-Id"],  # MCP Streamable HTTP session 头
-)
-print("[INFO] CORS 中间件已配置 (allow_origins=*, expose MCP headers)")
+# 注意: FastMCP 的 _app 属性不存在，CORSMiddleware 在 _run_mcp_service() 中
+# 通过 run() 的 middleware 参数注入（见 _run_mcp_service）
+print("[INFO] CORS 中间件将通过 mcp.run(middleware=...) 在启动时注入")
 
 # ── v6.0.2: 请求诊断中间件 ────────────────────────────────────────
 # 记录每个请求的关键信息，用于排查 ModelScope 代理层问题
@@ -4572,11 +4565,23 @@ if __name__ == "__main__":
         print("=" * 60)
 
         # 启动 Streamable HTTP 服务
+        # v6.0.3: CORSMiddleware 作为 ASGI 中间件传入，解决 ModelScope 跨域问题
+        # 使用 starlette.middleware.Middleware 包装，符合 Starlette 中间件注册规范
+        from starlette.middleware import Middleware as _Middleware
+        from starlette.middleware.cors import CORSMiddleware as _CORSMiddleware
         mcp.run(transport="streamable-http",
                  host="0.0.0.0",
                  port=port,
                  json_response=True,
-                 stateless_http=True)
+                 stateless_http=True,
+                 middleware=[_Middleware(
+                     _CORSMiddleware,
+                     allow_origins=["*"],
+                     allow_credentials=True,
+                     allow_methods=["*"],
+                     allow_headers=["*"],
+                     expose_headers=["Mcp-Session-Id"],
+                 )])
 
     # 判断启动模式
     if len(sys.argv) > 1:

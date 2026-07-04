@@ -27,10 +27,21 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY server.py pyproject.toml ./
 COPY devpartner_tools/ devpartner_tools/
 COPY devpartner_agent/ devpartner_agent/
-COPY models/README.md models/
 
 # 数据目录
 RUN mkdir -p /app/data/{databases,logs,reports,memories} /app/models
+
+# 模型文件（打包进镜像，避免容器崩溃后重复下载）
+# 如果你需要在构建时从 ModelScope 下载模型，取消下面注释并设置 MODELSCOPE_TOKEN：
+# RUN pip install modelscope && \
+#     MODELSCOPE_TOKEN="your_token" python3 -c "
+# import os, glob, shutil
+# from modelscope import snapshot_download
+# path = snapshot_download('Pisces43/Dev-partner-model', token=os.environ['MODELSCOPE_TOKEN'], cache_dir='/tmp/msc_cache', revision='master')
+# for g in glob.glob(os.path.join(path, '*.gguf')):
+#     shutil.copy2(g, '/app/models/')
+#     print(f'Model: {os.path.basename(g)}')
+# " && rm -rf /tmp/msc_cache
 
 # 启动脚本 + 健康检查
 COPY scripts/start_modelscope.sh /app/start_modelscope.sh

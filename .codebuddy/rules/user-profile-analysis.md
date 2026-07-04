@@ -1,3 +1,11 @@
+---
+description: 
+alwaysApply: false
+enabled: false
+updatedAt: 2026-07-04T14:35:25.249Z
+provider: 
+---
+
 # 用户全维度画像分析规则 v1.0
 
 > DevPartner MCP 双向画像协同协议的客户端分析规则。
