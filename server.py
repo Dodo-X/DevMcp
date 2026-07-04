@@ -74,8 +74,14 @@ if str(_project_root) not in sys.path:
 from fastmcp import FastMCP
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from starlette.middleware.cors import CORSMiddleware
 import os as _os
+import logging
+
+# v6.0.2: 请求诊断日志 — 帮助排查 ModelScope 代理层 MCP 连接问题
+_diag_logger = logging.getLogger("devpartner.diag")
+_diag_logger.setLevel(logging.INFO)
 
 # v6.0.1: 版本号从 pyproject.toml 动态读取（单一来源）
 from devpartner_agent.core.config import get_project_version
@@ -161,6 +167,61 @@ _apply_sse_closed_resource_patch()
 # 创建统一 MCP 实例
 mcp = FastMCP("devpartner")
 
+# ── v6.0.2: CORS 中间件 ──────────────────────────────────────────
+# ModelScope 创空间的代理层可能跨域转发 MCP 请求，
+# 缺少 CORS 头会导致客户端 preflight 失败 → 连接不上
+mcp._app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Mcp-Session-Id"],  # MCP Streamable HTTP session 头
+)
+print("[INFO] CORS 中间件已配置 (allow_origins=*, expose MCP headers)")
+
+# ── v6.0.2: 请求诊断中间件 ────────────────────────────────────────
+# 记录每个请求的关键信息，用于排查 ModelScope 代理层问题
+class RequestDiagMiddleware(Middleware):
+    """记录每个请求的来源、路径、方法，帮助诊断 MCP 连接问题"""
+    async def on_before_request(self, context: MiddlewareContext, call_next):
+        try:
+            req = getattr(context, "request", None)
+            if req:
+                _diag_logger.info(
+                    "[DIAG] %s %s | Origin=%s | Referer=%s | X-Forwarded=%s",
+                    req.method, req.url.path,
+                    req.headers.get("origin", "-"),
+                    req.headers.get("referer", "-")[:80],
+                    req.headers.get("x-forwarded-for", "-")
+                )
+        except Exception:
+            pass
+        return await call_next(context)
+
+mcp.add_middleware(RequestDiagMiddleware())
+
+# ── v6.0.2: 根路径和 /health 端点 ─────────────────────────────────
+# ModelScope 创空间需要根路径和健康检查端点，否则可能拒绝路由流量
+
+@mcp.custom_route("/", methods=["GET", "HEAD"])
+async def root_endpoint(request: Request):
+    """根路径 — ModelScope 创空间探测入口"""
+    return JSONResponse({
+        "service": "DevPartner v6.0",
+        "version": VERSION,
+        "protocol": "MCP Streamable HTTP",
+        "mcp_endpoint": "/mcp",
+        "health": "/health",
+        "dashboard": "/dashboard",
+        "status": "running",
+    })
+
+@mcp.custom_route("/health", methods=["GET", "HEAD"])
+async def health_endpoint(request: Request):
+    """快速健康检查 — 轻量级，仅返回存活状态"""
+    return JSONResponse({"status": "healthy", "version": VERSION})
+
 # ── v5.2: Web Dashboard 自定义路由 ──
 _DASHBOARD_PATH = _os.path.join(_os.path.dirname(__file__),
                                 "devpartner_agent", "dashboard.html")
@@ -177,8 +238,10 @@ async def mcp_health_check(request: Request) -> JSONResponse:
     return JSONResponse({
         "status": "ok",
         "server": "devpartner",
+        "version": VERSION,
         "protocol": "MCP Streamable HTTP (POST /mcp)",
         "dashboard": "/dashboard",
+        "health": "/health",
         "llm_available": llm_available,
         "message": "此 GET 端点用于健康检查；MCP JSON-RPC 调用请使用 POST /mcp",
     })

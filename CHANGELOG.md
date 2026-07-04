@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [6.0.2] - 2026-07-04
+
+### 🔧 ModelScope MCP 连接修复
+
+#### 🐛 修复
+- **CORS 中间件缺失**: 添加 `CORSMiddleware`，允许所有来源 + 暴露 `Mcp-Session-Id` 头（ModelScope 代理层跨域转发导致 MCP 连接失败）
+- **缺少根路径端点**: 添加 `GET /` 和 `GET /health` 端点（ModelScope 创空间需要根路径探测，无响应会拒绝路由流量）
+- **请求诊断不足**: 添加 `RequestDiagMiddleware` 记录所有请求路径/来源/代理头（帮助排查代理层问题）
+
+#### 🔄 变更
+- `healthcheck.py`: 改为依次探测 `/health` → `/` → `/dashboard`，优先使用轻量端点
+- `Dockerfile`: HEALTHCHECK 间隔从 60s 缩短到 30s，启动等待从 30s 缩短到 20s
+- `Dockerfile`: 精简注释和冗余层，从 161 行缩减到 42 行
+- `scripts/start_modelscope.sh`: 精简启动脚本，从 230 行缩减到 36 行
+
+#### 📝 文件变更
+- `server.py`: 新增 CORS 中间件 + 根路径/健康检查端点 + 请求诊断中间件
+- `scripts/healthcheck.py`: 多端点回退探测
+- `Dockerfile`: 优化健康检查参数
+
+---
+
 ## [5.2.0] - 2026-07-03
 
 ### 🎉 重大更新 - LLM 驱动架构重构
