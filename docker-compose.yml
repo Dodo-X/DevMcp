@@ -48,10 +48,15 @@ services:
       - MCP_PORT=7860
       - TZ=Asia/Shanghai
       - PYTHONUNBUFFERED=1
-      # v6.0: 模型路径配置
+      # v6.0: 模型路径配置（默认路径，可通过 Volume 或自动下载覆盖）
       - MODEL_PATH=/app/models/Qwen3.5-9B-Q4_1.gguf
       # v6.0: Streamable HTTP 模式标识
       - TRANSPORT_MODE=streamable-http
+
+      # ===== ModelScope 自动下载配置 (可选) =====
+      # 获取 Token: https://modelscope.cn/my/myaccesstoken
+      # - MODELSCOPE_TOKEN=your_token_here          # API Token (访问私有模型必需)
+      # - MODELSCOPE_MODEL_ID=Pisces43/Dev-partner-model  # 模型 ID (默认值)
 
     # 健康检查（使用独立脚本）
     healthcheck:

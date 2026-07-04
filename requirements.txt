@@ -21,3 +21,6 @@ pyyaml>=6.0
 # 安装 CUDA 加速版（GPU 推荐）:
 #   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
 llama-cpp-python>=0.3.20
+
+# ModelScope SDK (用于下载私有模型到容器内)
+modelscope>=1.9.0
