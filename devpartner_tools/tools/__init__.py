@@ -1,13 +1,12 @@
 ﻿"""
 DevPartner Tools - 纯工具包
 
-5 大类共 21 个无状态 MCP 工具：
+4 大类共 16 个无状态 MCP 工具：
 
   📁 filesystem        — 文件系统操作 (5个: read_file, write_file, list_directory, search_files, search_content)
   🔀 git_operations     — Git 操作 (3个: git_status, git_log, git_diff)
   🌐 web_requests       — 网络请求 (4个: fetch_url, github_search_code, github_search_repositories, context7_search)
   ⚙️ system_utils       — 系统工具 (4个: execute_system_command, detect_client, environment_scan, validate_path)
-  📊 growth_analytics   — 双向成长分析 (5个: get_user_growth_overview, get_system_evolution_stats, get_user_skill_radar, get_learning_timeline, get_user_activity_heatmap)
 
 设计原则：
   - 无状态：函数不持有内部状态，每次调用独立
@@ -28,13 +27,6 @@ from .web_requests import (
 from .system_utils import (
     execute_system_command, detect_client, environment_scan, validate_path
 )
-from .growth_analytics import (
-    get_user_growth_overview,
-    get_system_evolution_stats,
-    get_user_skill_radar,
-    get_learning_timeline,
-    get_user_activity_heatmap
-)
 
 __all__ = [
     # filesystem
@@ -45,10 +37,4 @@ __all__ = [
     "fetch_url", "github_search_code", "github_search_repositories", "context7_search",
     # system
     "execute_system_command", "detect_client", "environment_scan", "validate_path",
-    # growth analytics (双向成长仪表盘)
-    "get_user_growth_overview",
-    "get_system_evolution_stats",
-    "get_user_skill_radar",
-    "get_learning_timeline",
-    "get_user_activity_heatmap",
 ]

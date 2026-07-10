@@ -33,21 +33,7 @@ class ProfileScheduler:
     - 支持手动调用 trigger_analysis(scope="full")
     """
 
-    _instance: Optional["ProfileScheduler"] = None
-    _lock = threading.Lock()
-
-    def __new__(cls):
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-        return cls._instance
-
     def __init__(self):
-        if hasattr(self, "_initialized"):
-            return
-        
-        self._initialized = True
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._last_daily_run: Optional[str] = None
@@ -287,9 +273,15 @@ class ProfileScheduler:
         }
 
 
+# PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入
+_scheduler_instance: Optional[ProfileScheduler] = None
+
 def get_scheduler() -> ProfileScheduler:
     """获取全局调度器单例"""
-    return ProfileScheduler()
+    global _scheduler_instance
+    if _scheduler_instance is None:
+        _scheduler_instance = ProfileScheduler()
+    return _scheduler_instance
 
 
 if __name__ == "__main__":

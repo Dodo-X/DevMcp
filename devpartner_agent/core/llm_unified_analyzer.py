@@ -7,7 +7,7 @@ LLM 统一分析引擎 v6.0
 
 设计理念：
 - 🎯 单一职责：所有数据分析、归纳、校验、统计工作由本引擎承载
-- 🤖 LLM 驱动：依托 llama-cpp-python + Qwen3.5-9B 进行智能推理
+- 🤖 LLM 驱动：依托 Ollama 进行智能推理
 - 📐 提示词工程：结构化 Prompt 模板确保输入输出精准可控
 - 🔄 双模式：LLM 可用时智能分析，不可用时优雅降级到简化规则
 - ⚡ 高性能：复用 LLMService 单例，懒加载模型
@@ -251,8 +251,8 @@ class LLMUnifiedAnalyzer:
 
         if result and not result.get("parse_error"):
             result["analysis_timestamp"] = datetime.now().isoformat()
-            result["inference_engine"] = "llama-cpp-python"
-            result["model_info"] = "Qwen3.5-9B-Q4_1"
+            result["inference_engine"] = "ollama"
+            result["model_info"] = getattr(self._get_llm_config(), 'ollama_model', 'qwen3')
             return result
 
         # LLM 失败时降级到简化版规则（仅做基础提取）
@@ -410,7 +410,7 @@ class LLMUnifiedAnalyzer:
         if result and not result.get("parse_error"):
             result["generated_at"] = datetime.now().isoformat()
             result["data_source"] = work_data.get("data_source", "db")
-            result["inference_engine"] = "llama-cpp-python"
+            result["inference_engine"] = "ollama"
             return result
 
         logger.warning("LLM 日报生成失败")

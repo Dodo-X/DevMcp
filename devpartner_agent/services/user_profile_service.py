@@ -73,9 +73,9 @@ def request_user_profile_analysis(
             "client_context": client_context or {},
         },
         "recent_data": recent_conversations[:3] if recent_conversations else [],
-        "user_traits_schema": _get_user_traits_schema(),
-        "project_strategy": _get_project_strategy(),
-        "few_shot_examples": _get_few_shot_examples(),
+        "user_traits_schema": _USER_TRAITS_SCHEMA,
+        "project_strategy": _PROJECT_STRATEGY,
+        "few_shot_examples": _FEW_SHOT_EXAMPLES,
         "analysis_guidelines": {
             "focus_areas": [
                 "技术技能识别与等级评估",
@@ -160,155 +160,33 @@ def query_user_profile(
     return result
 
 
-def _get_user_traits_schema() -> dict:
-    """返回用户画像 Schema 定义"""
-    return {
-        "version": "6.0",
-        "schema_type": "json_schema",
-        "fields": {
-            "skills_observed": {
-                "type": "array[string]",
-                "description": "从对话中识别的技术技能列表",
-                "examples": ["Python 开发", "React Hooks", "SQL 查询优化"],
-            },
-            "behavior_notes": {
-                "type": "string",
-                "description": "学习习惯、问题解决方式、沟通特点",
-            },
-            "tech_interests": {
-                "type": "array[string]",
-                "description": "用户表现出的技术兴趣方向",
-            },
-            "areas_for_growth": {
-                "type": "array[string]",
-                "description": "需要提升或学习的领域",
-            },
-            "mistakes": {
-                "type": "array[string]",
-                "description": "常见的错误模式或知识盲区",
-            },
-            "strengths": {
-                "type": "array[string]",
-                "description": "明显的优势和能力",
-            },
-            "communication_style": {
-                "type": "string",
-                "enum": ["详细型", "简洁型", "示例驱动型", "理论导向型"],
-            },
-            "decision_pattern": {
-                "type": "string",
-                "enum": ["快速决策", "深思熟虑", "依赖建议", "自主探索"],
-            },
-            "emotional_state": {
-                "type": "string",
-                "enum": ["积极", "中性", "焦虑", "沮丧"],
-            },
-            "learning_progress": {
-                "type": "object",
-                "properties": {
-                    "current_level": "string",
-                    "target_level": "string",
-                    "gap_analysis": "string",
-                },
-            },
-        },
-        "required_fields": ["skills_observed", "behavior_notes"],
-    }
+# PONYTATIL: 静态数据直接定义为模块级常量，避免每次调用时重新构建 dict
+_USER_TRAITS_SCHEMA = {
+    "version": "7.2",
+    "schema_type": "json_schema",
+    "fields": {
+        "skills_observed": {"type": "array[string]", "description": "从对话中识别的技术技能列表"},
+        "behavior_notes": {"type": "string", "description": "学习习惯、问题解决方式、沟通特点"},
+        "tech_interests": {"type": "array[string]", "description": "用户表现出的技术兴趣方向"},
+        "areas_for_growth": {"type": "array[string]", "description": "需要提升或学习的领域"},
+        "mistakes": {"type": "array[string]", "description": "常见的错误模式或知识盲区"},
+        "strengths": {"type": "array[string]", "description": "明显的优势和能力"},
+        "communication_style": {"type": "string", "enum": ["详细型", "简洁型", "示例驱动型", "理论导向型"]},
+        "decision_pattern": {"type": "string", "enum": ["快速决策", "深思熟虑", "依赖建议", "自主探索"]},
+        "emotional_state": {"type": "string", "enum": ["积极", "中性", "焦虑", "沮丧"]},
+        "learning_progress": {"type": "object", "properties": {"current_level": "string", "target_level": "string", "gap_analysis": "string"}},
+    },
+    "required_fields": ["skills_observed", "behavior_notes"],
+}
 
+_PROJECT_STRATEGY = {
+    "focus_areas": ["前端框架 (React/Vue/Angular)", "后端开发 (Python/Django/FastAPI)", "数据库设计 (SQL/NoSQL)", "DevOps 工具链 (Docker/Git/CI-CD)", "AI/ML 应用 (LLM/RAG/Agent)"],
+    "priority_skills": ["TypeScript 类型安全编程", "现代前端工程化", "微服务架构设计", "云原生部署实践"],
+    "learning_path_suggestion": "1) 基础巩固阶段：熟练掌握当前技术栈核心概念。2) 进阶提升阶段：深入理解底层原理和最佳实践。3) 专家成长阶段：关注前沿技术和架构趋势。",
+}
 
-def _get_project_strategy() -> dict:
-    """返回项目策略配置"""
-    return {
-        "focus_areas": [
-            "前端框架 (React/Vue/Angular)",
-            "后端开发 (Python/Django/FastAPI)",
-            "数据库设计 (SQL/NoSQL)",
-            "DevOps 工具链 (Docker/Git/CI-CD)",
-            "AI/ML 应用 (LLM/RAG/Agent)",
-        ],
-        "priority_skills": [
-            "TypeScript 类型安全编程",
-            "现代前端工程化",
-            "微服务架构设计",
-            "云原生部署实践",
-        ],
-        "learning_path_suggestion": """
-根据当前对话内容，建议按以下优先级规划学习路径：
-
-1️⃣ **基础巩固阶段** (1-2个月)
-   - 熟练掌握当前使用的技术栈核心概念
-   - 补齐基础知识盲区
-
-2️⃣ **进阶提升阶段** (2-3个月)
-   - 深入理解底层原理和最佳实践
-   - 参与实际项目应用
-
-3️⃣ **专家成长阶段** (持续)
-   - 关注前沿技术和架构趋势
-   - 建立个人技术影响力
-""",
-    }
-
-
-def _get_few_shot_examples() -> list[dict]:
-    """返回 Few-shot 示例（用于指导客户端统一分析标准）"""
-    return [
-        {
-            "scenario": "前端开发者讨论 React 性能优化",
-            "input_dialogue": """
-我在用 React + TypeScript 开发一个电商项目，
-遇到了 Redux Toolkit 的异步 action 类型定义错误。
-我尝试了 createAsyncThunk 但类型推断总是报错。
-""",
-            "expected_output": {
-                "skills_observed": [
-                    "React 开发",
-                    "TypeScript 使用",
-                    "Redux Toolkit 状态管理",
-                ],
-                "behavior_notes": "能够清晰描述技术问题和上下文，倾向于同时提出多个相关问题",
-                "tech_interests": ["现代前端框架", "类型安全", "状态管理"],
-                "areas_for_growth": ["TypeScript 高级类型", "Redux 异步流程"],
-                "mistakes": ["async/await 与 Promise 混用导致类型推断失败"],
-                "strengths": ["问题描述准确", "有主动尝试解决的意识"],
-                "confidence": "medium",
-            },
-        },
-        {
-            "scenario": "后端开发者讨论数据库性能",
-            "input_dialogue": """
-Django ORM 的 N+1 查询问题怎么解决？
-我试了 select_related 但还是慢，查询时间超过 2 秒。
-""",
-            "expected_output": {
-                "skills_observed": [
-                    "Python/Django",
-                    "ORM 使用",
-                    "数据库性能调优",
-                ],
-                "behavior_notes": "遇到性能问题时会主动尝试常见方案再求助，关注量化指标",
-                "tech_interests": ["后端架构", "数据库优化", "ORM 原理"],
-                "areas_for_growth": ["SQL 执行计划分析", "缓存策略设计"],
-                "mistakes": ["混淆 select_related 和 prefetch_related 适用场景"],
-                "strengths": ["有性能优化意识", "熟悉 Django 生态", "能提供具体数值"],
-                "confidence": "high",
-            },
-        },
-        {
-            "scenario": "DevOps 工具链讨论",
-            "input_dialogue": "我想搭建一个 CI/CD 流水线，用 GitHub Actions 自动部署到 Docker 容器。目前手动部署经常出错，想自动化整个流程。",
-            "expected_output": {
-                "skills_observed": [
-                    "Docker 容器化",
-                    "CI/CD 概念",
-                    "GitHub Actions",
-                ],
-                "behavior_notes": "目标明确，希望系统性地解决问题而非临时方案",
-                "tech_interests": ["自动化运维", "容器化部署", "DevOps 实践"],
-                "areas_for_growth": ["YAML 工作流编写", "多环境部署策略"],
-                "mistakes": ["缺少对现有部署流程的问题根因分析"],
-                "strengths": ["有自动化意识", "能明确表达痛点"],
-                "confidence": "medium",
-            },
-        },
-    ]
+_FEW_SHOT_EXAMPLES = [
+    {"scenario": "前端开发者讨论 React 性能优化", "input_dialogue": "我在用 React + TypeScript 开发一个电商项目，遇到了 Redux Toolkit 的异步 action 类型定义错误。", "expected_output": {"skills_observed": ["React 开发", "TypeScript 使用", "Redux Toolkit 状态管理"], "behavior_notes": "能够清晰描述技术问题和上下文", "tech_interests": ["现代前端框架", "类型安全", "状态管理"], "areas_for_growth": ["TypeScript 高级类型", "Redux 异步流程"], "mistakes": ["async/await 与 Promise 混用"], "strengths": ["问题描述准确"]}},
+    {"scenario": "后端开发者讨论数据库性能", "input_dialogue": "Django ORM 的 N+1 查询问题怎么解决？我试了 select_related 但还是慢。", "expected_output": {"skills_observed": ["Python/Django", "ORM 使用", "数据库性能调优"], "behavior_notes": "遇到性能问题会主动尝试常见方案再求助", "tech_interests": ["后端架构", "数据库优化"], "areas_for_growth": ["SQL 执行计划分析", "缓存策略设计"], "mistakes": ["混淆 select_related 和 prefetch_related"], "strengths": ["有性能优化意识"]}},
+    {"scenario": "DevOps 工具链讨论", "input_dialogue": "我想搭建一个 CI/CD 流水线，用 GitHub Actions 自动部署到 Docker 容器。", "expected_output": {"skills_observed": ["Docker 容器化", "CI/CD 概念", "GitHub Actions"], "behavior_notes": "目标明确，希望系统性地解决问题", "tech_interests": ["自动化运维", "DevOps 实践"], "areas_for_growth": ["YAML 工作流编写", "多环境部署策略"], "mistakes": ["缺少根因分析"], "strengths": ["有自动化意识"]}},
+]

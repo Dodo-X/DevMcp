@@ -82,19 +82,9 @@ class CallbackRegistry:
       - 触发日志记录
       - 容错：单个回调异常不影响后续触发
     """
-
-    _instance: Optional["CallbackRegistry"] = None
-    _lock = threading.RLock()
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
+    
     def __init__(self):
-        if hasattr(self, "_initialized"):
-            return
-        self._initialized = True
+        self._lock = threading.RLock()
 
         # ── 核心数据结构 ──
         self._registrations: Dict[str, CallbackRegistration] = {}
@@ -518,6 +508,12 @@ class CallbackRegistry:
         logger.info("✅ 回调注册表已关闭")
 
 
+# PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入
+_callback_registry_instance: Optional[CallbackRegistry] = None
+
 def get_callback_registry() -> CallbackRegistry:
     """获取全局回调注册表单例"""
-    return CallbackRegistry()
+    global _callback_registry_instance
+    if _callback_registry_instance is None:
+        _callback_registry_instance = CallbackRegistry()
+    return _callback_registry_instance

@@ -1,194 +1,134 @@
-# 🤖 模型文件目录
+# 🤖 Ollama 推理引擎说明
 
-## 📋 说明
+## 📋 概述
 
-此目录用于存放 LLM 推理所需的模型文件。
+**v7.3 起，DevPartner 使用 [Ollama](https://ollama.com) 作为 LLM 推理引擎。**
 
-**重要**: 此目录下的模型文件 **不纳入 Git 版本控制**（见 `.gitignore` 配置）。
-
----
-
-## 🔧 支持的模型格式
-
-| 格式 | 扩展名 | 用途 | 推荐工具 |
-|------|--------|------|---------|
-| GGUF | `.gguf` | llama-cpp-python 推理 | ✅ **推荐** |
-| Safetensors | `.safetensors` | HuggingFace transformers | 备选 |
-| PyTorch Bin | `.bin` | 原生 PyTorch 模型 | 不推荐 |
+不再需要手动下载 GGUF 模型文件到此目录。模型由 Ollama 统一管理。
 
 ---
 
-## 📦 当前项目使用的模型
+## 🔧 安装 Ollama
 
-### **Qwen3.5-9B-Instruct-GGUF (Q4_1 量化版本)**
+### 方式一：官方安装包（推荐）
 
-- **文件名**: `Qwen3.5-9B-Q4_1.gguf`
-- **大小**: ~5.7 GB
-- **量化等级**: Q4_1 (4-bit量化，平衡性能与体积)
-- **用途**: 本地 LLM 推理、对话生成、代码分析
+1. 访问 [ollama.com](https://ollama.com) 下载对应系统安装包
+2. 安装完成后启动服务：
+   ```bash
+   ollama serve
+   ```
+3. 拉取推荐模型：
+   ```bash
+   ollama pull qwen3:latest
+   ```
 
-#### 为什么选择这个模型？
-
-1. ✅ **中文能力强**: Qwen 系列在中文场景表现优异
-2. ✅ **体积适中**: 9B参数 + 4bit量化 = ~5.7GB，可本地运行
-3. ✅ **推理速度快**: 支持 llama-cpp-python 加速
-4. ✅ **功能全面**: 对话、代码、数学、推理全覆盖
-
----
-
-## ⬇️ 下载方式
-
-### 方式一：从 ModelScope 下载（国内用户推荐）
+### 方式二：Docker
 
 ```bash
-# 安装 modelscope CLI
-pip install modelscope
-
-# 下载模型到当前目录
-modelscope download --model Qwen/Qwen3.5-9B-Instruct-GGUF \
-    --local_dir . \
-    Qwen3.5-9B-Q4_1.gguf
+docker run -d --name ollama -p 11434:11434 ollama/ollama
+docker exec -it ollama ollama pull qwen3:latest
 ```
 
-### 方式二：从 HuggingFace 下载
+### 方式三：Linux 命令行
 
 ```bash
-# 使用 huggingface-cli
-pip install huggingface_hub
-
-huggingface-cli download Qwen/Qwen3.5-9B-Instruct-GGUF \
-    Qwen3.5-9B-Q4_1.gguf \
-    --local-dir .
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull qwen3:latest
 ```
-
-### 方式三：手动下载
-
-1. 访问 [ModelScope 模型页面](https://modelscope.cn/models/Qwen/Qwen3.5-9B-Instruct-GGUF/files)
-2. 找到 `Qwen3.5-9B-Q4_1.gguf` 文件
-3. 点击下载（约 5.7GB）
-4. 将文件放到本目录 (`models/`)
 
 ---
 
-## 🔧 验证模型文件
+## 📦 推荐模型
 
-下载完成后，验证文件完整性：
+| 场景 | 模型 | 大小 | 命令 |
+|------|------|------|------|
+| 轻量级 | `qwen3:1.8b` | ~1.1GB | `ollama pull qwen3:1.8b` |
+| 平衡级 | `qwen3:latest` | ~4.7GB | `ollama pull qwen3:latest` |
+| 高性能 | `qwen3:14b` | ~8.5GB | `ollama pull qwen3:14b` |
+| 备选 | `qwen2.5:7b` | ~4.4GB | `ollama pull qwen2.5:7b` |
 
-```bash
-# 检查文件是否存在
-ls -lh models/Qwen3.5-9B-Q4_1.gguf
-
-# 预期输出:
-# -rw-r--r-- 1 user user 5.7G Jul  3 13:30 models/Qwen3.5-9B-Q4_1.gguf
-
-# 验证 MD5（如果提供）
-md5sum models/Qwen3.5-9B-Q4_1.gguf
-```
+> **推荐 `qwen3:latest`**：中文能力强、体积适中、推理速度快。
 
 ---
 
 ## ⚙️ 配置说明
 
-### 自动检测路径
+### DevPartner 自动检测
 
-DevPartner 会自动在以下位置查找模型：
+DevPartner 默认连接 `http://localhost:11434`，自动检测 Ollama 服务状态和可用模型。
 
-```
-优先级顺序：
-1. config.yaml 中配置的 llm.model_path
-2. 环境变量 MODEL_PATH
-3. ./models/Qwen3.5-9B-Q4_1.gguf (默认)
-4. ../models/Qwen3.5-9B-Q4_1.gguf (Docker 容器内)
-```
-
-### 手动配置路径
+### 手动配置
 
 编辑 `config.yaml`:
 
 ```yaml
 llm:
-  model_path: "./models/Qwen3.5-9B-Q4_1.gguf"
-  
-  # 模型参数
-  n_ctx: 4096          # 上下文窗口大小
-  n_batch: 512         # 批处理大小
-  n_gpu_layers: 0      # GPU 加速 (0=纯CPU, 无显卡保持0)
+  enabled: true
+  ollama_model: "qwen3"         # Ollama 模型名
+  ollama_timeout: 120           # 推理超时（秒）
+  temperature: 0.7
+  max_tokens: 2048
+  enhance_analysis: true
+  fallback_to_rules: false
 ```
 
-或通过环境变量：
+### 环境变量
 
 ```bash
-# Linux/Mac
-export MODEL_PATH="./models/Qwen3.5-9B-Q4_1.gguf"
+# 自定义 Ollama 地址（非本地时）
+export OLLAMA_BASE_URL="http://192.168.1.100:11434"
 
 # Windows (PowerShell)
-$env:MODEL_PATH=".\models\Qwen3.5-9B-Q4_1.gguf"
+$env:OLLAMA_BASE_URL="http://192.168.1.100:11434"
 ```
 
 ---
 
 ## 🐳 Docker 部署
 
-### 轻量模式（推荐）
-
-镜像不包含模型，通过 volume 挂载：
+### 轻量模式（连宿主机 Ollama）
 
 ```yaml
 # docker-compose.yml
 services:
   devpartner:
     image: devpartner:lite
-    volumes:
-      - ./models:/app/models  # 挂载本地模型目录
     ports:
       - "7860:7860"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
 ```
 
-### 完整模式
+### 完整模式（内嵌 Ollama）
 
-将模型打包进 Docker 镜像（~6.5GB）：
-
-```bash
-# 取消 deploy/.dockerignore 中的模型排除规则
-# models/*.gguf  ← 注释掉这行
-
-# 构建完整镜像
-docker build -t devpartner:full -f deploy/Dockerfile .
-
-# 运行（无需挂载）
-docker run -d -p 7860:7860 devpartner:full
+```dockerfile
+FROM python:3.11-slim
+RUN curl -fsSL https://ollama.com/install.sh | sh
+COPY . /app
+WORKDIR /app
+RUN pip install -r requirements.txt
+CMD ["bash", "-c", "ollama serve & sleep 5 && ollama pull qwen3 && python server.py 7860"]
 ```
-
-详细说明见 [../deploy/README.md](../deploy/README.md)
 
 ---
 
-## ☁️ ModelScope 云端部署
+## ✅ 验证
 
-### 方案 A: Dataset 挂载
+```bash
+# 检查 Ollama 服务
+ollama list
+# 或
+curl http://localhost:11434/api/tags
 
-1. 在 ModelScope 创建 Dataset
-2. 上传模型文件到 Dataset
-3. 部署时挂载 Dataset:
+# 检查 DevPartner LLM 引擎
+curl http://localhost:7860/api/system/status | grep engine
+# 应返回: "engine": "ollama"
 
-```yaml
-volumes:
-  - your-model-dataset:/app/models
+# 运行检查脚本
+python scripts/check_model.py
 ```
-
-### 方案 B: OSS/S3 存储
-
-将模型上传到对象存储服务，启动时自动下载：
-
-```python
-# config.yaml
-llm:
-  model_source: "remote"
-  model_url: "https://your-bucket.oss-cn-hangzhou.aliyuncs.com/models/Qwen3.5-9B-Q4_1.gguf"
-  auto_download: true
-```
-
-详细说明见 [../DEPLOYMENT_GUIDE.md](../DEPLOYMENT_GUIDE.md)
 
 ---
 
@@ -196,51 +136,63 @@ llm:
 
 ### Q1: 下载速度慢怎么办？
 
-**A**: 
-- 使用 ModelScope 国内镜像（速度快）
-- 选择非高峰期下载（凌晨）
-- 使用下载工具（如 aria2, IDM）多线程下载
+**A**: Ollama 从官方仓库拉取模型，国内可使用镜像：
+```bash
+# 设置 Ollama 镜像（如有）
+export OLLAMA_HOST=https://ollama-mirror.example.com
+```
 
 ### Q2: 可以用其他模型吗？
 
-**A**: 可以！支持任何 GGUF 格式模型。推荐配置：
+**A**: 可以！Ollama 支持数千种模型：
+```bash
+ollama pull llama3.2:3b
+ollama pull mistral:7b
+ollama pull deepseek-r1:8b
+```
 
-| 场景 | 推荐模型 | 大小 |
-|------|---------|------|
-| 轻量级 | Qwen3.5-1.5B-Q4 | ~1GB |
-| 平衡级 | Qwen3.5-9B-Q4 (**当前**) | **~5.7GB** |
-| 高性能 | Qwen3.5-32B-Q4 | ~18GB |
-| 专业级 | Qwen3.5-72B-Q4 | ~40GB |
+修改 `config.yaml` 中 `ollama_model` 即可。
 
-### Q3: 磁盘空间不足？
-
-**A**: 
-- 使用更小模型（1.5B 或 3B 版本）
-- 或使用云端部署（ModelScope/Docker）
-- 清理不需要的缓存: `rm -rf ~/.cache/huggingface/`
-
-### Q4: 如何更新模型版本？
+### Q3: 如何切换模型版本？
 
 **A**:
 ```bash
-# 1. 备份旧模型
-mv models/Qwen3.5-9B-Q4_1.gguf models/Qwen3.5-9B-Q4_1.gguf.bak
+# 拉取不同版本
+ollama pull qwen3:14b
 
-# 2. 下载新版本
-# （重复上面的下载步骤）
+# 修改 config.yaml
+llm:
+  ollama_model: "qwen3:14b"
+```
 
-# 3. 删除备份（确认新版本正常后）
-rm models/Qwen3.5-9B-Q4_1.gguf.bak
+### Q4: GPU 加速如何配置？
+
+**A**: Ollama 自动检测 GPU：
+- **NVIDIA**: 自动使用 CUDA（需安装 NVIDIA 驱动）
+- **Apple Silicon**: 自动使用 Metal
+- **AMD**: 自动使用 ROCm（Linux）
+
+无需额外配置。
+
+### Q5: 如何清理不需要的模型？
+
+**A**:
+```bash
+# 列出所有模型
+ollama list
+
+# 删除指定模型
+ollama rm qwen3:1.8b
 ```
 
 ---
 
 ## 📚 相关资源
 
-- **官方文档**: [Qwen3.5 GitHub](https://github.com/QwenLM/Qwen3.5)
-- **ModelScope**: [Qwen3.5-9B-Instruct-GGUF](https://modelscope.cn/models/Qwen/Qwen3.5-9B-Instruct-GGUF)
-- **HuggingFace**: [Qwen3.5-9B-Instruct-GGUF](https://huggingface.co/Qwen/Qwen3.5-9B-Instruct-GGUF)
-- **llama-cpp-python**: [GitHub](https://github.com/abetlen/llama-cpp-python)
+- **Ollama 官方**: https://ollama.com
+- **Ollama GitHub**: https://github.com/ollama/ollama
+- **模型库**: https://ollama.com/library
+- **DevPartner 部署指南**: [../DEPLOYMENT_GUIDE.md](../DEPLOYMENT_GUIDE.md)
 
 ---
 
@@ -248,11 +200,11 @@ rm models/Qwen3.5-9B-Q4_1.gguf.bak
 
 | 日期 | 操作 | 说明 |
 |------|------|------|
-| 2026-07-03 | 创建文档 | v6.0 初始化 |
-| 2026-07-03 | 更新配置 | 添加多环境部署说明 |
+| 2026-07-10 | 重写文档 | v7.3 迁移到 Ollama，移除 GGUF 说明 |
+| 2026-07-03 | 创建文档 | v6.0 初始化（已废弃） |
 
 ---
 
 **维护者**: DevPartner Team  
-**最后更新**: 2026-07-03  
-**适用版本**: DevPartner v6.0+
+**最后更新**: 2026-07-10  
+**适用版本**: DevPartner v7.3+

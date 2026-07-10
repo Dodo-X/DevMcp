@@ -27,17 +27,8 @@ from typing import Optional
 class OptimizationLoop:
     """优化闭环引擎"""
 
-    _instance: Optional["OptimizationLoop"] = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
     def __init__(self):
-        if hasattr(self, "_initialized"):
-            return
-        self._initialized = True
+        pass
 
     # ── 核心入口：用户反馈驱动的自我检索 ──
 
@@ -372,5 +363,11 @@ class OptimizationLoop:
             return {"success": False, "error": str(e)}
 
 
+# PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入
+_optimization_loop_instance: Optional[OptimizationLoop] = None
+
 def get_optimization_loop() -> OptimizationLoop:
-    return OptimizationLoop()
+    global _optimization_loop_instance
+    if _optimization_loop_instance is None:
+        _optimization_loop_instance = OptimizationLoop()
+    return _optimization_loop_instance

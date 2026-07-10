@@ -2,17 +2,17 @@
 chcp 65001 >nul
 for /f "tokens=2 delims= " %%v in ('python -c "from devpartner_agent.core.config import get_project_version; print(get_project_version())" 2^>nul') do set DEV_VERSION=%%v
 if "%DEV_VERSION%"=="" set DEV_VERSION=6.0.0
-title DevPartner v%DEV_VERSION% - 双向成长仪表盘
+title DevPartner v%DEV_VERSION% - 运维面板 + MCP 服务
 color 0A
 
 echo.
 echo ╔══════════════════════════════════════════════════════════════╗
-echo ║       ⚡ DevPartner v%DEV_VERSION% · 双向成长仪表盘 启动器      ║
+echo ║       ⚡ DevPartner v%DEV_VERSION% · 运维面板 + MCP 服务        ║
 echo ╠══════════════════════════════════════════════════════════════╣
 echo ║                                                              ║
-echo ║   🌱 成长视角: 用户技能 + 系统进化                           ║
-echo ║   ⚙️ 运维视角: 系统监控 + 任务队列                           ║
-echo ║   🤖 LLM推理: 本地/Docker/云端统一加载                       ║
+echo ║   🖥️ 运维视角: 系统监控 + 异步任务队列                        ║
+echo ║   🤖 LLM推理: 本地 Ollama HTTP API                            ║
+echo ║   🔌 MCP服务: streamable-http /mcp 端点                       ║
 echo ║                                                              ║
 echo ╚══════════════════════════════════════════════════════════════╝
 echo.
@@ -35,7 +35,7 @@ REM 步骤 2: 检查并安装依赖
 REM ============================================================
 echo.
 echo [步骤 2/4] 检查项目依赖...
-python -c "import fastapi; import uvicorn; import llama_cpp; print('   ✅ 核心依赖已安装')" 2>nul
+python -c "import fastapi; import uvicorn; import ollama; print('   ✅ 核心依赖已安装')" 2>nul
 if errorlevel 1 (
     echo   ⚠️ 部分依赖未安装，正在自动安装...
     pip install -q -r requirements.txt
@@ -48,38 +48,36 @@ if errorlevel 1 (
 )
 
 REM ============================================================
-REM 步骤 3: 检查模型文件（v6.0 核心：统一从 models/ 加载）
+REM 步骤 3: 检查 Ollama 服务（v7.3.0 核心：本地 Ollama HTTP API）
 REM ============================================================
 echo.
-echo [步骤 3/4] 检查模型文件...
-echo   📍 模型目录: .\models\
-echo   🎯 目标文件: Qwen3.5-9B-Q4_1.gguf (~5.7GB)
+echo [步骤 3/4] 检查 Ollama 服务...
+echo   📍 Ollama 地址: %OLLAMA_BASE_URL%
 
-REM 使用专门的检查脚本
-python scripts/check_model.py
+python -c "import urllib.request,os,sys; sys.exit(0 if urllib.request.urlopen((os.environ.get('OLLAMA_BASE_URL') or 'http://localhost:11434')+'/api/tags',timeout=3) else 1)" 2>nul
 set CHECK_RESULT=%errorlevel%
 
 if %CHECK_RESULT% equ 0 (
-    echo   ✅ 模型检查通过
+    echo   ✅ Ollama 服务可连接
 ) else (
-    echo   ⚠️ 模型文件不存在或损坏！
+    echo   ⚠️ 未检测到 Ollama 服务！
     echo.
     echo   请选择操作：
-    echo     1. 继续启动（LLM 推理功能将不可用）
-    echo     2. 退出并查看下载指南
+    echo     1. 继续启动（LLM 推理不可用，自动降级到规则引擎）
+    echo     2. 退出并查看 Ollama 安装指南
     echo.
     choice /C 12 /N /M "请选择 [1-2]: "
     if errorlevel 2 (
         echo.
-        echo   📥 模型下载方法：
-        echo     方式一: python scripts/check_model.py （查看完整指南）
-        echo     方式二: 打开 models\README.md 查看详细说明
-        echo     方式三: 访问 ModelScope 手动下载
+        echo   📥 Ollama 安装方法：
+        echo     方式一: 访问 https://ollama.com/download 安装并启动 Ollama
+        echo     方式二: ollama pull qwen3   （拉取推理模型）
+        echo     方式三: 设置 OLLAMA_BASE_URL 指向远程 Ollama
         echo.
         pause
         exit /b 0
     )
-    echo   ⚠️ 将以降级模式启动（无 LLM 推理能力）
+    echo   ⚠️ 将以降级模式启动（无 LLM 推理能力，规则引擎兜底）
 )
 
 REM ============================================================
@@ -91,8 +89,8 @@ echo.
 echo   ╔═════════════════════════════════════════════════════════╗
 echo   ║  🚀 服务启动中...                                      ║
 echo   ╠═════════════════════════════════════════════════════════╣
-echo   ║  📊 Dashboard: http://localhost:7860/dashboard          ║
 echo   ║  🔧 API文档:   http://localhost:7860/docs               ║
+echo   ║  🔌 MCP端点:   http://localhost:7860/mcp                ║
 echo   ║  🛑 停止服务:   Ctrl+C                                   ║
 echo   ╚═════════════════════════════════════════════════════════╝
 echo.

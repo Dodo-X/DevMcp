@@ -22,16 +22,7 @@ from typing import Optional
 class DialogueService:
     """模块间协作消息管理服务"""
 
-    _instance: Optional["DialogueService"] = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
     def __init__(self):
-        if hasattr(self, "_initialized"):
-            return
         # 从配置读取路径，失败时使用默认值
         try:
             from devpartner_agent.core.config import get_config
@@ -261,5 +252,11 @@ class DialogueService:
         }
 
 
+# PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入
+_dialogue_instance: Optional[DialogueService] = None
+
 def get_dialogue() -> DialogueService:
-    return DialogueService()
+    global _dialogue_instance
+    if _dialogue_instance is None:
+        _dialogue_instance = DialogueService()
+    return _dialogue_instance

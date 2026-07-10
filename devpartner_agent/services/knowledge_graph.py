@@ -66,18 +66,7 @@ class KnowledgeGraph:
     知识图谱引擎 - 从 knowledge_points 构建关系网络
     """
 
-    _instance: Optional["KnowledgeGraph"] = None
-    _lock = threading.RLock()
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
     def __init__(self):
-        if hasattr(self, "_initialized"):
-            return
-        self._initialized = True
 
         self._nodes: Dict[str, GraphNode] = {}
         self._edges: Dict[str, Dict[str, GraphEdge]] = {}
@@ -537,7 +526,72 @@ class KnowledgeGraph:
 
         return {"error": f"Unknown format: {format}"}
 
+    def sync_relations_to_db(self, min_weight: float = 0.5) -> Dict[str, Any]:
+        """
+        v7.2: 将图谱中发现的共现关系写回 knowledge_points.related_knowledge_ids。
+        
+        基于现有边的权重筛选高质量关联（≥ min_weight），
+        去重后以逗号分隔的 knowledge_id 列表写入 DB。
+        
+        只更新已变更的记录，减少不必要的写操作。
+        """
+        if not self._index_built:
+            return {"status": "not_built", "message": "请先 build_index() 构建图谱"}
+
+        try:
+            from devpartner_agent.core.database import get_db
+            db = get_db()
+
+            # 收集每个节点的关联邻居
+            relations: Dict[str, List[str]] = defaultdict(list)
+            for source, targets in self._edges.items():
+                for target, edge in targets.items():
+                    if edge.weight >= min_weight:
+                        relations[source].append(target)
+                        relations[target].append(source)
+
+            updated = 0
+            skipped = 0
+            for kid, related_ids in relations.items():
+                # 去重 + 排序（保持确定性）
+                unique_related = sorted(set(related_ids))
+                new_related_str = ",".join(unique_related)
+
+                # 读取当前值，避免不必要的 UPDATE
+                current = db.query_local(
+                    "SELECT related_knowledge_ids FROM knowledge_points WHERE knowledge_id = ?",
+                    (kid,)
+                )
+                if current and current[0].get("related_knowledge_ids") == new_related_str:
+                    skipped += 1
+                    continue
+
+                db.query_local(
+                    "UPDATE knowledge_points SET related_knowledge_ids = ?, updated_at = ? WHERE knowledge_id = ?",
+                    (new_related_str, datetime.now().isoformat(), kid)
+                )
+                updated += 1
+
+            return {
+                "status": "success",
+                "nodes_processed": len(self._nodes),
+                "nodes_with_relations": len(relations),
+                "updated": updated,
+                "skipped": skipped,
+                "min_weight": min_weight,
+            }
+
+        except Exception as e:
+            logger.error(f"sync_relations_to_db failed: {e}")
+            return {"status": "error", "error": str(e)}
+
+
+# PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入
+_knowledge_graph_instance: Optional[KnowledgeGraph] = None
 
 def get_knowledge_graph() -> KnowledgeGraph:
     """Get global KnowledgeGraph singleton"""
-    return KnowledgeGraph()
+    global _knowledge_graph_instance
+    if _knowledge_graph_instance is None:
+        _knowledge_graph_instance = KnowledgeGraph()
+    return _knowledge_graph_instance

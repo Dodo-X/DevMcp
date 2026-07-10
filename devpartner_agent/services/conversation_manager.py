@@ -1,21 +1,20 @@
 """
-会话管理器 (v5.0)
+会话管理器 (v7.0)
 ==================
-管理对话的完整生命周期，支持步骤化异步处理。
+管理对话的完整生命周期，基于总分总架构。
 
 核心功能：
   - 唯一 conversation_id 生成（UUID v4）
   - 状态机管理（active → completed/failed/paused）
-  - 步骤化任务拆分（conversation_steps）
+  - record_step 即时记录 + 后台异步分析
   - 知识点有序落地（knowledge_points）
   - 内存占用监控
-  - 异步任务调度集成
 
 使用示例：
     mgr = ConversationManager()
     conv_id = mgr.create_conversation(client="codebuddy", topic="重构数据库")
-    step_ids = mgr.create_steps(conv_id, ["分析现状", "设计Schema", "迁移数据"])
-    result = mgr.execute_steps_async(conv_id, priority="high")
+    mgr.record_step(conv_id, "分析现状", step_type="design", content="...")
+    mgr.finalize_conversation(conv_id, summary="...")
 """
 import json
 import uuid
@@ -89,18 +88,7 @@ class ConversationManager:
       - 失败重试机制
     """
     
-    _instance: Optional["ConversationManager"] = None
-    _lock = threading.Lock()
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-    
     def __init__(self):
-        if hasattr(self, "_initialized"):
-            return
-        self._initialized = True
         self._active_conversations: Dict[str, dict] = {}  # conversation_id -> metadata
         self._memory_usage_mb: float = 0.0
         self._max_memory_mb: float = 2048.0  # 默认最大内存限制（2GB）
@@ -175,6 +163,52 @@ class ConversationManager:
             logger.error(f"❌ 创建会话失败: {e}", exc_info=True)
             raise RuntimeError(f"Failed to create conversation: {e}")
     
+    def ensure_conversation_exists(
+        self,
+        conversation_id: str,
+        client: str = "codebuddy",
+        topic: str = "自动创建的会话",
+        task_type: str = "general",
+    ) -> bool:
+        """
+        确保指定 conversation_id 的会话在 DB 中存在（record_step 的 FK 自保护）。
+
+        背景：create_conversation 与 record_step 是两次独立的 MCP 请求，
+        共享同一个 WAL 连接的读快照时，刚创建的会话可能尚未对 record_step 可见，
+        导致 conversation_steps 的 FK 校验失败。本方法在写步骤前补齐父行，
+        使 record_step 不依赖请求间的可见性时序。
+
+        Returns:
+            True 表示该会话原本就存在 / 已成功补齐；False 表示补齐失败。
+        """
+        if not conversation_id:
+            return False
+        from devpartner_agent.core.database import get_db
+        db = get_db()
+        try:
+            row = db.query_local(
+                "SELECT id FROM conversations WHERE conversation_id = ?",
+                (conversation_id,),
+            )
+            if row:
+                return True
+
+            ts = datetime.now().isoformat()
+            db.query_local(
+                """
+                INSERT INTO conversations (
+                    conversation_id, timestamp, client, topic, task_type,
+                    status, priority, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 'active', 'medium', ?, ?)
+                """,
+                (conversation_id, ts, client, topic, task_type, ts, ts),
+            )
+            logger.info(f"✅ ensure_conversation_exists: 补齐会话 {conversation_id}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ ensure_conversation_exists 失败: {e}")
+            return False
+
     def create_steps(
         self,
         conversation_id: str,
@@ -196,18 +230,25 @@ class ConversationManager:
         step_ids = []
         from devpartner_agent.core.database import get_db
         db = get_db()
-        
+
+        # v7.0: 获取 conversations.id 用于 FK 关联
+        conv_row = db.query_local(
+            "SELECT id FROM conversations WHERE conversation_id = ?",
+            (conversation_id,)
+        )
+        conversations_id = conv_row[0]["id"] if conv_row else None
+
         for config in step_configs:
             step_id = self.generate_step_id(conversation_id, config.order)
-            
+
             db.query_local("""
                 INSERT INTO conversation_steps (
-                    step_id, conversation_id, step_order, step_type,
+                    step_id, conversation_id, conversations_id, step_order, step_type,
                     step_name, status, input_data, max_retries,
                     timeout_seconds, priority, depends_on, created_at
-                ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
             """, (
-                step_id, conversation_id, config.order, config.step_type.value,
+                step_id, conversation_id, conversations_id, config.order, config.step_type.value,
                 config.step_name, json.dumps(config.input_data, ensure_ascii=False),
                 config.max_retries, config.timeout_seconds, config.priority,
                 ",".join(config.depends_on), datetime.now().isoformat()
@@ -227,61 +268,7 @@ class ConversationManager:
         
         return step_ids
     
-    def execute_steps_async(
-        self,
-        conversation_id: str,
-        priority: str = "medium",
-        callback: Optional[callable] = None
-    ) -> bool:
-        """
-        异步执行会话的所有步骤
-        
-        Args:
-            conversation_id: 会话ID
-            priority: 执行优先级
-            callback: 完成后的回调函数
-        
-        Returns:
-            是否成功提交到任务队列
-        """
-        if not self._validate_conversation(conversation_id):
-            return False
-        
-        # 检查并发限制
-        with self._task_lock:
-            if self._running_tasks >= self._concurrency_limit:
-                logger.warning(f"⚠️ 达到并发限制 ({self._concurrency_limit})，任务排队等待")
-            else:
-                self._running_tasks += 1
-        
-        try:
-            # 提交到异步任务队列
-            from devpartner_agent.services.task_queue import get_task_queue
-            queue = get_task_queue()
-            
-            task_payload = {
-                "conversation_id": conversation_id,
-                "priority": priority,
-                "callback": callback.__name__ if callback else None,
-                "submitted_at": datetime.now().isoformat(),
-            }
-            
-            task_id = queue.submit_task(
-                task_type="conversation_analysis",
-                payload=task_payload,
-                priority=10 if priority == "high" else 5,
-                estimated_memory_mb=self._estimate_memory_for_conversation(conversation_id),
-            )
-            
-            logger.info(f"🚀 提交异步任务: {task_id} | 会话: {conversation_id}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ 提交异步任务失败: {e}", exc_info=True)
-            with self._task_lock:
-                self._running_tasks -= 1
-            return False
-    
+
     def execute_single_step(
         self,
         step_id: str,
@@ -549,6 +536,10 @@ class ConversationManager:
         source_id: str = ""
     ) -> Optional[str]:
         """创建知识点记录"""
+        # v7.2: source_type 断言，确保 source_id 格式统一
+        assert source_type in ('step', 'finalize', 'manual', 'knowledge_graph', 'system', 'business_extraction'), \
+            f"Unknown source_type: {source_type}"
+
         from devpartner_agent.core.database import get_db
         db = get_db()
         
@@ -707,6 +698,12 @@ class ConversationManager:
         }
 
 
+# PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入
+_conversation_manager_instance: Optional[ConversationManager] = None
+
 def get_conversation_manager() -> ConversationManager:
     """获取全局会话管理器单例"""
-    return ConversationManager()
+    global _conversation_manager_instance
+    if _conversation_manager_instance is None:
+        _conversation_manager_instance = ConversationManager()
+    return _conversation_manager_instance

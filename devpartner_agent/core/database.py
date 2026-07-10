@@ -53,22 +53,13 @@ class Database:
       - 写操作用 _write_lock 串行，避免 SQLITE_BUSY
     """
 
-    _instance: Optional["Database"] = None
     _local_lock = threading.Lock()       # 保护 init_local 一次性初始化
     _write_lock = threading.Lock()       # 保护写操作串行化（SQLite 单写）
     _shared_lock = threading.Lock()      # 保护 shared 连接
 
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
     def __init__(self):
-        if hasattr(self, "_initialized"):
-            return
         self._local_conn: Optional[sqlite3.Connection] = None
         self._shared_conn: Optional[sqlite3.Connection] = None
-        self._initialized = True
 
     def init_local(self, db_path: str):
         """初始化本地数据库，始终启用 WAL 模式以提升写入性能 + FK 约束"""
@@ -104,6 +95,8 @@ class Database:
                 self._migrate_v53()
                 # v6.0: 表结构优化（多维度 JSON + 技能追溯字段）
                 self._migrate_v60()
+                # v7.4: 知识库系统扩展 — type/aliases/source_session/source_step/auto_synced
+                self._migrate_v74()
                 # 记录当前 schema 版本
                 self._set_schema_version(current_version)
                 print(f"[DB] Schema 迁移完成 → {current_version}")
@@ -121,11 +114,34 @@ class Database:
         """创建本地数据库表（v3.0 精简版）"""
         cursor = self._local_conn.cursor()
 
-        # ── 对话日志表（核心表，v4.3 新增 analyzed 列）──
+        # ════════════════════════════════════════════════════════════════
+        # 表: conversations — 核心对话记录表
+        # 用途: 存储每次对话的元信息（主题、类型、决策、文件变更等）
+        # 字段:
+        #   id               INTEGER  自增主键
+        #   conversation_id  TEXT     全局唯一对话标识（UUID），v6.0 加唯一约束
+        #   timestamp        TEXT     对话创建时间（ISO 8601）
+        #   client           TEXT     客户端标识（codebuddy/cursor/...）
+        #   topic            TEXT     对话主题（一句话）
+        #   task_type        TEXT     任务类型（debug/design/code_change/learn/deploy/general）
+        #   user_intent      TEXT     用户意图描述
+        #   actions          JSON     对话中执行的操作摘要
+        #   problems         TEXT     遇到的问题
+        #   solutions        TEXT     采用的解决方案
+        #   decisions        TEXT     关键决策记录
+        #   files_touched    JSON     涉及的文件列表
+        #   thinking_steps   JSON     思考步骤
+        #   self_reflection  TEXT     AI 复盘反思
+        #   raw_json         JSON     原始对话数据
+        #   skill_domains    JSON     涉及的技能领域
+        #   complexity       TEXT     复杂度（simple/medium/complex）
+        #   feedback_type    JSON     反馈类型
+        #   analyzed         INTEGER  是否已完成用户画像分析（0/1）
+        # ════════════════════════════════════════════════════════════════
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                conversation_id TEXT UNIQUE,  -- v6.0: 添加唯一约束以支持外键引用
+                conversation_id TEXT UNIQUE,
                 timestamp TEXT NOT NULL,
                 client TEXT DEFAULT 'unknown',
                 topic TEXT,
@@ -146,27 +162,24 @@ class Database:
             )
         """)
 
-        # ── 对话存档表（完整对话存档，v4.3 强制 FK 外键约束）──
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS conversation_archive (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                source TEXT DEFAULT 'unknown',
-                client TEXT DEFAULT 'unknown',
-                conversation_id TEXT,
-                conversations_id INTEGER,
-                raw_content TEXT,
-                summary TEXT,
-                skill_domains JSON,
-                complexity TEXT DEFAULT 'simple',
-                tool_calls JSON,
-                user_feedback JSON,
-                analyzed INTEGER DEFAULT 0,
-                FOREIGN KEY (conversations_id) REFERENCES conversations(id)
-            )
+            CREATE INDEX IF NOT EXISTS idx_improvement_log_status
+            ON improvement_log(status)
         """)
 
-        # ── 进化日志表（增强版：记录每次自我进化，v4.3 强制 FK 外键约束）──
+        # ════════════════════════════════════════════════════════════════
+        # 表: evolution_log — 进化日志表
+        # 用途: 记录每次系统自我进化的变更（自动优化/代码变更/配置更新）
+        # 字段:
+        #   id               INTEGER  自增主键
+        #   timestamp        TEXT     变更时间
+        #   version          TEXT     触发版本号
+        #   change_type      TEXT     变更类型（auto_optimize/code_change/config/...）
+        #   description      TEXT     变更描述
+        #   files_changed    TEXT     变更的文件列表
+        #   success          INTEGER  是否成功（0/1）
+        #   conversations_id INTEGER  关联 conversations.id（FK）
+        # ════════════════════════════════════════════════════════════════
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS evolution_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -180,8 +193,29 @@ class Database:
                 FOREIGN KEY (conversations_id) REFERENCES conversations(id)
             )
         """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_improvement_log_status
+            ON improvement_log(status)
+        """)
 
-        # ── 版本历史表（v4.2: 扩充结构化字段）──
+        # ════════════════════════════════════════════════════════════════
+        # 表: version_history — 版本历史表
+        # 用途: 记录每次版本变更的结构化信息（变更摘要、新增特性、Bug修复等）
+        # 字段:
+        #   id               INTEGER  自增主键
+        #   timestamp        TEXT     版本记录时间
+        #   version          TEXT     当前版本号
+        #   previous_version TEXT     上一版本号
+        #   change_summary   TEXT     变更摘要
+        #   changelog        TEXT     完整变更日志
+        #   tools_count      INTEGER  注册工具数
+        #   triggered_by     TEXT     触发来源（startup/upgrade/manual）
+        #   diff_detail      TEXT     详细差异
+        #   optimize_point   TEXT     优化点
+        #   bug_fix          TEXT     Bug 修复项
+        #   new_feature      TEXT     新增特性
+        #   data_change      TEXT     数据变更说明
+        # ════════════════════════════════════════════════════════════════
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS version_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -200,7 +234,20 @@ class Database:
             )
         """)
 
-        # ── MCP 工具注册表（新增：记录所有已注册的 MCP 工具）──
+        # ════════════════════════════════════════════════════════════════
+        # 表: mcp_tool_registry — MCP 工具注册表
+        # 用途: 记录所有已注册的 MCP 工具及其调用统计
+        # 字段:
+        #   id                 INTEGER  自增主键
+        #   timestamp          TEXT     注册时间
+        #   tool_name          TEXT     工具名称（唯一）
+        #   module             TEXT     所属模块
+        #   description        TEXT     工具描述
+        #   version_registered TEXT     注册时的版本号
+        #   last_called        TEXT     最近调用时间
+        #   call_count         INTEGER  总调用次数
+        #   status             TEXT     状态（active/inactive）
+        # ════════════════════════════════════════════════════════════════
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS mcp_tool_registry (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -215,7 +262,20 @@ class Database:
             )
         """)
 
-        # ── 改进日志表（原 system_improvements，v4.3 强制 FK 外键约束）──
+        # ════════════════════════════════════════════════════════════════
+        # 表: improvement_log — 系统自改进日志表
+        # 用途: 记录 AI 分析生成的系统改进建议（与 optimization_feedback 分工：系统 vs 用户）
+        # 字段:
+        #   id               INTEGER  自增主键
+        #   timestamp        TEXT     记录时间
+        #   category         TEXT     类别（system_issue/decision/user_insight/self_improvement）
+        #   suggestion       TEXT     改进建议
+        #   priority         TEXT     优先级（high/medium/low）
+        #   status           TEXT     状态（pending → in_progress → applied/rejected）
+        #   applied_at       TEXT     应用时间
+        #   result           TEXT     应用结果
+        #   conversations_id INTEGER  关联 conversations.id（FK）
+        # ════════════════════════════════════════════════════════════════
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS improvement_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -230,8 +290,26 @@ class Database:
                 FOREIGN KEY (conversations_id) REFERENCES conversations(id)
             )
         """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_improvement_log_status
+            ON improvement_log(status)
+        """)
 
-        # ── 用户技能表（原 skill_profile）──
+        # ════════════════════════════════════════════════════════════════
+        # 表: user_skills — 用户技能表
+        # 用途: 记录用户已掌握的技术技能及其熟练度
+        # 字段:
+        #   id               INTEGER  自增主键
+        #   timestamp        TEXT     记录时间
+        #   skill_domain     TEXT     技能领域（Python/SQL/...）
+        #   skill_level      TEXT     熟练度（beginner/intermediate/advanced/expert）
+        #   sub_skills       TEXT     子技能列表
+        #   evidence         TEXT     技能证据（观察来源）
+        #   conversation_ids TEXT     关联的对话ID列表
+        #   hours_spent      REAL     累计投入时间（小时）
+        #   growth_trend     TEXT     成长趋势（stable/improving/declining）
+        #   last_updated     TEXT     最后更新时间
+        # ════════════════════════════════════════════════════════════════
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_skills (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -247,7 +325,22 @@ class Database:
             )
         """)
 
-        # ── 用户技能规划表（新增：目标与进度）──
+        # ════════════════════════════════════════════════════════════════
+        # 表: user_skill_plan — 用户技能规划表
+        # 用途: 记录用户的学习目标与进度追踪
+        # 字段:
+        #   id               INTEGER  自增主键
+        #   timestamp        TEXT     记录时间
+        #   skill_domain     TEXT     技能领域
+        #   goal             TEXT     学习目标
+        #   target_level     TEXT     目标级别
+        #   target_date      TEXT     目标达成日期
+        #   current_progress TEXT     当前进度描述
+        #   milestones       JSON     里程碑列表
+        #   status           TEXT     状态（active/completed/paused）
+        #   created_at       TEXT     创建时间
+        #   updated_at       TEXT     更新时间
+        # ════════════════════════════════════════════════════════════════
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_skill_plan (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -264,7 +357,24 @@ class Database:
             )
         """)
 
-        # ── 优化反馈表（v4.3 强制 FK 外键约束）──
+        # ════════════════════════════════════════════════════════════════
+        # 表: optimization_feedback — 优化反馈表
+        # 用途: 记录用户主动提交的优化反馈（与 improvement_log 分工：用户 vs 系统）
+        # 字段:
+        #   id               INTEGER  自增主键
+        #   timestamp        TEXT     反馈时间
+        #   source           TEXT     反馈来源（auto/manual/user）
+        #   feedback_type    TEXT     反馈类型
+        #   target_tool      TEXT     目标工具
+        #   target_rule      TEXT     目标规则
+        #   description      TEXT     问题描述
+        #   suggestion       TEXT     改进建议
+        #   priority         TEXT     优先级
+        #   status           TEXT     状态（pending/in_progress/applied/rejected）
+        #   applied_at       TEXT     应用时间
+        #   result           TEXT     应用结果
+        #   conversations_id INTEGER  关联 conversations.id（FK）
+        # ════════════════════════════════════════════════════════════════
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS optimization_feedback (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -279,18 +389,47 @@ class Database:
                 status TEXT DEFAULT 'pending',
                 applied_at TEXT,
                 result TEXT,
-                conversation_id TEXT,
                 conversations_id INTEGER,
                 FOREIGN KEY (conversations_id) REFERENCES conversations(id)
             )
         """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_improvement_log_status
+            ON improvement_log(status)
+        """)
 
-        # ── v5.0: 会话步骤表（★ 步骤化异步处理）──
+        # ════════════════════════════════════════════════════════════════
+        # 表: conversation_steps — 会话步骤表（v5.0 步骤化异步处理核心表）
+        # 用途: 总分总架构的「分」环节，记录对话中每个子任务的执行状态和分析结果
+        # 状态机: pending → in_progress → completed/failed/timeout → orphaned（兜底）
+        # 字段:
+        #   id                  INTEGER  自增主键
+        #   step_id             TEXT     全局唯一步骤ID
+        #   conversation_id     TEXT     所属对话ID（FK → conversations.conversation_id，CASCADE）
+        #   conversations_id    INTEGER  关联 conversations.id（FK，v7.0 新增）
+        #   step_order          INTEGER  步骤顺序号
+        #   step_type           TEXT     步骤类型（code_change/debug/config/design/learn/deploy/general）
+        #   step_name           TEXT     步骤名称
+        #   status              TEXT     状态（pending/in_progress/completed/failed/timeout/orphaned）
+        #   input_data          JSON     输入数据（客户端提交的步骤详情）
+        #   output_data         JSON     输出数据（Worker 分析结果）
+        #   error_message       TEXT     错误信息
+        #   knowledge_point_ids TEXT     关联的知识点ID列表（JSON数组）
+        #   started_at          TEXT     开始执行时间
+        #   completed_at        TEXT     完成时间
+        #   duration_ms         INTEGER  实际耗时（毫秒）
+        #   retry_count         INTEGER  重试次数
+        #   max_retries         INTEGER  最大重试次数
+        #   priority            INTEGER  优先级（越大越高）
+        #   depends_on          TEXT     依赖的前置步骤ID
+        #   created_at          TEXT     创建时间
+        # ════════════════════════════════════════════════════════════════
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS conversation_steps (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 step_id TEXT NOT NULL UNIQUE,
                 conversation_id TEXT NOT NULL,
+                conversations_id INTEGER,
                 step_order INTEGER NOT NULL,
                 step_type TEXT NOT NULL,
                 step_name TEXT,
@@ -307,12 +446,17 @@ class Database:
                 priority INTEGER DEFAULT 0,
                 depends_on TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id) ON DELETE CASCADE
+                FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id) ON DELETE CASCADE,
+                FOREIGN KEY (conversations_id) REFERENCES conversations(id)
             )
         """)
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_conversation_steps_conv_id
             ON conversation_steps(conversation_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_conversation_steps_conversations_id
+            ON conversation_steps(conversations_id)
         """)
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_conversation_steps_status
@@ -322,8 +466,36 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_conversation_steps_order
             ON conversation_steps(conversation_id, step_order)
         """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_conversation_steps_created
+            ON conversation_steps(created_at)
+        """)
 
-        # ── v5.0: 知识点表（★ 知识库有序落地）──
+        # ════════════════════════════════════════════════════════════════
+        # 表: knowledge_points — 知识点表（v5.0 知识库有序落地）
+        # 用途: 存储从对话中提取的技术知识点，支持按域/分类/标签检索
+        # 字段:
+        #   id                    INTEGER  自增主键
+        #   knowledge_id          TEXT     全局唯一知识点ID
+        #   title                 TEXT     知识点标题
+        #   content               TEXT     知识点详细内容
+        #   category              TEXT     分类（step_extracted/knowledge_graph/manual）
+        #   domain                TEXT     技术领域（Python/SQL/...）
+        #   tags                  JSON     标签列表
+        #   source_type           TEXT     来源类型（step/finalize/manual/knowledge_graph/system）
+        #   source_id             TEXT     来源ID（step_id 或 conversation_id）
+        #   confidence            REAL     置信度（0~1）
+        #   difficulty            TEXT     难度（easy/medium/hard）
+        #   usage_count           INTEGER  被引用次数（知识点复用统计）
+        #   last_used_at          TEXT     最近使用时间
+        #   related_knowledge_ids TEXT     关联知识点ID列表
+        #   version               INTEGER  版本号
+        #   is_verified           INTEGER  是否已验证（0/1）
+        #   metadata              JSON     扩展元数据
+        #   created_by            TEXT     创建者（system/user）
+        #   created_at            TEXT     创建时间
+        #   updated_at            TEXT     更新时间
+        # ════════════════════════════════════════════════════════════════
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS knowledge_points (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -345,7 +517,14 @@ class Database:
                 metadata JSON DEFAULT '{}',
                 created_by TEXT DEFAULT 'system',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                type TEXT NOT NULL DEFAULT 'skill' CHECK(type IN ('skill','business')),
+                aliases JSON DEFAULT '[]',
+                source_session_id TEXT,
+                source_step_id TEXT,
+                auto_synced_to_md INTEGER DEFAULT 1,
+                md_file_path TEXT DEFAULT '',
+                md_modified_at TEXT DEFAULT ''
             )
         """)
         cursor.execute("""
@@ -360,8 +539,45 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_knowledge_points_source
             ON knowledge_points(source_type, source_id)
         """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_knowledge_points_usage
+            ON knowledge_points(usage_count DESC)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_kp_type
+            ON knowledge_points(type)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_kp_source_session
+            ON knowledge_points(source_session_id)
+        """)
 
-        # ── v5.0: 异步任务队列表（★ 优先级调度 + 资源控制）──
+        # ════════════════════════════════════════════════════════════════
+        # 表: task_queue — 异步任务队列表（v5.0 优先级调度 + 资源控制）
+        # 用途: 后台 Worker 消费的异步任务队列，支持 FIFO 调度、重试、软删除
+        # 字段:
+        #   id                  INTEGER  自增主键
+        #   task_id             TEXT     全局唯一任务ID
+        #   task_type           TEXT     任务类型（step_analysis/conversation_finalize/...）
+        #   payload             JSON     任务载荷
+        #   status              TEXT     状态（pending/running/completed/failed/timeout）
+        #   priority            INTEGER  优先级（越大越高）
+        #   max_retries         INTEGER  最大重试次数
+        #   retry_count         INTEGER  当前重试次数
+        #   error_message       TEXT     错误信息
+        #   result              JSON     任务执行结果
+        #   progress            REAL     执行进度（0~1）
+        #   estimated_memory_mb INTEGER  预估内存占用
+        #   actual_memory_mb    INTEGER  实际内存占用（完成后回写）
+        #   queued_at           TEXT     入队时间
+        #   started_at          TEXT     开始执行时间
+        #   completed_at        TEXT     完成时间
+        #   timeout_seconds     INTEGER  超时时间（秒）
+        #   worker_id           TEXT     执行的 Worker 标识
+        #   is_deleted          INTEGER  软删除标记（0/1）
+        #   next_retry_at       TEXT     下次重试时间
+        #   sort_order          INTEGER  FIFO 排序序号
+        # ════════════════════════════════════════════════════════════════
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS task_queue (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -381,7 +597,10 @@ class Database:
                 started_at TEXT,
                 completed_at TEXT,
                 timeout_seconds INTEGER DEFAULT 300,
-                worker_id TEXT
+                worker_id TEXT,
+                is_deleted INTEGER DEFAULT 0,
+                next_retry_at TEXT,
+                sort_order INTEGER DEFAULT 0
             )
         """)
         cursor.execute("""
@@ -395,6 +614,14 @@ class Database:
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_task_queue_type
             ON task_queue(task_type)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_task_queue_deleted
+            ON task_queue(is_deleted)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_task_queue_retry
+            ON task_queue(status, next_retry_at)
         """)
 
         # ── 迁移：为已有 conversations 表补列 ──
@@ -414,19 +641,25 @@ class Database:
             ("created_at", "TEXT DEFAULT CURRENT_TIMESTAMP"),  # v5.0
             ("updated_at", "TEXT DEFAULT CURRENT_TIMESTAMP"),  # v5.0
             ("completed_at", "TEXT"),                   # v5.0
+            ("summary_generated", "INTEGER DEFAULT 0"),  # v7.0: 总结是否已生成（清理前置校验）
         ]:
             try:
                 cursor.execute(f"ALTER TABLE conversations ADD COLUMN {col} {col_def}")
             except sqlite3.OperationalError:
                 pass
 
-        # v4.1: 为 conversation_archive 补 conversations_id 列
-        try:
-            cursor.execute("ALTER TABLE conversation_archive ADD COLUMN conversations_id INTEGER")
-        except sqlite3.OperationalError:
-            pass
+        # v7.0: 为 task_queue 补全新增列（is_deleted, next_retry_at, sort_order）
+        for col, col_def in [
+            ("is_deleted", "INTEGER DEFAULT 0"),
+            ("next_retry_at", "TEXT"),
+            ("sort_order", "INTEGER DEFAULT 0"),
+        ]:
+            try:
+                cursor.execute(f"ALTER TABLE task_queue ADD COLUMN {col} {col_def}")
+            except Exception:
+                pass
 
-        # v4.1: 为 optimization_feedback 补 conversations_id 列
+        # v4.1: 为 optimization_feedback 补 conversations_id 列（v7.0: conversation_id 已删除）
         try:
             cursor.execute("ALTER TABLE optimization_feedback ADD COLUMN conversations_id INTEGER")
         except sqlite3.OperationalError:
@@ -645,26 +878,6 @@ class Database:
                     )
                 """,
             },
-            "conversation_archive": {
-                "json_columns": ["skill_domains", "tool_calls", "user_feedback"],
-                "create_sql": """
-                    CREATE TABLE conversation_archive_new (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        timestamp TEXT NOT NULL,
-                        source TEXT DEFAULT 'unknown',
-                        client TEXT DEFAULT 'unknown',
-                        conversation_id TEXT,
-                        conversations_id INTEGER,
-                        raw_content TEXT,
-                        summary TEXT,
-                        skill_domains JSON,
-                        complexity TEXT DEFAULT 'simple',
-                        tool_calls JSON,
-                        user_feedback JSON,
-                        analyzed INTEGER DEFAULT 0
-                    )
-                """,
-            },
             "user_skill_plan": {
                 "json_columns": ["milestones"],
                 "create_sql": """
@@ -767,24 +980,6 @@ class Database:
 
         # 需要迁移的子表定义
         fk_migrations = {
-            "conversation_archive": """
-                CREATE TABLE conversation_archive_new (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT NOT NULL,
-                    source TEXT DEFAULT 'unknown',
-                    client TEXT DEFAULT 'unknown',
-                    conversation_id TEXT,
-                    conversations_id INTEGER,
-                    raw_content TEXT,
-                    summary TEXT,
-                    skill_domains JSON,
-                    complexity TEXT DEFAULT 'simple',
-                    tool_calls JSON,
-                    user_feedback JSON,
-                    analyzed INTEGER DEFAULT 0,
-                    FOREIGN KEY (conversations_id) REFERENCES conversations(id)
-                )
-            """,
             "optimization_feedback": """
                 CREATE TABLE optimization_feedback_new (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -799,7 +994,6 @@ class Database:
                     status TEXT DEFAULT 'pending',
                     applied_at TEXT,
                     result TEXT,
-                    conversation_id TEXT,
                     conversations_id INTEGER,
                     FOREIGN KEY (conversations_id) REFERENCES conversations(id)
                 )
@@ -918,40 +1112,9 @@ class Database:
         2. 无法匹配的保留 NULL（安全策略，不猜测关联）
         """
         cursor = self._local_conn.cursor()
-        backfilled = {"conversation_archive": 0, "optimization_feedback": 0,
-                       "evolution_log": 0, "improvement_log": 0}
+        backfilled = {"evolution_log": 0, "improvement_log": 0}
 
-        # conversation_archive: 通过 conversation_id (业务ID) 匹配 conversations 表
-        try:
-            cursor.execute("""
-                UPDATE conversation_archive
-                SET conversations_id = (
-                    SELECT c.id FROM conversations c
-                    WHERE c.conversation_id = conversation_archive.conversation_id
-                    AND c.conversation_id != ''
-                )
-                WHERE conversations_id IS NULL
-            """)
-            backfilled["conversation_archive"] = cursor.rowcount
-        except Exception as e:
-            print(f"[DB] conversation_archive 存量回填失败: {e}")
-
-        # optimization_feedback: 通过 conversation_id (业务ID) 匹配
-        try:
-            cursor.execute("""
-                UPDATE optimization_feedback
-                SET conversations_id = (
-                    SELECT c.id FROM conversations c
-                    WHERE c.conversation_id = optimization_feedback.conversation_id
-                    AND c.conversation_id != ''
-                )
-                WHERE conversations_id IS NULL
-                  AND conversation_id IS NOT NULL
-                  AND conversation_id != ''
-            """)
-            backfilled["optimization_feedback"] = cursor.rowcount
-        except Exception as e:
-            print(f"[DB] optimization_feedback 存量回填失败: {e}")
+        # optimization_feedback: v7.0 conversation_id 列已删除，跳过回填
 
         # evolution_log / improvement_log: 通过时间戳范围估算关联
         # 这两张表没有 conversation_id 业务ID，只能通过 timestamp 范围匹配最近的 conversation
@@ -996,6 +1159,22 @@ class Database:
         try:
             cursor.execute("ALTER TABLE conversation_steps ADD COLUMN timeout_seconds INTEGER DEFAULT 300")
             print("[DB] conversation_steps.timeout_seconds 列已添加")
+        except Exception:
+            pass  # 列已存在
+
+        # v7.0: conversation_steps 添加 conversations_id 外键列
+        try:
+            cursor.execute("ALTER TABLE conversation_steps ADD COLUMN conversations_id INTEGER")
+            # 回填已有数据
+            cursor.execute("""
+                UPDATE conversation_steps
+                SET conversations_id = (
+                    SELECT c.id FROM conversations c
+                    WHERE c.conversation_id = conversation_steps.conversation_id
+                )
+                WHERE conversations_id IS NULL
+            """)
+            print(f"[DB] conversation_steps.conversations_id 列已添加，回填 {cursor.rowcount} 行")
         except Exception:
             pass  # 列已存在
 
@@ -1122,6 +1301,60 @@ class Database:
         self._local_conn.commit()
         print("[DB] v6.0 数据库迁移完成")
 
+    def _migrate_v74(self):
+        """
+        v7.4.0: 知识库系统扩展 — knowledge_points 表新增字段。
+
+        变更内容：
+        1. type TEXT — 区分 'skill' / 'business'，默认为 'skill'
+        2. aliases JSON — 别名列表，导出到 Obsidian Frontmatter
+        3. source_session_id TEXT — 产生该知识的会话 ID
+        4. source_step_id TEXT — 产生该知识的步骤 ID
+        5. auto_synced_to_md INTEGER — 1=系统自动导出（可覆盖），0=用户手动编辑过（禁止覆盖）
+        6. 新增索引 idx_kp_type / idx_kp_source_session
+        """
+        cursor = self._local_conn.cursor()
+
+        new_columns = [
+            ("type", "TEXT NOT NULL DEFAULT 'skill'"),
+            ("aliases", "JSON DEFAULT '[]'"),
+            ("source_session_id", "TEXT"),
+            ("source_step_id", "TEXT"),
+            ("auto_synced_to_md", "INTEGER DEFAULT 1"),
+            ("md_file_path", "TEXT DEFAULT ''"),
+            ("md_modified_at", "TEXT DEFAULT ''"),
+        ]
+
+        for col_name, col_type in new_columns:
+            try:
+                cursor.execute(f"""
+                    ALTER TABLE knowledge_points
+                    ADD COLUMN {col_name} {col_type}
+                """)
+                print(f"[DB] knowledge_points.{col_name} 列已添加")
+            except Exception:
+                pass  # 列已存在
+
+        # 创建新索引
+        try:
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kp_type
+                ON knowledge_points(type)
+            """)
+        except Exception:
+            pass
+
+        try:
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kp_source_session
+                ON knowledge_points(source_session_id)
+            """)
+        except Exception:
+            pass
+
+        self._local_conn.commit()
+        print("[DB] v7.4.0 数据库迁移完成")
+
     def validate_conversation_integrity(self) -> dict:
         """
         v4.3: 数据完整性校验 — 检查关键字段非空 + 外键关联有效性。
@@ -1163,7 +1396,7 @@ class Database:
             issues.append(f"conversations.analyzed: {unanalyzed}/{total_conv} 条记录未完成分析")
 
         # 3. 检查 FK 关联—子表中 conversations_id 是否指向有效记录
-        fk_tables = ["conversation_archive", "optimization_feedback",
+        fk_tables = ["optimization_feedback",
                       "evolution_log", "improvement_log"]
         for table in fk_tables:
             try:
@@ -1181,15 +1414,6 @@ class Database:
             except Exception:
                 pass
 
-        # 4. 检查 conversation_archive.analyzed 与 conversations.analyzed 一致性
-        cursor.execute("""
-            SELECT count(*) FROM conversation_archive ca
-            JOIN conversations c ON ca.conversations_id = c.id
-            WHERE ca.analyzed = 0 AND c.analyzed = 1
-        """)
-        mismatch = cursor.fetchone()[0]
-        if mismatch > 0:
-            issues.append(f"archive.analyzed 与 conversations.analyzed 不一致: {mismatch} 条")
 
         status = "error" if orphaned_fks else ("warning" if issues else "ok")
         return {
@@ -1718,12 +1942,12 @@ class Database:
     # ══════════════════════════════════════════════════════════
 
     def insert_optimization_feedback(self, data: dict):
-        """插入优化反馈（v4.1: 支持 conversations_id 关联）"""
+        """插入优化反馈（v7.0: 删除废弃 conversation_id 列）"""
         sql = """
             INSERT INTO optimization_feedback
             (timestamp, source, feedback_type, target_tool, target_rule,
-             description, suggestion, priority, status, conversation_id, conversations_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             description, suggestion, priority, status, conversations_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         return self.query_local(sql, (
             data.get("timestamp", datetime.now().isoformat()),
@@ -1735,7 +1959,6 @@ class Database:
             data.get("suggestion", ""),
             data.get("priority", "medium"),
             data.get("status", "pending"),
-            data.get("conversation_id", ""),
             data.get("conversations_id"),
         ))
 
@@ -1760,42 +1983,49 @@ class Database:
 
     def archive_conversation(self, data: dict):
         """
-        存档完整对话（v4.1 增强：关联 conversations.id）
+        存档完整对话（@deprecated v7.0: 表已不再创建，仅兼容旧数据查询）
+
+        v7.0: conversation_archive 表不再创建，调用此方法静默返回 None。
+        历史数据仍可查询。新数据全部走 conversation_steps 流程。
 
         Args:
             data: 必须包含 conversation_id（业务ID，非DB主键）
                   可选 conversations_id（关联 conversations 表的 id 主键）
         """
-        conv_id = data.get("conversation_id", "")
-        existing = self.query_local(
-            "SELECT id FROM conversation_archive WHERE conversation_id = ?", (conv_id,)
-        )
-        if existing:
-            return existing[0]
+        try:
+            conv_id = data.get("conversation_id", "")
+            existing = self.query_local(
+                "SELECT id FROM conversation_archive WHERE conversation_id = ?", (conv_id,)
+            )
+            if existing:
+                return existing[0]
 
-        conversations_id = data.get("conversations_id")  # v4.1: 关联 conversations.id
+            conversations_id = data.get("conversations_id")
 
-        sql = """
-            INSERT INTO conversation_archive
-            (timestamp, source, client, conversation_id, conversations_id,
-             raw_content, summary, skill_domains, complexity, tool_calls,
-             user_feedback, analyzed)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        return self.query_local(sql, (
-            data.get("timestamp", datetime.now().isoformat()),
-            data.get("source", "unknown"),
-            data.get("client", "unknown"),
-            conv_id,
-            conversations_id,
-            data.get("raw_content", ""),
-            data.get("summary", ""),
-            data.get("skill_domains", ""),
-            data.get("complexity", "simple"),
-            data.get("tool_calls", ""),
-            data.get("user_feedback", ""),
-            data.get("analyzed", 0),
-        ))
+            sql = """
+                INSERT INTO conversation_archive
+                (timestamp, source, client, conversation_id, conversations_id,
+                 raw_content, summary, skill_domains, complexity, tool_calls,
+                 user_feedback, analyzed)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            return self.query_local(sql, (
+                data.get("timestamp", datetime.now().isoformat()),
+                data.get("source", "unknown"),
+                data.get("client", "unknown"),
+                conv_id,
+                conversations_id,
+                data.get("raw_content", ""),
+                data.get("summary", ""),
+                data.get("skill_domains", ""),
+                data.get("complexity", "simple"),
+                data.get("tool_calls", ""),
+                data.get("user_feedback", ""),
+                data.get("analyzed", 0),
+            ))
+        except sqlite3.OperationalError:
+            # v7.0: 表不存在时静默跳过
+            return None
 
     def get_unanalyzed_conversations(self, limit: int = 50) -> list[dict]:
         """获取未分析的对话（v4.1: 关联 conversations 表获取完整上下文）"""
@@ -2042,10 +2272,13 @@ class Database:
         if not conv:
             return {}
 
-        archive = self.query_local(
-            "SELECT * FROM conversation_archive WHERE conversations_id = ?",
-            (conversations_id,)
-        )
+        try:
+            archive = self.query_local(
+                "SELECT * FROM conversation_archive WHERE conversations_id = ?",
+                (conversations_id,)
+            )
+        except sqlite3.OperationalError:
+            archive = []  # v7.0: 表可能不存在
 
         feedbacks = self.query_local(
             "SELECT * FROM optimization_feedback WHERE conversations_id = ?",
@@ -2111,5 +2344,11 @@ class Database:
             self._shared_conn.close()
 
 
+# PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入
+_db_instance: Optional[Database] = None
+
 def get_db() -> Database:
-    return Database()
+    global _db_instance
+    if _db_instance is None:
+        _db_instance = Database()
+    return _db_instance

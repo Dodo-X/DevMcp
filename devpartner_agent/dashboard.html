@@ -3,1484 +3,303 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DevPartner v{{VERSION}} · 智能仪表盘</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<title>DevPartner 运维仪表盘 v{{VERSION}}</title>
 <style>
   :root {
-    --bg: #0d1117;
-    --card: #161b22;
-    --border: #30363d;
-    --text: #c9d1d9;
-    --text-muted: #8b949e;
-    --accent: #58a6ff;
-    --green: #3fb950;
-    --yellow: #d29922;
-    --red: #f85149;
-    --purple: #a371f7;
-    --cyan: #39d2c0;
-    --orange: #db6d28;
-    --radius: 8px;
-    --shadow: 0 1px 3px rgba(0,0,0,0.3);
-  }
-  
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    line-height: 1.5;
-    min-height: 100vh;
-  }
-
-  .header {
-    background: var(--card);
-    border-bottom: 1px solid var(--border);
-    padding: 16px 24px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    backdrop-filter: blur(8px);
-  }
-
-  .header h1 {
-    font-size: 1.25rem;
-    font-weight: 600;
-    background: linear-gradient(135deg, var(--accent), var(--purple));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-  }
-
-  .header-right {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
-
-  .tab-buttons {
-    display: flex;
-    gap: 4px;
-    background: var(--bg);
-    padding: 4px;
-    border-radius: 10px;
-    border: 1px solid var(--border);
-  }
-
-  .tab-btn {
-    padding: 8px 20px;
-    border-radius: 6px;
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 0.85rem;
-    transition: all 0.2s;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .tab-btn.active {
-    background: linear-gradient(135deg, var(--accent), var(--purple));
-    color: #fff;
-    box-shadow: 0 2px 8px rgba(88,166,255,0.3);
-  }
-
-  .tab-btn:hover:not(.active) {
-    color: var(--text);
-    background: rgba(255,255,255,0.05);
-  }
-
-  .version-badge {
-    background: linear-gradient(135deg, var(--accent), var(--purple));
-    color: #fff;
-    font-size: 0.75rem;
-    padding: 2px 10px;
-    border-radius: 12px;
-    font-weight: 500;
-  }
-
-  .refresh-indicator {
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    min-width: 140px;
-    text-align: right;
-  }
-
-  .container {
-    max-width: 1440px;
-    margin: 0 auto;
-    padding: 24px;
-  }
-
-  /* ===== 视图容器 ===== */
-  .view-container {
-    display: none;
-  }
-  
-  .view-container.active {
-    display: block;
-    animation: fadeIn 0.3s ease-in-out;
-  }
-
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  /* ===== Grid 布局 ===== */
-  .grid {
-    display: grid;
-    gap: 16px;
-    margin-bottom: 16px;
-  }
-  
-  .grid-5 { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
-  .grid-4 { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
-  .grid-3 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
-  .grid-2 { grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); }
-  .grid-1-1 { grid-template-columns: 1fr 1fr; }
-  .grid-2-1 { grid-template-columns: 2fr 1fr; }
-
-  /* ===== 卡片样式 ===== */
-  .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 20px;
-    box-shadow: var(--shadow);
-  }
-
-  .card-title {
-    font-size: 1rem;
-    font-weight: 600;
-    margin-bottom: 16px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--text);
-  }
-
-  /* ===== 指标卡（成长视角）===== */
-  .metric-card {
-    position: relative;
-    overflow: hidden;
-    border-left: 3px solid var(--accent);
-    transition: transform 0.2s, box-shadow 0.2s;
-  }
-
-  .metric-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-  }
-
-  .metric-icon {
-    font-size: 2rem;
-    margin-bottom: 8px;
-  }
-
-  .metric-value {
-    font-size: 2rem;
-    font-weight: 700;
-    line-height: 1.2;
-    color: var(--text);
-  }
-
-  .metric-label {
-    font-size: 0.85rem;
-    color: var(--text-muted);
-    margin-top: 4px;
-  }
-
-  .metric-trend {
-    font-size: 0.75rem;
-    margin-top: 8px;
-    padding: 4px 8px;
-    border-radius: 4px;
-    display: inline-block;
-  }
-
-  .metric-trend.positive {
-    color: var(--green);
-    background: rgba(63,185,80,0.1);
-  }
-
-  .metric-trend.negative {
-    color: var(--red);
-    background: rgba(248,81,73,0.1);
-  }
-
-  /* ===== 系统指标卡（运维视角）===== */
-  .stat-card {
-    position: relative;
-    overflow: hidden;
-    border-left: 3px solid var(--green);
-    transition: transform 0.2s;
-  }
-
-  .stat-card:hover {
-    transform: translateY(-2px);
-  }
-
-  .stat-icon {
-    font-size: 1.5rem;
-    margin-bottom: 12px;
-  }
-
-  .stat-value {
-    font-size: 2.5rem;
-    font-weight: 700;
-    line-height: 1;
-    margin-bottom: 8px;
-  }
-
-  .stat-label {
-    font-size: 0.9rem;
-    color: var(--text-muted);
-  }
-
-  .stat-detail {
-    margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px solid var(--border);
-    font-size: 0.8rem;
-    color: var(--text-muted);
-  }
-
-  /* ===== 进度条 ===== */
-  .progress-bar {
-    width: 100%;
-    height: 8px;
-    background: var(--bg);
-    border-radius: 4px;
-    overflow: hidden;
-    margin-top: 8px;
-  }
-
-  .progress-fill {
-    height: 100%;
-    background: linear-gradient(90deg, var(--accent), var(--purple));
-    border-radius: 4px;
-    transition: width 0.5s ease;
-  }
-
-  /* ===== 雷达图容器 ===== */
-  .chart-container {
-    position: relative;
-    height: 350px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  /* ===== 系统进化面板 ===== */
-  .evolution-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-  }
-
-  .evo-item {
-    text-align: center;
-    padding: 16px;
-    background: var(--bg);
-    border-radius: 6px;
-  }
-
-  .evo-item.full-width {
-    grid-column: span 2;
-  }
-
-  .evo-label {
-    font-size: 0.85rem;
-    color: var(--text-muted);
-    margin-bottom: 8px;
-  }
-
-  .evo-value {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: var(--accent);
-  }
-
-  .evo-trend {
-    font-size: 0.75rem;
-    color: var(--green);
-    margin-top: 4px;
-  }
-
-  /* ===== 环形进度条 ===== */
-  .circle-progress {
-    width: 80px;
-    height: 80px;
-    border-radius: 50%;
-    background: conic-gradient(
-      var(--accent) calc(var(--pct) * 1%),
-      var(--border) calc(var(--pct) * 1%)
-    );
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin: 8px auto;
-    font-weight: 700;
-    font-size: 1.1rem;
-  }
-
-  .circle-progress::before {
-    content: attr(data-pct);
-    width: 64px;
-    height: 64px;
-    background: var(--bg);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  /* ===== 堆积进度条 ===== */
-  .stacked-bar {
-    width: 100%;
-    height: 32px;
-    background: var(--bg);
-    border-radius: 6px;
-    overflow: hidden;
-    display: flex;
-    margin-top: 8px;
-  }
-
-  .bar-segment {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.8rem;
-    font-weight: 500;
-    color: #fff;
-    transition: width 0.5s ease;
-  }
-
-  .bar-segment.llm { background: linear-gradient(135deg, var(--accent), var(--cyan)); }
-  .bar-segment.rules { background: linear-gradient(135deg, var(--purple), var(--orange)); }
-
-  /* ===== 时间线 ===== */
-  .timeline {
-    max-height: 400px;
-    overflow-y: auto;
-    padding-right: 8px;
-  }
-
-  .timeline::-webkit-scrollbar {
-    width: 6px;
-  }
-
-  .timeline::-webkit-scrollbar-track {
-    background: var(--bg);
-    border-radius: 3px;
-  }
-
-  .timeline::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 3px;
-  }
-
-  .timeline-item {
-    display: flex;
-    gap: 12px;
-    padding: 12px 0;
-    border-left: 2px solid var(--border);
-    padding-left: 20px;
-    position: relative;
-    animation: slideIn 0.3s ease-out;
-  }
-
-  @keyframes slideIn {
-    from { opacity: 0; transform: translateX(-10px); }
-    to { opacity: 1; transform: translateX(0); }
-  }
-
-  .timeline-item::before {
-    content: '';
-    position: absolute;
-    left: -7px;
-    top: 18px;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: var(--card);
-    border: 2px solid var(--border);
-  }
-
-  .timeline-item.user::before { border-color: var(--green); }
-  .timeline-item.system::before { border-color: var(--accent); }
-
-  .timeline-icon {
-    font-size: 1.2rem;
-    margin-top: 2px;
-  }
-
-  .timeline-content {
-    flex: 1;
-  }
-
-  .timeline-time {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    margin-bottom: 4px;
-  }
-
-  .timeline-text {
-    font-size: 0.9rem;
-    line-height: 1.4;
-  }
-
-  .timeline-badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 10px;
-    font-size: 0.75rem;
-    font-weight: 500;
-    margin-top: 4px;
-  }
-
-  .timeline-badge.positive { 
-    background: rgba(63,185,80,0.15); 
-    color: var(--green); 
-  }
-  
-  .timeline-badge.info { 
-    background: rgba(88,166,255,0.15); 
-    color: var(--accent); 
-  }
-
-  /* ===== 表格样式（运维视角）===== */
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.9rem;
-  }
-
-  th {
-    text-align: left;
-    padding: 12px;
-    background: var(--bg);
-    border-bottom: 2px solid var(--border);
-    font-weight: 600;
-    color: var(--text-muted);
-    white-space: nowrap;
-  }
-
-  td {
-    padding: 12px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  tr:hover td {
-    background: rgba(88,166,255,0.04);
-  }
-
-  .status-badge {
-    display: inline-block;
-    padding: 4px 12px;
-    border-radius: 12px;
-    font-size: 0.8rem;
-    font-weight: 500;
-  }
-
-  .status-running { background: rgba(63,185,80,0.15); color: var(--green); }
-  .status-pending { background: rgba(210,153,34,0.15); color: var(--yellow); }
-  .status-completed { background: rgba(139,148,158,0.15); color: var(--text-muted); }
-  .status-failed { background: rgba(248,81,73,0.15); color: var(--red); }
-
-  /* ===== 可折叠面板 ===== */
-  .collapsible-panel {
-    cursor: pointer;
-    user-select: none;
-  }
-
-  .collapsible-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .collapsible-toggle {
-    font-size: 1.2rem;
-    transition: transform 0.3s;
-  }
-
-  .collapsed .collapsible-toggle {
-    transform: rotate(-90deg);
-  }
-
-  .collapsed .collapsible-body {
-    display: none;
-  }
-
-  /* ===== 错误提示横幅 ===== */
-  .error-banner {
-    background: rgba(248,81,73,0.1);
-    border: 1px solid var(--red);
-    color: var(--red);
-    padding: 12px 16px;
-    border-radius: var(--radius);
-    margin-bottom: 16px;
-    font-size: 0.9rem;
-  }
-
-  /* ===== 响应式设计 ===== */
-  @media (max-width: 1200px) {
-    .grid-1-1, .grid-2-1 { grid-template-columns: 1fr; }
-    .container { padding: 16px; }
-  }
-
-  @media (max-width: 768px) {
-    .header { flex-direction: column; gap: 12px; align-items: flex-start; }
-    .tab-buttons { width: 100%; justify-content: center; }
-    .grid-5, .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
-    .evolution-grid { grid-template-columns: 1fr; }
-    .evo-item.full-width { grid-column: span 1; }
+    --bg: #0f1117;
+    --card-bg: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e1e4eb;
+    --text-muted: #8b8fa3;
+    --accent: #6366f1;
+    --accent-hover: #818cf8;
+    --green: #22c55e;
+    --yellow: #eab308;
+    --red: #ef4444;
+    --radius: 10px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: -apple-system, 'Segoe UI', sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+  .container { max-width:1280px; margin:0 auto; padding:24px; }
+  header { display:flex; justify-content:space-between; align-items:center; padding:20px 0; border-bottom:1px solid var(--border); margin-bottom:24px; }
+  header h1 { font-size:22px; font-weight:600; }
+  header .version { font-size:13px; color:var(--text-muted); background:var(--card-bg); padding:4px 10px; border-radius:6px; }
+  .status-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+  .status-dot.online { background:var(--green); box-shadow:0 0 6px var(--green); }
+  .status-dot.offline { background:var(--red); }
+  .status-dot.warning { background:var(--yellow); }
+
+  .grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px; }
+  .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:24px; }
+  .grid-2 { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; margin-bottom:24px; }
+
+  .card { background:var(--card-bg); border:1px solid var(--border); border-radius:var(--radius); padding:20px; }
+  .card-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+  .card-header h2 { font-size:14px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; }
+  .card-header .badge { font-size:11px; padding:2px 8px; border-radius:10px; background:var(--accent); color:#fff; }
+
+  .metric-value { font-size:36px; font-weight:700; line-height:1; }
+  .metric-label { font-size:12px; color:var(--text-muted); margin-top:6px; }
+  .metric-change { font-size:12px; margin-top:4px; }
+  .metric-change.up { color:var(--green); }
+  .metric-change.down { color:var(--red); }
+
+  .progress-bar { height:6px; background:var(--border); border-radius:3px; margin-top:8px; overflow:hidden; }
+  .progress-bar .fill { height:100%; border-radius:3px; transition:width 0.5s ease; }
+  .progress-bar .fill.green { background:var(--green); }
+  .progress-bar .fill.yellow { background:var(--yellow); }
+  .progress-bar .fill.red { background:var(--red); }
+  .progress-bar .fill.accent { background:var(--accent); }
+
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; padding:10px 8px; border-bottom:1px solid var(--border); color:var(--text-muted); font-weight:500; font-size:11px; text-transform:uppercase; }
+  td { padding:10px 8px; border-bottom:1px solid var(--border); }
+  tr:hover td { background:rgba(99,102,241,0.05); }
+
+  .tag { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:500; }
+  .tag.pending { background:rgba(234,179,8,0.15); color:var(--yellow); }
+  .tag.running { background:rgba(99,102,241,0.15); color:var(--accent); }
+  .tag.completed { background:rgba(34,197,94,0.15); color:var(--green); }
+  .tag.failed { background:rgba(239,68,68,0.15); color:var(--red); }
+
+  .refresh-bar { display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--text-muted); margin-bottom:16px; }
+  .refresh-bar button { background:var(--card-bg); border:1px solid var(--border); color:var(--text); padding:4px 12px; border-radius:6px; cursor:pointer; font-size:12px; }
+  .refresh-bar button:hover { border-color:var(--accent); }
+
+  .memory-bar { margin-bottom:12px; }
+  .memory-bar .label { display:flex; justify-content:space-between; font-size:12px; color:var(--text-muted); margin-bottom:4px; }
+
+  .empty { text-align:center; padding:32px; color:var(--text-muted); font-size:13px; }
+
+  .error-banner { background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:var(--radius); padding:12px 16px; margin-bottom:16px; color:var(--red); font-size:13px; display:none; }
+
+  @media (max-width:768px) {
+    .grid-4 { grid-template-columns:repeat(2,1fr); }
+    .grid-3, .grid-2 { grid-template-columns:1fr; }
   }
 </style>
 </head>
 <body>
-
-<!-- ============================================================
-     Header - 导航栏
-     ============================================================ -->
-<div class="header">
-  <h1>⚡ DevPartner v{{VERSION}}</h1>
-  <div class="header-right">
-    <div class="tab-buttons" id="view-tabs">
-      <button class="tab-btn active" data-view="growth" onclick="switchView('growth')">
-        🌱 成长视角
-      </button>
-      <button class="tab-btn" data-view="ops" onclick="switchView('ops')">
-        ⚙️ 运维视角
-      </button>
+<div class="container">
+  <header>
+    <div>
+      <h1><span class="status-dot online" id="sysStatusDot"></span>DevPartner 运维仪表盘</h1>
     </div>
-    <span class="version-badge">v{{VERSION}}</span>
-    <span class="refresh-indicator" id="refresh-status">● 自动刷新中</span>
+    <span class="version">v{{VERSION}}</span>
+  </header>
+
+  <div class="error-banner" id="errorBanner"></div>
+
+  <div class="refresh-bar">
+    <span id="lastUpdate">加载中...</span>
+    <button onclick="refreshAll()">⟳ 刷新</button>
   </div>
+
+  <!-- 核心指标 -->
+  <div class="grid-4">
+    <div class="card">
+      <div class="metric-value" id="activeSessions">-</div>
+      <div class="metric-label">活跃会话 (24h)</div>
+    </div>
+    <div class="card">
+      <div class="metric-value" id="todaySessions">-</div>
+      <div class="metric-label">今日新会话</div>
+    </div>
+    <div class="card">
+      <div class="metric-value" id="kbSize">-</div>
+      <div class="metric-label">知识库条目</div>
+    </div>
+    <div class="card">
+      <div class="metric-value" id="todayKnowledge">-</div>
+      <div class="metric-label">今日新增知识</div>
+    </div>
+  </div>
+
+  <!-- 任务队列 + 内存 -->
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header"><h2>任务队列</h2><span class="badge" id="taskTotal">-</span></div>
+      <div class="grid-3" style="margin-bottom:12px;">
+        <div><div class="metric-value" style="font-size:24px;" id="pendingTasks">-</div><div class="metric-label">待处理</div></div>
+        <div><div class="metric-value" style="font-size:24px;" id="runningTasks">-</div><div class="metric-label">运行中</div></div>
+        <div><div class="metric-value" style="font-size:24px;" id="completedTasks">-</div><div class="metric-label">已完成</div></div>
+      </div>
+      <table id="taskTable">
+        <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>状态</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h2>内存使用</h2></div>
+      <div class="memory-bar">
+        <div class="label"><span id="memUsedLabel">进程 RSS</span><span id="memRSS">-</span></div>
+        <div class="progress-bar"><div class="fill accent" id="memRSSBar" style="width:0%"></div></div>
+      </div>
+      <div class="memory-bar">
+        <div class="label"><span>系统总内存</span><span id="memSys">-</span></div>
+        <div class="progress-bar"><div class="fill yellow" id="memSysBar" style="width:0%"></div></div>
+      </div>
+      <div id="memDetails"></div>
+    </div>
+  </div>
+
+  <!-- 回调统计 + 健康检查 -->
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header"><h2>回调统计</h2></div>
+      <div class="grid-2" style="margin-bottom:12px;">
+        <div><div class="metric-value" style="font-size:24px; color:var(--green);" id="cbSuccess">-</div><div class="metric-label">成功触发</div></div>
+        <div><div class="metric-value" style="font-size:24px; color:var(--red);" id="cbError">-</div><div class="metric-label">错误次数</div></div>
+      </div>
+      <table id="cbTable">
+        <thead><tr><th>ID</th><th>名称</th><th>状态</th><th>时间</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h2>服务健康</h2></div>
+      <div id="healthContent" class="empty">加载中...</div>
+    </div>
+  </div>
+
 </div>
 
-<div class="container">
-
-  <!-- ============================================================
-       视图1: 🌱 成长视角（双向成长仪表盘）
-       ============================================================ -->
-  <div id="view-growth" class="view-container active">
-
-    <!-- 错误提示横幅 -->
-    <div id="error-banner-growth" class="error-banner" style="display:none;"></div>
-
-    <!-- 第1行：融合核心指标（用户 + 系统）-->
-    <div class="grid grid-5" id="metrics-row-growth">
-      
-      <!-- 用户指标：技能总数 -->
-      <div class="card metric-card" style="border-left-color: var(--accent);">
-        <div class="metric-icon">🧠</div>
-        <div class="metric-value" id="total-skills">--</div>
-        <div class="metric-label">技能总数</div>
-        <div class="metric-trend positive" id="skills-trend">加载中...</div>
-      </div>
-
-      <!-- 用户指标：平均掌握率 -->
-      <div class="card metric-card" style="border-left-color: var(--purple);">
-        <div class="metric-icon">📈</div>
-        <div class="metric-value" id="avg-mastery">--%</div>
-        <div class="metric-label">平均掌握率</div>
-        <div class="progress-bar">
-          <div class="progress-fill" id="mastery-bar" style="width: 0%"></div>
-        </div>
-      </div>
-
-      <!-- 系统指标：版本/迭代 -->
-      <div class="card metric-card" style="border-left-color: var(--cyan);">
-        <div class="metric-icon">🔄</div>
-        <div class="metric-value" id="system-version">--</div>
-        <div class="metric-label">系统版本 / 迭代次数</div>
-        <div class="metric-trend" id="version-trend" style="color:var(--text-muted);">--</div>
-      </div>
-
-      <!-- 系统指标：采纳率 + 迭代次数 -->
-      <div class="card metric-card" style="border-left-color: var(--green);">
-        <div class="metric-icon">⚡</div>
-        <div class="metric-value" id="iteration-count">--</div>
-        <div class="metric-label">系统迭代次数</div>
-        <div class="circle-progress" id="adoption-circle" style="--pct:0%" data-pct="--%"></div>
-        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">采纳率: <span id="adoption-text">--%</span></div>
-      </div>
-
-      <!-- 用户指标：学习效率 -->
-      <div class="card metric-card" style="border-left-color: var(--orange);">
-        <div class="metric-icon">📊</div>
-        <div class="metric-value" id="learning-efficiency">--</div>
-        <div class="metric-label">学习效率指数</div>
-        <div class="metric-trend positive" id="efficiency-trend">--</div>
-      </div>
-    </div>
-
-    <!-- 第2行：用户成长视角（左） + 系统进化视角（右）-->
-    <div class="grid grid-1-1" id="main-row-growth">
-      
-      <!-- 左侧：用户技能六维雷达 -->
-      <div class="card">
-        <div class="card-title">📊 用户技能六维雷达</div>
-        <div class="chart-container">
-          <canvas id="skill-radar-chart"></canvas>
-        </div>
-        <div style="margin-top: 16px; display: flex; justify-content: space-around; text-align: center;">
-          <div>
-            <span style="color: var(--text-muted); font-size: 0.8rem;">当前平均分</span><br>
-            <strong id="radar-current-avg" style="color: var(--accent); font-size: 1.2rem;">--</strong>
-          </div>
-          <div>
-            <span style="color: var(--text-muted); font-size: 0.8rem;">30天前平均分</span><br>
-            <strong id="radar-history-avg" style="color: var(--purple); font-size: 1.2rem;">--</strong>
-          </div>
-          <div>
-            <span style="color: var(--text-muted); font-size: 0.8rem;">整体提升</span><br>
-            <strong id="radar-improvement" style="color: var(--green); font-size: 1.2rem;">--</strong>
-          </div>
-        </div>
-      </div>
-
-      <!-- 右侧：系统进化面板 -->
-      <div class="card">
-        <div class="card-title">🤖 系统进化面板</div>
-        <div class="evolution-grid">
-          
-          <!-- 自迭代总次数 -->
-          <div class="evo-item">
-            <span class="evo-label">自迭代总次数</span>
-            <span class="evo-value" id="total-iterations">--</span>
-            <span class="evo-trend" id="iteration-rate">--</span>
-          </div>
-
-          <!-- 优化建议采纳率 -->
-          <div class="evo-item">
-            <span class="evo-label">优化建议采纳率</span>
-            <div class="circle-progress" id="adoption-rate-circle" style="--pct:0%" data-pct="--%"></div>
-          </div>
-
-          <!-- LLM 分析引擎统计（v6.0: 已全面转 LLM）-->
-          <div class="evo-item full-width">
-            <span class="evo-label">🤖 LLM 分析引擎统计（近30天）</span>
-            <div style="display:flex;justify-content:space-around;margin-top:8px;">
-              <div style="text-align:center;">
-                <div style="font-size:1.3rem;font-weight:700;color:var(--accent);" id="llm-step-count">--</div>
-                <div style="font-size:0.75rem;color:var(--text-muted);">Step分析</div>
-              </div>
-              <div style="text-align:center;">
-                <div style="font-size:1.3rem;font-weight:700;color:var(--purple);" id="llm-conv-count">--</div>
-                <div style="font-size:0.75rem;color:var(--text-muted);">对话总结</div>
-              </div>
-              <div style="text-align:center;">
-                <div style="font-size:1.3rem;font-weight:700;color:var(--green);" id="llm-success-rate">--%</div>
-                <div style="font-size:0.75rem;color:var(--text-muted);">成功率</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 知识库增长率 -->
-          <div class="evo-item full-width">
-            <span class="evo-label">知识库月增长率</span>
-            <span class="evo-value" id="kb-growth-rate" style="font-size:1.2rem;">--</span>
-          </div>
-
-          <!-- 最近变更 -->
-          <div class="evo-item full-width">
-            <span class="evo-label">📌 最近变更</span>
-            <div id="latest-change" style="padding: 8px; background: var(--bg); border-radius: 4px; font-size: 0.85rem; margin-top: 4px;">
-              加载中...
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 第3行：融合时间线 + 学习热力图 -->
-    <div class="grid grid-1-1" id="bottom-row-growth">
-      
-      <!-- 左侧：双向成长时间线 -->
-      <div class="card">
-        <div class="card-title">⏱️ 双向成长时间线</div>
-        <div class="timeline" id="timeline-container">
-          <div style="text-align: center; color: var(--text-muted); padding: 40px 0;">
-            加载中...
-          </div>
-        </div>
-      </div>
-
-      <!-- 右侧：近4周学习热力图 -->
-      <div class="card">
-        <div class="card-title">🔥 近4周学习活跃度</div>
-        <div style="position: relative; height: 280px;">
-          <canvas id="activity-heatmap-chart"></canvas>
-        </div>
-        <div style="margin-top: 16px; display: flex; justify-content: space-around; text-align: center;">
-          <div>
-            <span style="color: var(--text-muted); font-size: 0.8rem;">活跃天数</span><br>
-            <strong id="heatmap-active-days" style="color: var(--green); font-size: 1.2rem;">--</strong>
-          </div>
-          <div>
-            <span style="color: var(--text-muted); font-size: 0.8rm;">峰值强度</span><br>
-            <strong id="heatmap-peak" style="color: var(--red); font-size: 1.2rem;">--</strong>
-          </div>
-          <div>
-            <span style="color: var(--text-muted); font-size: 0.8rem;">平均强度</span><br>
-            <strong id="heatmap-avg" style="color: var(--accent); font-size: 1.2rem;">--</strong>
-          </div>
-        </div>
-      </div>
-    </div>
-
-  </div> <!-- end view-growth -->
-
-  <!-- ============================================================
-       视图2: ⚙️ 运维视角（原有完整监控面板）
-       ============================================================ -->
-  <div id="view-ops" class="view-container">
-
-    <!-- 错误提示横幅 -->
-    <div id="error-banner-ops" class="error-banner" style="display:none;"></div>
-
-    <!-- 第1行：核心系统指标 -->
-    <div class="grid grid-4" id="metrics-row-ops">
-      
-      <div class="card stat-card" style="border-left-color: var(--green);">
-        <div class="stat-icon">💬</div>
-        <div class="stat-value" id="active-sessions">--</div>
-        <div class="stat-label">当前会话数</div>
-        <div class="stat-detail">
-          今日新增: <span id="today-sessions">--</span>
-        </div>
-      </div>
-
-      <div class="card stat-card" style="border-left-color: var(--accent);">
-        <div class="stat-icon">📋</div>
-        <div class="stat-value" id="pending-tasks">--</div>
-        <div class="stat-label">待处理任务</div>
-        <div class="stat-detail">
-          运行中: <span id="running-tasks">--</span> | 已完成: <span id="completed-tasks">--</span>
-        </div>
-      </div>
-
-      <div class="card stat-card" style="border-left-color: var(--purple);">
-        <div class="stat-icon">📚</div>
-        <div class="stat-value" id="knowledge-base-size">--</div>
-        <div class="stat-label">知识库技能数</div>
-        <div class="stat-detail">
-          今日新增: <span id="today-knowledge">--</span>
-        </div>
-      </div>
-
-      <div class="card stat-card" style="border-left-color: var(--yellow);">
-        <div class="stat-icon">🔗</div>
-        <div class="stat-value" id="callback-registrations">--</div>
-        <div class="stat-label">回调注册数</div>
-        <div class="stat-detail">
-          总触发: <span id="callback-triggers">--</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- 第2行：任务队列 + 内存使用 + 回调统计 -->
-    <div class="grid grid-1-1" id="main-row-ops">
-      
-      <!-- 左侧：任务队列详情 -->
-      <div class="card">
-        <div class="card-title">📋 任务队列详情</div>
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>任务名称</th>
-              <th>类型</th>
-              <th>状态</th>
-              <th>创建时间</th>
-              <th>优先级</th>
-            </tr>
-          </thead>
-          <tbody id="task-list-body">
-            <tr>
-              <td colspan="6" style="text-align:center;color:var(--text-muted);">加载中...</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!-- 右侧：内存使用 + 回调统计 -->
-      <div class="grid grid-2-1" style="gap: 16px;">
-        
-        <!-- 内存使用 -->
-        <div class="card">
-          <div class="card-title">💾 内存使用情况</div>
-          <div style="margin: 20px 0;">
-            <div style="display:flex;justify-content:space-between;margin-bottom:8px;font-size:0.9rem;">
-              <span>已使用</span>
-              <span id="memory-used">-- MB</span>
-            </div>
-            <div class="progress-bar" style="height: 24px;">
-              <div class="progress-fill" id="memory-bar" style="width:0%"></div>
-            </div>
-            <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:0.8rem;color:var(--text-muted);">
-              <span id="memory-percent">--%</span>
-              <span id="memory-total">总计 -- MB</span>
-            </div>
-          </div>
-          <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
-            <div style="font-size:0.85rem;margin-bottom:8px;color:var(--text-muted);">详细分配:</div>
-            <div id="memory-details" style="font-size:0.8rem;line-height:1.8;">
-              加载中...
-            </div>
-          </div>
-        </div>
-
-        <!-- 回调统计 -->
-        <div class="card">
-          <div class="card-title">🔗 回调统计</div>
-          <div style="margin: 20px 0;">
-            <div style="display:flex;justify-content:space-around;text-align:center;">
-              <div>
-                <div style="font-size:2rem;font-weight:700;color:var(--green);" id="callback-success">--</div>
-                <div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">成功</div>
-              </div>
-              <div>
-                <div style="font-size:2rem;font-weight:700;color:var(--red);" id="callback-errors">--</div>
-                <div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">错误</div>
-              </div>
-            </div>
-          </div>
-          <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
-            <div style="font-size:0.85rem;margin-bottom:8px;color:var(--text-muted);">最近回调记录:</div>
-            <div id="recent-callbacks" style="font-size:0.8rem;max-height:150px;overflow-y:auto;">
-              加载中...
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 第3行：健康状态 + 系统趋势 -->
-    <div class="grid grid-1-1" id="bottom-row-ops">
-      
-      <!-- 左侧：系统健康状态 -->
-      <div class="card collapsible-panel" onclick="togglePanel(this)">
-        <div class="card-title collapsible-header">
-          <span>❤️ 系统健康状态</span>
-          <span class="collapsible-toggle">▼</span>
-        </div>
-        <div class="collapsible-body" style="margin-top: 16px;">
-          <div id="health-status-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">
-            <div style="padding:12px;background:var(--bg);border-radius:6px;border-left:3px solid var(--green);">
-              <div style="font-size:0.85rem;color:var(--text-muted);">MCP Server</div>
-              <div style="font-weight:600;margin-top:4px;" id="health-mcp">检测中...</div>
-            </div>
-            <div style="padding:12px;background:var(--bg);border-radius:6px;border-left:3px solid var(--green);">
-              <div style="font-size:0.85rem;color:var(--text-muted);">数据库连接</div>
-              <div style="font-weight:600;margin-top:4px;" id="health-db">检测中...</div>
-            </div>
-            <div style="padding:12px;background:var(--bg);border-radius:6px;border-left:3px solid var(--green);">
-              <div style="font-size:0.85rem;color:var(--text-muted);">LLM 服务</div>
-              <div style="font-weight:600;margin-top:4px;" id="health-llm">检测中...</div>
-            </div>
-            <div style="padding:12px;background:var(--bg);border-radius:6px;border-left:3px solid var(--green);">
-              <div style="font-size:0.85rem;color:var(--text-muted);">文件系统</div>
-              <div style="font-weight:600;margin-top:4px;" id="health-fs">检测中...</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 右侧：系统运行趋势 -->
-      <div class="card">
-        <div class="card-title">📈 系统运行趋势 (最近24小时)</div>
-        <div style="position:relative;height:250px;">
-          <canvas id="system-trend-chart"></canvas>
-        </div>
-      </div>
-    </div>
-
-  </div> <!-- end view-ops -->
-
-</div> <!-- end container -->
-
 <script>
-// ============================================================
-// 全局配置与常量
-// ============================================================
-const API_BASE = '/api';
-const REFRESH_INTERVAL = 5000;
+const API_BASE = '';
 
-let radarChartInstance = null;
-let heatmapChartInstance = null;
-let trendChartInstance = null;
-
-// ============================================================
-// 视图切换功能
-// ============================================================
-function switchView(viewName) {
-  // 更新按钮状态
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.view === viewName);
-  });
-
-  // 切换视图显示
-  document.querySelectorAll('.view-container').forEach(view => {
-    view.classList.toggle('active', view.id === `view-${viewName}`);
-  });
-
-  // 触发对应视图的数据刷新
-  if (viewName === 'growth') {
-    refreshGrowthData();
-  } else if (viewName === 'ops') {
-    refreshOpsData();
-  }
+function formatDate(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso + (iso.endsWith('Z') ? '' : 'Z'));
+  return d.toLocaleString('zh-CN', { hour12: false });
 }
 
-// ============================================================
-// 数据获取函数
-// ============================================================
+function fmtTime(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso + (iso.endsWith('Z') ? '' : 'Z'));
+  return d.toLocaleTimeString('zh-CN', { hour12: false });
+}
+
+function statusTag(s) {
+  const cls = {pending:'pending',running:'running',completed:'completed',failed:'failed'}[s] || 'pending';
+  return `<span class="tag ${cls}">${s}</span>`;
+}
+
 async function fetchJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  return r.json();
+}
+
+async function refreshSystemStatus() {
   try {
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    return await resp.json();
-  } catch (error) {
-    console.error(`[API] ${url} failed:`, error);
-    return null;
+    const d = await fetchJSON('/api/system/status');
+    document.getElementById('activeSessions').textContent = d.active_sessions ?? '-';
+    document.getElementById('todaySessions').textContent = d.today_new_sessions ?? '-';
+    document.getElementById('kbSize').textContent = d.knowledge_base_size ?? '-';
+    document.getElementById('todayKnowledge').textContent = d.today_knowledge_added ?? '-';
+    document.getElementById('pendingTasks').textContent = d.pending_tasks ?? '-';
+    document.getElementById('runningTasks').textContent = d.running_tasks ?? '-';
+    document.getElementById('completedTasks').textContent = d.completed_tasks ?? '-';
+    document.getElementById('taskTotal').textContent = (d.pending_tasks||0)+(d.running_tasks||0)+(d.completed_tasks||0);
+    document.getElementById('cbSuccess').textContent = d.callback_triggers ?? '-';
+    document.getElementById('cbError').textContent = 0;
+    document.getElementById('errorBanner').style.display = 'none';
+  } catch(e) {
+    document.getElementById('errorBanner').style.display = 'block';
+    document.getElementById('errorBanner').textContent = '系统状态获取失败: ' + e.message;
   }
 }
 
-// 成长视角数据接口
-async function getUserGrowth() { return await fetchJSON(`${API_BASE}/growth/user-overview`); }
-async function getSystemEvolution() { return await fetchJSON(`${API_BASE}/growth/system-evolution`); }
-async function getSkillRadar() { return await fetchJSON(`${API_BASE}/growth/skill-radar`); }
-async function getTimeline() { return await fetchJSON(`${API_BASE}/growth/timeline?limit=15`); }
-async function getActivityHeatmap() { return await fetchJSON(`${API_BASE}/growth/activity-heatmap`); }
-
-// 运维视角数据接口
-async function getSystemStatus() { return await fetchJSON(`${API_BASE}/system/status`); }
-async function getTaskQueue() { return await fetchJSON(`${API_BASE}/tasks/list?limit=10`); }
-async function getMemoryUsage() { return await fetchJSON(`${API_BASE}/system/memory`); }
-async function getCallbackStats() { return await fetchJSON(`${API_BASE}/callbacks/stats`); }
-async function getHealthCheck() { return await fetchJSON(`${API_BASE}/health/check`); }
-async function getSystemTrends() { return await fetchJSON(`${API_BASE}/trends/system?hours=24`); }
-
-// ============================================================
-// 成长视角 UI 更新函数
-// ============================================================
-function updateGrowthMetrics(userGrowth, systemEvo) {
-  if (!userGrowth || !systemEvo) return;
-
-  // 用户指标
-  document.getElementById('total-skills').textContent = userGrowth.total_skills || 0;
-  document.getElementById('skills-trend').textContent = `↑ +${userGrowth.this_week_new || 0} 本周新增`;
-  
-  const mastery = userGrowth.avg_mastery || 0;
-  document.getElementById('avg-mastery').textContent = `${mastery}%`;
-  document.getElementById('mastery-bar').style.width = `${mastery}%`;
-
-  // 系统指标
-  // v6.0.1: 从 recent_changes 推导当前版本，兼容后端字段名
-  const latestChange = systemEvo.recent_changes?.[0];
-  const currentVersion = systemEvo.current_version || latestChange?.version || '?.?.?';
-  document.getElementById('system-version').textContent = `v${currentVersion}`;
-  document.getElementById('version-trend').textContent = `${systemEvo.total_iterations || 0} 次迭代`;
-
-  const iterCount = systemEvo.total_iterations || 0;
-  document.getElementById('iteration-count').textContent = iterCount;
-  
-  const adoptionRate = systemEvo.suggestion_adoption_rate || systemEvo.optimization_adoption_rate || 0;
-  document.getElementById('adoption-circle').style.setProperty('--pct', `${adoptionRate}%`);
-  document.getElementById('adoption-circle').dataset.pct = `${adoptionRate}%`;
-  document.getElementById('adoption-text').textContent = `${adoptionRate}%`;
-
-  // 学习效率
-  const efficiency = userGrowth.learning_efficiency || 0;
-  document.getElementById('learning-efficiency').textContent = efficiency.toFixed(2);
-  document.getElementById('efficiency-trend').textContent = efficiency > 0 ? `↑ ${Math.round(efficiency * 100)}% 超前` : '--';
-}
-
-function updateRadarChart(radarData) {
-  if (!radarData) return;
-
-  const ctx = document.getElementById('skill-radar-chart').getContext('2d');
-  
-  if (radarChartInstance) radarChartInstance.destroy();
-
-  radarChartInstance = new Chart(ctx, {
-    type: 'radar',
-    data: {
-      labels: radarData.dimensions || ['前端开发', '后端开发', '数据库', 'DevOps', '算法设计', 'AI/ML'],
-      datasets: [{
-        label: '当前掌握度',
-        data: radarData.current_scores || [0, 0, 0, 0, 0, 0],
-        backgroundColor: 'rgba(88,166,255,0.15)',
-        borderColor: '#58a6ff',
-        pointBackgroundColor: '#58a6ff',
-        pointBorderColor: '#fff',
-        pointHoverBackgroundColor: '#fff',
-        pointHoverBorderColor: '#58a6ff'
-      }, {
-        label: '30天前',
-        data: radarData.historical_scores || [0, 0, 0, 0, 0, 0],
-        backgroundColor: 'rgba(163,113,247,0.1)',
-        borderColor: '#a371f7',
-        borderDash: [5, 5],
-        pointBackgroundColor: '#a371f7',
-        pointBorderColor: '#fff'
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        r: {
-          angleLines: { color: 'rgba(48,54,61,0.5)' },
-          grid: { color: 'rgba(48,54,61,0.5)' },
-          pointLabels: { color: '#8b949e', font: { size: 11 } },
-          ticks: { color: '#8b949e', backdropColor: 'transparent' },
-          suggestedMin: 0,
-          suggestedMax: 100
-        }
-      },
-      plugins: {
-        legend: {
-          position: 'bottom',
-          labels: { color: '#8b949e', usePointStyle: true }
-        }
-      }
+async function refreshTasks() {
+  try {
+    const tasks = await fetchJSON('/api/tasks/list?limit=20');
+    const tbody = document.querySelector('#taskTable tbody');
+    if (!tasks.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="empty">暂无任务</td></tr>';
+      return;
     }
-  });
-
-  // 更新统计数据
-  const currentAvg = (radarData.current_scores || []).reduce((a,b)=>a+b,0) / 6;
-  const historyAvg = (radarData.historical_scores || []).reduce((a,b)=>a+b,0) / 6;
-  const improvement = currentAvg - historyAvg;
-
-  document.getElementById('radar-current-avg').textContent = currentAvg.toFixed(1);
-  document.getElementById('radar-history-avg').textContent = historyAvg.toFixed(1);
-  document.getElementById('radar-improvement').textContent = improvement > 0 ? `+${improvement.toFixed(1)}` : improvement.toFixed(1);
+    tbody.innerHTML = tasks.map(t => `
+      <tr>
+        <td style="font-family:monospace;font-size:12px;">${t.id}</td>
+        <td>${t.name}</td>
+        <td style="font-size:12px;color:var(--text-muted);">${t.type}</td>
+        <td>${statusTag(t.status)}</td>
+      </tr>
+    `).join('');
+  } catch(e) { /* 静默 */ }
 }
 
-function updateEvolutionPanel(systemEvo) {
-  if (!systemEvo) return;
+async function refreshMemory() {
+  try {
+    const d = await fetchJSON('/api/system/memory');
+    document.getElementById('memRSS').textContent = d.used_mb + ' MB / ' + d.total_mb + ' MB';
+    const pct = Math.min(d.percent, 100);
+    document.getElementById('memRSSBar').style.width = pct + '%';
+    document.getElementById('memSys').textContent = (d.details?.[2]?.size_mb || 0) + ' MB';
+    document.getElementById('memSysBar').style.width = (d.details?.[2]?.percent || 0) + '%';
 
-  // v6.0.1: 兼容后端字段名映射
-  // 迭代次数
-  document.getElementById('total-iterations').textContent = systemEvo.total_iterations || 0;
-  // 周迭代率（30天内平均）
-  const iterPerWeek = systemEvo.total_iterations ? 
-    (systemEvo.total_iterations / Math.max(1, (systemEvo.days_since_first_iteration || 30) / 7)).toFixed(1) :
-    '0.0';
-  document.getElementById('iteration-rate').textContent = systemEvo.iteration_rate_per_week ? 
-    `↑ ${systemEvo.iteration_rate_per_week} 次/周` : `↑ ${iterPerWeek} 次/周`;
-
-  // 采纳率
-  const adoptionRate = systemEvo.suggestion_adoption_rate || systemEvo.optimization_adoption_rate || 0;
-  document.getElementById('adoption-rate-circle').style.setProperty('--pct', `${adoptionRate}%`);
-  document.getElementById('adoption-rate-circle').dataset.pct = `${adoptionRate}%`;
-
-  // v6.0: LLM 分析引擎统计（不再展示虚假的规则引擎占比）
-  const llmStats = systemEvo.llm_analysis_stats || {};
-  document.getElementById('llm-step-count').textContent = llmStats.step_analyses ?? '--';
-  document.getElementById('llm-conv-count').textContent = llmStats.conv_analyses ?? '--';
-  document.getElementById('llm-success-rate').textContent = llmStats.success_rate ?? '--';
-
-  // 知识库增长
-  const kbGrowth = systemEvo.knowledge_growth_rate || systemEvo.knowledge_base_growth_rate || 0;
-  document.getElementById('kb-growth-rate').textContent = `+${kbGrowth}%`;
-
-  // 最近变更
-  const latestChangeObj = systemEvo.latest_change || systemEvo.recent_changes?.[0];
-  document.getElementById('latest-change').innerHTML = latestChangeObj ?
-    `<strong>${latestChangeObj.title || latestChangeObj.description || '未知变更'}</strong><br>` +
-    `<span style="color:var(--text-muted);font-size:0.8rem;">${latestChangeObj.time_ago || latestChangeObj.timestamp || ''}</span>` :
-    '<span style="color:var(--text-muted);">暂无记录</span>';
+    const detDiv = document.getElementById('memDetails');
+    detDiv.innerHTML = (d.details || []).map(i =>
+      `<div class="memory-bar" style="margin-top:8px;">
+        <div class="label"><span>${i.name}</span><span>${i.size_mb} MB (${i.percent}%)</span></div>
+      </div>`
+    ).join('');
+  } catch(e) { /* 静默 */ }
 }
 
-function updateTimeline(timelineData) {
-  const container = document.getElementById('timeline-container');
-  
-  // v6.0.1: 兼容后端返回 {events: [...], ...} 对象格式
-  const events = Array.isArray(timelineData) ? timelineData : (timelineData?.events || []);
-  
-  if (!events || events.length === 0) {
-    container.innerHTML = `
-      <div style="text-align:center;color:var(--text-muted);padding:40px 0;">
-        暂无成长事件
+async function refreshCallbacks() {
+  try {
+    const d = await fetchJSON('/api/callbacks/stats');
+    const tbody = document.querySelector('#cbTable tbody');
+    const recent = d.recent_calls || [];
+    if (!recent.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="empty">暂无回调记录</td></tr>';
+      return;
+    }
+    tbody.innerHTML = recent.map(c => `
+      <tr>
+        <td style="font-family:monospace;font-size:12px;">${c.id}</td>
+        <td>${c.name}</td>
+        <td>${statusTag(c.status)}</td>
+        <td style="font-size:12px;color:var(--text-muted);">${fmtTime(c.timestamp)}</td>
+      </tr>
+    `).join('');
+  } catch(e) { /* 静默 */ }
+}
+
+async function refreshHealth() {
+  try {
+    const d = await fetchJSON('/api/health/check');
+    const svc = d.services || {};
+    const items = Object.entries(svc).map(([k,v]) => {
+      const dot = v.healthy ? '<span class="status-dot online"></span>' : '<span class="status-dot offline"></span>';
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);">
+        <span>${dot} ${k}</span>
+        <span style="font-size:12px;color:var(--text-muted);">${v.detail || ''}</span>
       </div>`;
-    return;
-  }
-
-  container.innerHTML = events.map(event => `
-    <div class="timeline-item ${event.type}">
-      <div class="timeline-icon">${event.icon}</div>
-      <div class="timeline-content">
-        <div class="timeline-time">${event.time}</div>
-        <div class="timeline-text">${event.content}</div>
-        ${event.delta ? `<span class="timeline-badge positive">${event.delta}</span>` : ''}
-        ${event.impact ? `<span class="timeline-badge info">${event.impact}</span>` : ''}
-      </div>
-    </div>
-  `).join('');
-}
-
-function updateHeatmap(heatmapData) {
-  if (!heatmapData) return;
-
-  const ctx = document.getElementById('activity-heatmap-chart').getContext('2d');
-  
-  if (heatmapChartInstance) heatmapChartInstance.destroy();
-
-  heatmapChartInstance = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: (heatmapData.daily_data || []).map(d => d.date),
-      datasets: [{
-        label: '活动强度',
-        data: (heatmapData.daily_data || []).map(d => d.intensity),
-        backgroundColor: (heatmapData.daily_data || []).map(d => {
-          const intensity = d.intensity;
-          if (intensity >= 8) return 'rgba(248,81,73,0.7)';
-          if (intensity >= 6) return 'rgba(210,153,34,0.7)';
-          if (intensity >= 4) return 'rgba(63,185,80,0.7)';
-          return 'rgba(88,166,255,0.5)';
-        }),
-        borderRadius: 4,
-        barThickness: 10
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: (ctx) => `强度: ${ctx.raw}`
-          }
-        }
-      },
-      scales: {
-        x: {
-          ticks: { color: '#8b949e', maxRotation: 45, font: { size: 10 } },
-          grid: { display: false }
-        },
-        y: {
-          beginAtZero: true,
-          max: 10,
-          ticks: { color: '#8b949e', stepSize: 2 },
-          grid: { color: 'rgba(48,54,61,0.3)' }
-        }
-      }
-    }
-  });
-
-  // 更新统计
-  document.getElementById('heatmap-active-days').textContent = heatmapData.active_days || 0;
-  document.getElementById('heatmap-peak').textContent = heatmapData.peak_intensity || 0;
-  document.getElementById('heatmap-avg').textContent = (heatmapData.avg_intensity || 0).toFixed(1);
-}
-
-// ============================================================
-// 运维视角 UI 更新函数
-// ============================================================
-function updateOpsMetrics(statusData) {
-  if (!statusData) return;
-
-  document.getElementById('active-sessions').textContent = statusData.active_sessions || 0;
-  document.getElementById('today-sessions').textContent = statusData.today_new_sessions || 0;
-
-  document.getElementById('pending-tasks').textContent = statusData.pending_tasks || 0;
-  document.getElementById('running-tasks').textContent = statusData.running_tasks || 0;
-  document.getElementById('completed-tasks').textContent = statusData.completed_tasks || 0;
-
-  document.getElementById('knowledge-base-size').textContent = statusData.knowledge_base_size || 0;
-  document.getElementById('today-knowledge').textContent = statusData.today_knowledge_added || 0;
-
-  document.getElementById('callback-registrations').textContent = statusData.callback_registrations || 0;
-  document.getElementById('callback-triggers').textContent = statusData.callback_triggers || 0;
-}
-
-function updateTaskQueue(taskData) {
-  const tbody = document.getElementById('task-list-body');
-  
-  if (!taskData || taskData.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">暂无任务</td></tr>`;
-    return;
-  }
-
-  tbody.innerHTML = taskData.map(task => {
-    // 格式化创建时间
-    let timeDisplay = '--';
-    if (task.created_at) {
-      try {
-        const d = new Date(task.created_at);
-        if (!isNaN(d.getTime())) {
-          timeDisplay = d.toLocaleString('zh-CN', { 
-            month:'2-digit', day:'2-digit', 
-            hour:'2-digit', minute:'2-digit', second:'2-digit' 
-          });
-        }
-      } catch(e) { timeDisplay = task.created_at; }
-    }
-
-    // 任务类型中文映射
-    const typeLabels = {
-      'step_analysis': '📝 步骤分析',
-      'conversation_finalize': '🏁 对话收尾',
-      'general': '🔧 通用任务',
-    };
-    const typeLabel = typeLabels[task.type] || task.type;
-
-    return `
-    <tr>
-      <td title="${task.id}">${task.id}</td>
-      <td>${task.name || '--'}</td>
-      <td>${typeLabel}</td>
-      <td><span class="status-badge status-${task.status || 'pending'}">${task.status || 'pending'}</span></td>
-      <td>${timeDisplay}</td>
-      <td>${task.priority || '--'}</td>
-    </tr>`;
-  }).join('');
-}
-
-function updateMemoryUsage(memoryData) {
-  if (!memoryData) return;
-
-  const usedMB = memoryData.used_mb || 0;
-  const totalMB = memoryData.total_mb || 1000;
-  const percent = Math.round((usedMB / totalMB) * 100);
-
-  document.getElementById('memory-used').textContent = `${usedMB} MB`;
-  document.getElementById('memory-total').textContent = `总计 ${totalMB} MB`;
-  document.getElementById('memory-percent').textContent = `${percent}%`;
-  document.getElementById('memory-bar').style.width = `${percent}%`;
-
-  const details = memoryData.details || [];
-  document.getElementById('memory-details').innerHTML = details.length > 0 ?
-    details.map(d => `
-      <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-        <span>${d.name}</span>
-        <span style="color:${d.percent > 70 ? 'var(--red)' : 'var(--text-muted)'}">${d.percent}% (${d.size_mb}MB)</span>
-      </div>
-    `).join('') :
-    '<span style="color:var(--text-muted);">无详细信息</span>';
-}
-
-function updateCallbackStats(callbackData) {
-  if (!callbackData) return;
-
-  document.getElementById('callback-success').textContent = callbackData.success_count || 0;
-  document.getElementById('callback-errors').textContent = callbackData.error_count || 0;
-
-  const recent = callbackData.recent_calls || [];
-  document.getElementById('recent-callbacks').innerHTML = recent.length > 0 ?
-    recent.slice(0, 5).map(c => `
-      <div style="padding:4px 0;border-bottom:1px solid var(--border);">
-        <strong>${c.name || c.id}</strong>: ${c.status}
-        <span style="float:right;color:var(--text-muted);font-size:0.75rem;">${c.timestamp}</span>
-      </div>
-    `).join('') :
-    '<span style="color:var(--text-muted);">暂无记录</span>';
-}
-
-function updateHealthCheck(healthData) {
-  if (!healthData) return;
-
-  const services = healthData.services || {};
-  
-  document.getElementById('health-mcp').innerHTML = services.mcp_server?.healthy ?
-    '✅ 正常' : '❌ 异常';
-  document.getElementById('health-mcp').parentElement.style.borderLeftColor = 
-    services.mcp_server?.healthy ? 'var(--green)' : 'var(--red)';
-    
-  document.getElementById('health-db').innerHTML = services.database?.healthy ?
-    '✅ 正常' : '❌ 异常';
-  document.getElementById('health-db').parentElement.style.borderLeftColor = 
-    services.database?.healthy ? 'var(--green)' : 'var(--red)';
-
-  document.getElementById('health-llm').innerHTML = services.llm_service?.healthy ?
-    '✅ 正常' : '❌ 异常';
-  document.getElementById('health-llm').parentElement.style.borderLeftColor = 
-    services.llm_service?.healthy ? 'var(--green)' : 'var(--red)';
-
-  document.getElementById('health-fs').innerHTML = services.filesystem?.healthy ?
-    '✅ 正常' : '❌ 异常';
-  document.getElementById('health-fs').parentElement.style.borderLeftColor = 
-    services.filesystem?.healthy ? 'var(--green)' : 'var(--red)';
-}
-
-function updateTrends(trendData) {
-  if (!trendData) return;
-
-  const ctx = document.getElementById('system-trend-chart').getContext('2d');
-  
-  if (trendChartInstance) trendChartInstance.destroy();
-
-  trendChartInstance = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: (trendData.timestamps || []).slice(-24),
-      datasets: [
-        {
-          label: '会话数',
-          data: (trendData.sessions || []).slice(-24),
-          borderColor: '#58a6ff',
-          backgroundColor: 'rgba(88,166,255,0.1)',
-          tension: 0.3,
-          fill: true
-        },
-        {
-          label: '任务完成',
-          data: (trendData.tasks_completed || []).slice(-24),
-          borderColor: '#3fb950',
-          backgroundColor: 'rgba(63,185,80,0.1)',
-          tension: 0.3,
-          fill: true
-        },
-        {
-          label: '回调触发',
-          data: (trendData.callbacks_triggered || []).slice(-24),
-          borderColor: '#a371f7',
-          backgroundColor: 'rgba(163,113,247,0.1)',
-          tension: 0.3,
-          fill: true
-        }
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: {
-          position: 'top',
-          labels: { color: '#8b949e', usePointStyle: true }
-        }
-      },
-      scales: {
-        x: {
-          ticks: { color: '#8b949e', maxRotation: 45, font: { size: 10 } },
-          grid: { display: false }
-        },
-        y: {
-          beginAtZero: true,
-          ticks: { color: '#8b949e' },
-          grid: { color: 'rgba(48,54,61,0.3)' }
-        }
-      }
-    }
-  });
-}
-
-// ============================================================
-// 辅助功能
-// ============================================================
-function togglePanel(panelElement) {
-  panelElement.classList.toggle('collapsed');
-}
-
-function showError(viewId, message) {
-  const banner = document.getElementById(`error-banner-${viewId}`);
-  if (banner) {
-    banner.textContent = message;
-    banner.style.display = 'block';
+    }).join('');
+    document.getElementById('healthContent').innerHTML = items || '<div class="empty">无服务信息</div>';
+  } catch(e) {
+    document.getElementById('healthContent').innerHTML = '<div class="empty" style="color:var(--red);">健康检查失败</div>';
   }
 }
 
-function clearError(viewId) {
-  const banner = document.getElementById(`error-banner-${viewId}`);
-  if (banner) {
-    banner.style.display = 'none';
-  }
+async function refreshAll() {
+  document.getElementById('lastUpdate').textContent = '刷新中...';
+  await Promise.all([
+    refreshSystemStatus(),
+    refreshTasks(),
+    refreshMemory(),
+    refreshCallbacks(),
+    refreshHealth(),
+  ]);
+  document.getElementById('lastUpdate').textContent = '最后更新: ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
 }
 
-// ============================================================
-// 数据刷新循环
-// ============================================================
-
-// 刷新成长视角数据
-async function refreshGrowthData() {
-  try {
-    const [userGrowth, systemEvo, radarData, timelineData, heatmapData] = await Promise.all([
-      getUserGrowth(),
-      getSystemEvolution(),
-      getSkillRadar(),
-      getTimeline(),
-      getActivityHeatmap()
-    ]);
-
-    updateGrowthMetrics(userGrowth, systemEvo);
-    updateRadarChart(radarData);
-    updateEvolutionPanel(systemEvo);
-    updateTimeline(timelineData);
-    updateHeatmap(heatmapData);
-
-    clearError('growth');
-  } catch (error) {
-    console.error('[Dashboard Growth] Refresh error:', error);
-    showError('growth', `刷新失败: ${error.message}`);
-  }
-}
-
-// 刷新运维视角数据
-async function refreshOpsData() {
-  try {
-    const [statusData, taskData, memoryData, callbackData, healthData, trendData] = await Promise.all([
-      getSystemStatus(),
-      getTaskQueue(),
-      getMemoryUsage(),
-      getCallbackStats(),
-      getHealthCheck(),
-      getSystemTrends()
-    ]);
-
-    updateOpsMetrics(statusData);
-    updateTaskQueue(taskData);
-    updateMemoryUsage(memoryData);
-    updateCallbackStats(callbackData);
-    updateHealthCheck(healthData);
-    updateTrends(trendData);
-
-    clearError('ops');
-  } catch (error) {
-    console.error('[Dashboard Ops] Refresh error:', error);
-    showError('ops', `刷新失败: ${error.message}`);
-  }
-}
-
-// 主刷新函数（仅刷新当前活动视图）
-async function refresh() {
-  const activeView = document.querySelector('.view-container.active');
-  if (activeView) {
-    const viewId = activeView.id.replace('view-', '');
-    if (viewId === 'growth') {
-      await refreshGrowthData();
-    } else if (viewId === 'ops') {
-      await refreshOpsData();
-    }
-  }
-
-  document.getElementById('refresh-status').textContent = `最后更新: ${new Date().toLocaleTimeString()}`;
-}
-
-// ============================================================
-// 初始化
-// ============================================================
-document.addEventListener('DOMContentLoaded', () => {
-  // 初始加载当前视图数据
-  refresh();
-  
-  // 自动刷新（仅刷新活动视图）
-  setInterval(refresh, REFRESH_INTERVAL);
-});
+refreshAll();
+setInterval(refreshAll, 30000);
 </script>
-
 </body>
 </html>

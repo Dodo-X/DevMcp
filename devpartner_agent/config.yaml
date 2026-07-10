@@ -1,10 +1,10 @@
-﻿# DevPartner Agent v5.2.0 配置
+﻿# DevPartner Agent v7.3.0 配置
 # 智能管家层，有状态管理，配置项较多
-# 引擎：llama-cpp-python + Qwen3.5-9B-Q4_1
+# 引擎：Ollama（本地 HTTP API）
 
 agent:
   name: "devpartner-agent"
-  version: "5.2.0"
+  version: "7.3.0"
   description: "DevPartner 智能管家 - 会话管理 + 异步任务 + 知识图谱 + Web Dashboard"
 
 server:
@@ -51,50 +51,33 @@ logging:
   format: "[%(asctime)s] [%(levelname)s] %(name)s: %(message)s"
   file: "./data/logs/agent.log"
 
-# 本地 LLM 配置（v5.1 - llama-cpp-python 专用）
+# 本地 LLM 配置（v7.3.0 — Ollama 引擎）
 # ==========================================
-# 使用 llama-cpp-python 直接加载本地 GGUF 模型文件
-# 当前模型：Qwen3.5-9B Q4_1 量化版（4-bit 量化，平衡性能与质量）
+# 使用本地 Ollama 服务（http://localhost:11434）进行推理。
+# 前提：已安装 Ollama 并拉取所需模型。
 #
-# 模型信息：
-# - 路径：./models/Qwen3.5-9B-Q4_1.gguf（项目根目录下）
-# - 参数量：9B (90亿参数)
-# - 量化级别：Q4_1 (4-bit, 约 5.7GB)
-# - 推理速度：CPU ~15-25 tokens/s
-#
-# 安装依赖：
-# pip install llama-cpp-python>=0.3.20
-# （conda 用户推荐：conda install -c conda-forge llama-cpp-python）
+# 安装 Ollama：https://ollama.com/download
+# 拉取模型：ollama pull qwen3
 llm:
   enabled: true                              # 是否启用 LLM 增强
   
-  # ── 模型路径配置 ──
-  model_path: "./models/Qwen3.5-9B-Q4_1.gguf"  # GGUF 模型文件路径（相对项目根目录）
-  
-  # ── 推理参数（针对 Q4_1 量化模型优化）──
-  n_ctx: 8192                                # 上下文窗口大小（Qwen3.5-9B 支持 32K，设 8K 平衡内存）
-  n_gpu_layers: 0                            # GPU 加速层数（0=纯CPU，-1=全部GPU。无显卡请保持 0）
-  n_threads: 8                               # CPU 线程数（建议设为核心数，如 8 核则填 8）
-  n_batch: 512                               # 批处理大小（影响推理速度，512 适合 Q4_1）
+  # ── Ollama 连接 ──
+  ollama_model: "qwen3"                      # Ollama 模型名称（ollama list 查看可用模型）
+  ollama_timeout: 120                        # 推理超时（秒）
   
   # ── 生成参数 ──
-  max_tokens: 2048                           # 最大生成 token 数（Q4_1 可适当增大）
-  max_input_chars: 8000                      # 最大输入字符数（增大以利用长上下文）
-  temperature: 0.3                           # 生成温度（Q4_1 建议稍高以保持多样性）
-  top_p: 0.9                                 # Top-P 采样（核采样，控制随机性）
-  top_k: 40                                  # Top-K 采样（限制候选词数量）
-  repeat_penalty: 1.1                        # 重复惩罚（避免循环输出）
+  max_tokens: 2048                           # 最大生成 token 数
+  max_input_chars: 8000                      # 最大输入字符数
+  temperature: 0.3                           # 生成温度
+  top_p: 0.9                                 # Top-P 采样（核采样）
+  top_k: 40                                  # Top-K 采样
+  repeat_penalty: 1.1                        # 重复惩罚
   
-  # ── 性能优化 ──
-  verbose: false                             # 详细日志（调试时开启）
-  preload: true                              # 启动时预加载模型到内存
-  cache_size_kb: 2048                        # 模型缓存大小（KB，增大可加速重复调用）
-  use_mmap: true                             # 使用内存映射文件（减少内存占用）
-  use_mlock: false                           # 锁定内存（防止交换到磁盘）
+  # ── 启动行为 ──
+  preload: true                              # 启动时验证 Ollama 连接并测试推理
   
   # ── 容错机制 ──
-  retry_on_error: true                       # 推理失败时自动重试
-  fallback_to_rules: true                    # 模型加载失败时降级到规则引擎
+  fallback_to_rules: true                    # 模型不可用时降级到规则引擎
   
   # ── 功能开关 ──
   enhance_analysis: true                     # 对话分析增强（LLM 语义理解）⭐ 推荐

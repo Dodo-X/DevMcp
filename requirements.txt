@@ -1,4 +1,4 @@
-# DevPartner v6.0 - 核心依赖
+# DevPartner v7.3.0 - 核心依赖
 # ============================
 # 合并自:
 #   - pyproject.toml (核心依赖)
@@ -14,13 +14,7 @@ httpx>=0.24.0
 # YAML 配置解析（必需）
 pyyaml>=6.0
 
-# 本地 LLM 推理引擎（必需 - Qwen3.5-9B 模型推理）
-# 安装标准版（CPU）:
-#   pip install llama-cpp-python>=0.3.20
-#
-# 安装 CUDA 加速版（GPU 推荐）:
-#   pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121
-llama-cpp-python>=0.3.20
-
-# ModelScope SDK (用于下载私有模型到容器内)
-modelscope>=1.9.0
+# Ollama Python 客户端（可选 — LLM 推理通过 Ollama HTTP API）
+# 注意：推理不依赖此包（使用标准库 urllib），仅用于方便管理
+# 必须先安装并运行 Ollama 服务：https://ollama.com/download
+ollama>=0.4.0

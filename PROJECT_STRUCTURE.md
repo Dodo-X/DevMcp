@@ -50,7 +50,8 @@ devpartner_tools/tools/
 → 部署问题：[deploy/README.md#故障排查](./deploy/README.md#🐛-故障排查)
 
 ### 📊 监控运维？
-→ Web Dashboard: http://localhost:8082  
+→ 运维面板：`devpartner_agent/dashboard.html`（系统/任务队列监控）
+→ API 端点：`/api/system/*`、`/api/tasks/*`、`/api/health/*`、`/api/trends/*`
 → 日志位置：`data/logs/agent.log`  
 → 数据库维护：`scripts/check_db_integrity.py`
 
@@ -204,7 +205,7 @@ from typing import Optional, Dict, List
 
 # 2. 第三方库
 import yaml
-import llama_cpp
+import ollama
 
 # 3. 本地模块
 from devpartner_agent.core.config import Config

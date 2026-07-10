@@ -5,26 +5,12 @@
 - 按能力（而非工具名）授权
 - 支持"允许文件读写但不允许网络访问"等细粒度控制
 - 危险操作需要审批，可配置自动批准策略
-
-能力定义：
-    file_read    - 读取文件
-    file_write   - 写入文件
-    file_delete  - 删除文件
-    git_read     - 读取 Git 信息
-    git_write    - 修改 Git 仓库
-    network      - 网络请求
-    system_exec  - 执行系统命令
-    database     - 数据库操作
-    evolution    - 自我进化（修改自身代码）
-    config       - 修改配置
-    admin        - 管理操作（最高权限）
 """
 
-import json
-from enum import Enum, auto
-from typing import Dict, Set, List, Optional, Callable, Any
+from datetime import datetime
+from enum import Enum
+from typing import Dict, Set, List, Any
 from dataclasses import dataclass, field
-from pathlib import Path
 
 
 class Capability(Enum):
@@ -202,22 +188,11 @@ TOOL_CAPABILITY_MAP: Dict[str, Set[Capability]] = {
 
 
 class CapabilityManager:
-    """能力管理器 - 单例模式"""
-    
-    _instance: Optional["CapabilityManager"] = None
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-    
+    """能力管理器"""
+
     def __init__(self):
-        if hasattr(self, "_initialized"):
-            return
-        self._initialized = True
         self._disabled_capabilities: Set[Capability] = set()
-        self._approval_callbacks: Dict[Capability, Callable] = {}
-        self._approval_history: List[ApprovalResult] = []
+        self._approval_history: List[dict] = []
         self._auto_approve_enabled: Dict[Capability, bool] = {}
     
     def disable_capability(self, capability: Capability) -> None:
@@ -231,11 +206,6 @@ class CapabilityManager:
     def set_auto_approve(self, capability: Capability, enabled: bool) -> None:
         """设置自动批准"""
         self._auto_approve_enabled[capability] = enabled
-    
-    def register_approval_callback(self, capability: Capability, 
-                                    callback: Callable) -> None:
-        """注册审批回调"""
-        self._approval_callbacks[capability] = callback
     
     def get_tool_capabilities(self, tool_name: str) -> Set[Capability]:
         """获取工具所需的能力"""
@@ -256,7 +226,7 @@ class CapabilityManager:
                     max_level = profile.risk_level
         return max_level
     
-    def check_authorization(self, tool_name: str, 
+    def check_authorization(self, tool_name: str,
                             dry_run: bool = False) -> ApprovalResult:
         """
         检查工具是否被授权
@@ -268,42 +238,53 @@ class CapabilityManager:
         Returns:
             ApprovalResult: 审批结果
         """
-        from datetime import datetime
         
         caps = self.get_tool_capabilities(tool_name)
         timestamp = datetime.now().isoformat()
         
         # 无风险工具直接通过
         if not caps:
-            return ApprovalResult(
+            result = ApprovalResult(
                 approved=True, 
                 reason=f"工具 '{tool_name}' 无风险能力要求",
                 approver="auto",
                 timestamp=timestamp
             )
+            self._approval_history.append(result.to_dict() if hasattr(result, 'to_dict') else {
+                "approved": result.approved, "reason": result.reason, "approver": result.approver, "timestamp": result.timestamp
+            })
+            return result
         
         # 检查是否有禁用的能力
         disabled = caps & self._disabled_capabilities
         if disabled:
             names = ", ".join(c.value for c in disabled)
-            return ApprovalResult(
+            result = ApprovalResult(
                 approved=False,
                 reason=f"以下能力已被禁用: {names}",
                 approver="system",
                 timestamp=timestamp
             )
+            self._approval_history.append({
+                "approved": result.approved, "reason": result.reason, "approver": result.approver, "timestamp": result.timestamp
+            })
+            return result
         
         # 获取最高风险等级
         risk_level = self.get_risk_level(tool_name)
         
         # SAFE 级别自动通过
         if risk_level == RiskLevel.SAFE:
-            return ApprovalResult(
+            result = ApprovalResult(
                 approved=True,
                 reason=f"工具 '{tool_name}' 风险等级为 SAFE，自动通过",
                 approver="auto",
                 timestamp=timestamp
             )
+            self._approval_history.append({
+                "approved": result.approved, "reason": result.reason, "approver": result.approver, "timestamp": result.timestamp
+            })
+            return result
         
         # 检查是否需要审批
         needs_approval = any(
@@ -327,7 +308,6 @@ class CapabilityManager:
                     approval_required=False
                 )
             else:
-                # 需要审批 → 返回 approval_required=True 让调用方向用户确认
                 caps_info = [
                     {
                         "capability": c.value,
@@ -359,12 +339,13 @@ class CapabilityManager:
                 timestamp=timestamp
             )
         
-        # 记录审批历史
-        self._approval_history.append(result)
+        self._approval_history.append({
+            "approved": result.approved, "reason": result.reason, "approver": result.approver, "timestamp": result.timestamp
+        })
         
         return result
     
-    def get_approval_history(self, limit: int = 20) -> List[ApprovalResult]:
+    def get_approval_history(self, limit: int = 20) -> List[dict]:
         """获取审批历史"""
         return self._approval_history[-limit:]
     
@@ -374,43 +355,11 @@ class CapabilityManager:
             "disabled_capabilities": [c.value for c in self._disabled_capabilities],
             "auto_approve_enabled": {c.value: v for c, v in self._auto_approve_enabled.items()},
             "total_tools_mapped": len(TOOL_CAPABILITY_MAP),
-            "recent_approvals": [
-                {"tool": a.approver, "approved": a.approved, "reason": a.reason, "timestamp": a.timestamp}
-                for a in self._approval_history[-5:]
-            ]
+            "recent_approvals": self._approval_history[-5:],
         }
 
 
 def get_capability_manager() -> CapabilityManager:
     """获取能力管理器实例"""
     return CapabilityManager()
-
-
-def require_capability(tool_name: str):
-    """
-    装饰器：检查工具是否被授权
-    
-    使用示例:
-        @require_capability("self_upgrade")
-        def self_upgrade(...):
-            ...
-    """
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            mgr = get_capability_manager()
-            result = mgr.check_authorization(tool_name)
-            
-            if not result.approved:
-                return json.dumps({
-                    "success": False,
-                    "error": result.reason,
-                    "approval_required": result.approval_required,
-                    "approval_prompt": result.approval_prompt,
-                    "risk_level": mgr.get_risk_level(tool_name).value,
-                    "capabilities": [c.value for c in mgr.get_tool_capabilities(tool_name)],
-                    "instruction": "如果你认为此操作是安全的，请确认后重新调用此工具并附带 approval_granted=true 参数"
-                }, ensure_ascii=False)
-            
-            return func(*args, **kwargs)
-        return wrapper
-    return decorator
+# PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入

@@ -63,16 +63,42 @@ class ServerConfig:
 
 @dataclass
 class DataConfig:
-    """数据存储路径配置 - 所有数据统一在 data/ 目录下"""
+    """数据存储路径配置 - 所有数据统一在 data/ 目录下
+    PONYTATIL: 只保留 root_dir，其余路径动态推导。当需要自定义路径时再添加字段。
+    """
     root_dir: str = "./data"
-    databases_dir: str = "./data/databases"
-    daily_logs_dir: str = "./data/daily_logs"
-    logs_dir: str = "./data/logs"
-    logs_archive_dir: str = "./data/logs_archive"
-    memories_dir: str = "./data/memories"
-    backups_dir: str = "./data/backups"
-    reports_dir: str = "./data/reports"
-    temp_dir: str = "./data/temp"
+
+    @property
+    def databases_dir(self) -> str:
+        return f"{self.root_dir}/databases"
+
+    @property
+    def daily_logs_dir(self) -> str:
+        return f"{self.root_dir}/daily_logs"
+
+    @property
+    def logs_dir(self) -> str:
+        return f"{self.root_dir}/logs"
+
+    @property
+    def logs_archive_dir(self) -> str:
+        return f"{self.root_dir}/logs_archive"
+
+    @property
+    def memories_dir(self) -> str:
+        return f"{self.root_dir}/memories"
+
+    @property
+    def backups_dir(self) -> str:
+        return f"{self.root_dir}/backups"
+
+    @property
+    def reports_dir(self) -> str:
+        return f"{self.root_dir}/reports"
+
+    @property
+    def temp_dir(self) -> str:
+        return f"{self.root_dir}/temp"
 
 
 @dataclass
@@ -136,55 +162,35 @@ class LoggingConfig:
 @dataclass
 class LLMConfig:
     """
-    本地 LLM 配置（v6.0 - llama-cpp-python 专用）
+    本地 LLM 配置（v7.3.0 — Ollama 引擎）
     
-    使用 llama-cpp-python 加载本地 GGUF 模型文件进行推理。
-    当前模型：Qwen3.5-9B Q4_1 量化版（~5.7GB）
-    
-    v6.0 变更：
-    - 统一模型存放位置: ./models/Qwen3.5-9B-Q4_1.gguf
-    - 支持多环境自动检测（本地/Docker/ModelScope云端）
-    - 通过 volume 挂载或手动上传管理模型文件
+    通过 Ollama HTTP API（http://localhost:11434）进行推理。
+    前提：用户已安装并运行 Ollama，且已拉取所需模型。
     
     特性：
-    - 单引擎架构，无外部依赖
-    - 支持 CPU/GPU 混合推理
-    - 针对量化模型优化的参数配置
-    
-    模型文件管理：
-    - 本地开发: 手动下载到 ./models/ 目录
-    - Docker部署: 通过 volume 挂载 ./models:/app/models
-    - ModelScope云端: 上传到 Dataset 或打包进镜像
+    - 零模型文件管理，模型由 Ollama 管理
+    - OpenAI 兼容的 /api/chat 端点
+    - 自动 GPU 加速（Ollama 内置）
     """
     # ── 功能开关 ──
-    enabled: bool = True                                # LLM 总开关（关闭后所有智能分析降级为规则引擎）
+    enabled: bool = True                                # LLM 总开关
 
-    # ── 模型路径（v6.0: 统一使用 models/ 目录）──
-    model_path: str = "./models/Qwen3.5-9B-Q4_1.gguf"   # GGUF 模型文件路径
-    
-    # ── 推理参数（针对 Q4_1 量化模型优化）──
-    n_ctx: int = 8192                                  # 上下文窗口大小（8K 平衡内存与性能）
-    n_gpu_layers: int = 0                              # GPU 加速层数（0=纯CPU, -1=全部GPU）
-    n_threads: int = 8                                 # CPU 线程数（建议设为核心数）
-    n_batch: int = 512                                 # 批处理大小（影响推理速度）
+    # ── Ollama 连接 ──
+    ollama_model: str = "qwen3"                        # Ollama 模型名称（ollama list 查看）
+    ollama_timeout: int = 120                          # 推理超时（秒）
     
     # ── 生成参数 ──
     max_tokens: int = 2048                             # 最大生成 token 数
     max_input_chars: int = 8000                        # 最大输入字符数
-    temperature: float = 0.3                           # 生成温度（Q4_1 建议稍高）
+    temperature: float = 0.3                           # 生成温度
     top_p: float = 0.9                                 # Top-P 核采样
     top_k: int = 40                                    # Top-K 候选词限制
-    repeat_penalty: float = 1.1                        # 重复惩罚（避免循环输出）
+    repeat_penalty: float = 1.1                        # 重复惩罚
     
-    # ── 性能优化 ──
-    verbose: bool = False                              # 详细日志（调试用）
-    preload: bool = True                               # 启动时预加载模型
-    cache_size_kb: int = 2048                          # 模型缓存大小（KB）
-    use_mmap: bool = True                              # 内存映射（减少内存占用）
-    use_mlock: bool = False                            # 锁定内存（防止交换）
+    # ── 启动行为 ──
+    preload: bool = True                               # 启动时验证 Ollama 连接
     
     # ── 容错机制 ──
-    retry_on_error: bool = True                        # 推理失败自动重试
     fallback_to_rules: bool = True                     # 模型不可用时降级到规则引擎
     
     # ── 功能开关 ──
@@ -216,15 +222,9 @@ class AgentConfig:
 # ═══════════════════════════════════════════════════════════
 
 class ConfigManager:
-    """配置管理器：单例模式，支持热重载"""
+    """配置管理器：支持热重载"""
 
-    _instance: Optional["ConfigManager"] = None
     _config: Optional[AgentConfig] = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
 
     def load(self, config_path: str = "config.yaml") -> AgentConfig:
         """加载配置，优先级：默认值 < YAML文件 < 环境变量"""
@@ -321,9 +321,7 @@ class ConfigManager:
             "DEVPARTNER_AGENT_LOG_LEVEL": ("logging", "level", str),
             "DEVPARTNER_LOG_RETENTION_DAYS": ("data_lifecycle", "log_retention_days", int),
             "DEVPARTNER_LLM_ENABLED": ("llm", "enabled", lambda v: v.lower() in ("1", "true", "yes")),
-            "DEVPARTNER_LLM_MODEL_PATH": ("llm", "model_path", str),
-            "DEVPARTNER_LLM_N_GPU_LAYERS": ("llm", "n_gpu_layers", int),
-            "DEVPARTNER_LLM_N_CTX": ("llm", "n_ctx", int),
+            "DEVPARTNER_LLM_MODEL": ("llm", "ollama_model", str),
         }
 
         for env_key, target in env_map.items():
@@ -349,7 +347,6 @@ class ConfigManager:
             config.data.backups_dir,
             config.data.reports_dir,
             config.data.temp_dir,
-            str(Path(config.llm.model_path).parent) if config.llm.model_path else "",
         ]
         dirs = [d for d in dirs if d]
         for d in dirs:
@@ -369,7 +366,17 @@ class ConfigManager:
 # ═══════════════════════════════════════════════════════════
 # 全局便捷访问
 # ═══════════════════════════════════════════════════════════
+# PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入
+
+_config_manager_instance: Optional[ConfigManager] = None
+
+def get_config_manager() -> ConfigManager:
+    """获取全局配置管理器实例"""
+    global _config_manager_instance
+    if _config_manager_instance is None:
+        _config_manager_instance = ConfigManager()
+    return _config_manager_instance
 
 def get_config() -> AgentConfig:
     """获取全局配置单例"""
-    return ConfigManager().config
+    return get_config_manager().config

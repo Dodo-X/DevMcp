@@ -27,17 +27,8 @@ class ConversationAnalyzer:
     完全废弃硬编码逻辑，统一由 LLM 承载分析工作。
     """
 
-    _instance: Optional["ConversationAnalyzer"] = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
     def __init__(self):
-        if hasattr(self, "_initialized"):
-            return
-        self._initialized = True
+        pass
 
     def analyze(self, content: str, source: str = "unknown",
                 client: str = "unknown") -> dict:
@@ -62,7 +53,7 @@ class ConversationAnalyzer:
                 result = analyzer.analyze_conversation(content, source, client)
                 
                 if result and result.get("confidence", 0) > 0.5:
-                    result["analysis_version"] = "v6.0_llm"
+                    result["analysis_version"] = "v7.2_llm"
                     result["analyzer_type"] = "unified_llm"
                     return result
                 
@@ -115,7 +106,7 @@ class ConversationAnalyzer:
             "user_traits": {},
             "confidence": 0.3,
             "analysis_method": "fallback_simple_rules",
-            "analysis_version": "v6.0_fallback",
+            "analysis_version": "v7.2_fallback",
         }
 
     def analyze_and_store(self, content: str, source: str = "unknown",

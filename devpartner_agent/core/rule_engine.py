@@ -33,19 +33,9 @@ class Rule:
 class RuleEngine:
     """规则引擎：管理、触发、执行所有规则"""
 
-    _instance: Optional["RuleEngine"] = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
     def __init__(self):
-        if hasattr(self, "_initialized"):
-            return
         self._rules: dict[str, Rule] = {}
         self._history: list[dict] = []
-        self._initialized = True
         self._load_builtin_rules()
 
     def _load_builtin_rules(self):
@@ -487,5 +477,11 @@ class RuleEngine:
         return findings
 
 
+# PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入
+_engine_instance: Optional[RuleEngine] = None
+
 def get_engine() -> RuleEngine:
-    return RuleEngine()
+    global _engine_instance
+    if _engine_instance is None:
+        _engine_instance = RuleEngine()
+    return _engine_instance

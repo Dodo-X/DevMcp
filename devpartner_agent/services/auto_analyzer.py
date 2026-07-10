@@ -156,7 +156,7 @@ def analyze_pending_conversations(db, limit: int = 10):
                 description=f"自动分析完成: {analyzed_count} 条存档已分析, "
                             f"{feedback_count} 条优化反馈已生成",
                 files_changed="conversations,conversation_archive,optimization_feedback,user_skills",
-                version="4.2.0",
+                version="7.2.0",
             )
         except Exception:
             pass

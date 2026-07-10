@@ -64,18 +64,8 @@ class IdentityManager:
         client = mgr.get_active_client()
     """
 
-    _instance: Optional["IdentityManager"] = None
-    _lock = threading.Lock()
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
     def __init__(self):
-        if hasattr(self, "_init_done"):
-            return
-        self._init_done = True
+        self._lock = threading.Lock()
         # 从配置读取数据目录
         try:
             from devpartner_agent.core.config import get_config
@@ -307,5 +297,11 @@ class IdentityManager:
 
 
 # 全局单例
+# PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入
+_identity_instance: Optional[IdentityManager] = None
+
 def get_identity() -> IdentityManager:
-    return IdentityManager()
+    global _identity_instance
+    if _identity_instance is None:
+        _identity_instance = IdentityManager()
+    return _identity_instance

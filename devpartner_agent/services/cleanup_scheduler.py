@@ -17,18 +17,8 @@ from typing import Optional
 class CleanupScheduler:
     """后台自动清理调度器"""
 
-    _instance: Optional["CleanupScheduler"] = None
-    _lock = threading.Lock()
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
     def __init__(self):
-        if hasattr(self, "_initialized"):
-            return
-        self._initialized = True
+        self._lock = threading.Lock()
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._interval_seconds = 24 * 3600  # 默认24小时
@@ -178,6 +168,12 @@ class CleanupScheduler:
         return result
 
 
+# PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入
+_cleanup_scheduler_instance: Optional[CleanupScheduler] = None
+
 def get_cleanup_scheduler() -> CleanupScheduler:
     """获取清理调度器单例"""
-    return CleanupScheduler()
+    global _cleanup_scheduler_instance
+    if _cleanup_scheduler_instance is None:
+        _cleanup_scheduler_instance = CleanupScheduler()
+    return _cleanup_scheduler_instance

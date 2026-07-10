@@ -24,21 +24,11 @@ from typing import Any, Optional
 class EvolutionEngine:
     """自我进化引擎：代码自更新、热重载、MCP自动发现"""
 
-    _instance: Optional["EvolutionEngine"] = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
     def __init__(self):
-        if hasattr(self, "_initialized"):
-            return
         self._project_root = Path(__file__).parent.parent
         self._backup_dir = self._project_root / "data" / "backups"
         self._upgrade_count_today = 0
         self._last_upgrade_date = ""
-        self._initialized = True
 
     # ── 内部辅助 ──────────────────────────────────────
 
@@ -540,7 +530,7 @@ class EvolutionEngine:
         try:
             from .database import get_db
             db = get_db()
-            version = cfg.version if cfg else "2.0.0"
+            version = cfg.version if cfg else "7.2.0"
             db.log_evolution(
                 change_type=change_type,
                 description=f"Self-evolution: {change_type} {file_path}",
@@ -574,5 +564,11 @@ class EvolutionEngine:
 
 
 # 全局便捷访问
+# PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入
+_evolution_instance: Optional[EvolutionEngine] = None
+
 def get_evolution_engine() -> EvolutionEngine:
-    return EvolutionEngine()
+    global _evolution_instance
+    if _evolution_instance is None:
+        _evolution_instance = EvolutionEngine()
+    return _evolution_instance

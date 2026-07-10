@@ -1,69 +1,42 @@
 """
 数据完整性服务 v4.3
-==================
-负责：
-1. 定期校验：每次 record_dialogue 后自动检查数据完整性
-2. 空值告警：关键字段非空检查 + 日志记录
-3. FK 关联校验：检查外键引用有效性
-4. 写入成功率监控：三大链路（record_dialogue / record_conversation / save_self_iterate）写入统计
-
-设计原则：
-- 校验失败不阻塞正常业务流
-- 告警通过日志输出（stderr）
-- 统计写入 success/count 记录到 improvement_log（系统级）
+PONYTATIL: WriteTracker 使用 collections.Counter 替代手写计数逻辑。
 """
 
-import json
-from datetime import datetime
+from collections import Counter
 from typing import Optional
 
 
 class WriteTracker:
-    """
-    写入成功率追踪器（内存计数，服务重启后重新统计）
-
-    追踪三大关键写入链路：
-    - record_dialogue: 对话落盘
-    - record_conversation: 对话存档
-    - save_self_iterate: 优化结果入库
-    """
+    """写入成功率追踪器（内存计数）"""
 
     def __init__(self):
-        self._counts = {
-            "record_dialogue": {"success": 0, "failure": 0},
-            "record_conversation": {"success": 0, "failure": 0},
-            "save_self_iterate": {"success": 0, "failure": 0},
-        }
+        self._success = Counter()
+        self._failure = Counter()
 
     def record_success(self, operation: str):
-        if operation in self._counts:
-            self._counts[operation]["success"] += 1
+        self._success[operation] += 1
 
     def record_failure(self, operation: str):
-        if operation in self._counts:
-            self._counts[operation]["failure"] += 1
+        self._failure[operation] += 1
 
     def get_stats(self) -> dict:
         stats = {}
-        for op, counts in self._counts.items():
-            total = counts["success"] + counts["failure"]
-            rate = (counts["success"] / total * 100) if total > 0 else 100
-            stats[op] = {
-                "success": counts["success"],
-                "failure": counts["failure"],
-                "total": total,
-                "success_rate": round(rate, 1),
-            }
+        all_ops = set(self._success) | set(self._failure)
+        for op in sorted(all_ops):
+            s = self._success[op]
+            f = self._failure[op]
+            total = s + f
+            rate = round(s / total * 100, 1) if total > 0 else 100
+            stats[op] = {"success": s, "failure": f, "total": total, "success_rate": rate}
         return stats
 
     def get_summary(self) -> str:
         """生成写入成功率摘要"""
-        parts = []
-        for op, s in self.get_stats().items():
-            parts.append(
-                f"{op}: {s['success']}/{s['total']} ({s['success_rate']}%)"
-            )
-        return " | ".join(parts)
+        return " | ".join(
+            f"{op}: {s['success']}/{s['total']} ({s['success_rate']}%)"
+            for op, s in self.get_stats().items()
+        )
 
 
 # 全局追踪器实例

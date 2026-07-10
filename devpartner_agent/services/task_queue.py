@@ -1,10 +1,12 @@
 """
-异步任务队列 (v5.0)
+异步任务队列 (v6.0)
 ==================
-管理后台任务的异步执行，支持优先级调度和资源控制。
+管理后台任务的异步执行，支持 FIFO 调度和同会话顺序保证。
 
 核心功能：
-  - 优先级任务调度（最大堆）
+  ✅ FIFO 先进先出调度（解决"总结先于步骤执行"的问题）
+  ✅ 同会话任务顺序执行（conversation_id 互斥）
+  ✅ 跨会话并行执行（不同对话可同时处理）
   - 并发控制（Semaphore）
   - 内存占用监控
   - 任务超时处理
@@ -16,19 +18,25 @@
   - 非阻塞（不阻塞客户端交互）
   - 可观测性（日志 + 状态查询）
   - 容错（优雅降级）
+  - 数据完整性（步骤必须按顺序完成后再总结）
 
 使用示例：
     queue = TaskQueue()
-    task_id = queue.submit_task("analysis", {"content": "..."}, priority=10)
+    task_id = queue.submit_task("analysis", {"content": "...", "conversation_id": "xxx"})
     status = queue.get_task_status(task_id)
+
+v6.0 变更：
+  - 从优先级堆改为 FIFO 队列
+  - 新增 conversation_id 级别的互斥锁
+  - 保证同一会话内的任务严格按提交顺序执行
 """
 import json
 import uuid
 import logging
 import threading
 import time
-import heapq
-from datetime import datetime
+import collections
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Callable
 from dataclasses import dataclass, field
 from enum import Enum
@@ -57,55 +65,56 @@ class TaskPriority:
     BACKGROUND = 0  # 后台任务（清理/归档）
 
 
-@dataclass(order=True)
-class PriorityTask:
-    """优先级任务包装器（用于堆排序）"""
-    priority: int                          # 优先级（负数用于最大堆）
-    task_id: str = field(compare=False)     # 任务ID
-    task_data: dict = field(compare=False) # 任务数据
+@dataclass
+class QueuedTask:
+    """FIFO 队列任务包装器"""
+    task_id: str                            # 任务ID
+    task_data: dict                         # 任务数据
+    enqueue_time: float = field(default_factory=time.time)  # 入队时间戳
 
 
 class TaskQueue:
     """
-    异步任务队列管理器
-    
+    异步任务队列管理器 (v6.0 - FIFO + 同会话顺序保证)
+
     特性：
-      - 基于最大堆的优先级调度
-      - Semaphore 并发控制
+      ✅ FIFO 先进先出调度（按提交顺序执行）
+      ✅ 同会话任务串行执行（conversation_id 互斥锁）
+      ✅ 跨会话并行执行（不同对话可同时处理）
+      - Semaphore 全局并发控制
       - 动态内存监控
       - 超时自动取消
       - 指数退避重试
-    
+
     资源策略：
-      - 默认并发数: 2（本地系统保守配置）
+      - 默认全局并发数: 2（本地系统保守配置）
       - 最大内存阈值: 1.5GB（为LLM预留空间）
       - 单任务超时: 300秒（5分钟）
       - 最大重试: 3次
+
+    调度规则：
+      1. 同一 conversation_id 的任务必须按提交顺序执行
+         （步骤1 → 步骤2 → ... → 总结，不能乱序）
+      2. 不同 conversation_id 的任务可以并行执行
+      3. 全局最多 N 个任务并发（默认2个）
     """
-    
-    _instance: Optional["TaskQueue"] = None
-    _lock = threading.Lock()
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-    
+
     def __init__(self):
-        if hasattr(self, "_initialized"):
-            return
-        self._initialized = True
-        
-        # ── 核心数据结构 ──
-        self._task_heap: List[PriorityTask] = []       # 优先级堆
-        self._heap_lock = threading.Lock()              # 堆操作锁
-        self._task_map: Dict[str, dict] = {}             # task_id -> 元数据
-        self._futures: Dict[str, Future] = {}           # task_id -> Future对象
-        
+
+        # ── 核心数据结构（FIFO 队列）──
+        self._task_queue: collections.deque = collections.deque()  # FIFO 队列
+        self._queue_lock = threading.Lock()                        # 队列操作锁
+        self._task_map: Dict[str, dict] = {}                       # task_id -> 元数据
+        self._futures: Dict[str, Future] = {}                     # task_id -> Future对象
+
+        # ── 同会话互斥锁 ──
+        self._conversation_locks: Dict[str, threading.Lock] = {}   # conversation_id -> Lock
+        self._conversation_locks_lock = threading.Lock()          # 锁字典的锁
+
         # ── 并发控制 ──
-        self._semaphore: threading.Semaphore = threading.Semaphore(2)  # 默认并发数=2
+        self._semaphore: threading.Semaphore = threading.Semaphore(2)  # 默认全局并发数=2
         self._executor: ThreadPoolExecutor = ThreadPoolExecutor(
-            max_workers=4,                              # 工作线程池大小
+            max_workers=4,                                          # 工作线程池大小
             thread_name_prefix="task_worker_"
         )
         
@@ -132,7 +141,19 @@ class TaskQueue:
             daemon=True
         )
         self._worker_thread.start()
-        logger.info("🔄 异步任务队列已启动")
+
+        # v7.0: 启动恢复 — 将上次异常中断卡在 processing/running 的任务重置为 pending
+        self._recover_interrupted_tasks()
+
+        # v7.0: 重试调度线程 — 定时扫描 failed 任务，到期后重置为 pending
+        self._retry_thread: threading.Thread = threading.Thread(
+            target=self._retry_scheduler_loop,
+            name="task_retry_scheduler",
+            daemon=True
+        )
+        self._retry_thread.start()
+
+        logger.info("🔄 异步任务队列已启动 (v7.0 恢复+重试调度)")
     
     def submit_task(
         self,
@@ -184,102 +205,162 @@ class TaskQueue:
         try:
             from devpartner_agent.core.database import get_db
             db = get_db()
+            # v7.0: 自动计算 sort_order（自增序号，保证 FIFO）
+            existing = db.query_local(
+                "SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_order FROM task_queue"
+            )
+            sort_order = existing[0]["next_order"] if existing else 1
             db.query_local("""
                 INSERT INTO task_queue (
                     task_id, task_type, payload, status, priority,
-                    max_retries, estimated_memory_mb, queued_at, timeout_seconds
-                ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)
+                    max_retries, estimated_memory_mb, queued_at, timeout_seconds, sort_order
+                ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)
             """, (
                 task_id, task_type, json.dumps(payload, ensure_ascii=False),
-                priority, max_retries, estimated_memory_mb, timestamp, timeout_seconds
+                priority, max_retries, estimated_memory_mb, timestamp, timeout_seconds, sort_order
             ))
         except Exception as e:
             logger.error(f"❌ 任务持久化失败: {e}")
         
-        # 加入内存队列
-        with self._heap_lock:
-            # 使用负数实现最大堆（heapq默认是最小堆）
-            heapq.heappush(self._task_heap, PriorityTask(-priority, task_id, task_meta))
-        
+        # 加入 FIFO 队列（v6.0：不再使用优先级堆）
+        with self._queue_lock:
+            self._task_queue.append(QueuedTask(task_id, task_meta))
+
         self._task_map[task_id] = task_meta
-        
+
+        conversation_id = payload.get("conversation_id", "global")
         with self._stats_lock:
             self._stats["total_submitted"] += 1
-        
-        logger.info(f"📥 提交任务: {task_id} | 类型: {task_type} | 优先级: {priority}")
+
+        logger.info(f"📥 提交任务: {task_id} | 类型: {task_type} | 会话: {conversation_id}")
         return task_id
     
     def _worker_loop(self):
-        """工作线程主循环 - 从队列中取任务并执行"""
+        """工作线程主循环 - FIFO 调度 + 同会话顺序保证 + 僵尸任务自动清理"""
+        _last_zombie_check = 0      # ponytail: 每60s检查一次，避免频繁DB查询
+        _last_orphan_check = 0      # v7.2: 每300s检查孤儿 conversation_steps
         while not self._shutdown_flag:
             try:
-                # 从堆中取出最高优先级任务
+                # 定期清理僵尸任务（卡死在 LLM 推理的任务）
+                if time.time() - _last_zombie_check > 60:
+                    self._auto_cleanup_zombies()
+                    _last_zombie_check = time.time()
+
+                # v7.2: 定期清理孤儿 conversation_steps（pending超24h / in_progress超10min）
+                if time.time() - _last_orphan_check > 300:
+                    self._auto_cleanup_orphan_steps()
+                    _last_orphan_check = time.time()
+
+                # 从 FIFO 队列中取出下一个任务
                 task = self._acquire_next_task()
                 if task is None:
                     time.sleep(0.5)  # 无任务时短暂休眠
                     continue
-                
+
                 task_id = task.task_id
                 task_meta = task.task_data
-                
-                # 检查资源是否充足
+                conversation_id = task_meta.get("payload", {}).get("conversation_id", "global")
+
+                # ✅ 检查同会话是否有任务正在运行（顺序保证）
+                conv_lock = self._get_conversation_lock(conversation_id)
+                if conv_lock.locked():
+                    # 同会话有任务在执行，放回队首（不丢失位置）
+                    logger.debug(f"⏳ 会话 {conversation_id} 有任务运行中，{task_id} 等待")
+                    with self._queue_lock:
+                        self._task_queue.appendleft(task)  # 放回队首
+                    time.sleep(0.5)
+                    continue
+
+                # 检查全局资源是否充足
                 if not self._check_resource_availability(task_meta):
                     logger.warning(f"⚠️ 资源不足，任务排队等待: {task_id}")
-                    with self._heap_lock:
-                        heapq.heappush(self._task_heap, task)  # 重新入队
+                    with self._queue_lock:
+                        self._task_queue.appendleft(task)  # 放回队首
                     time.sleep(2.0)
                     continue
-                
-                # 执行任务
-                future = self._executor.submit(self._execute_task_wrapper, task_id, task_meta)
+
+                # ✅ 获取会话锁（保证同一会话任务串行）
+                conv_lock.acquire()
+
+                # 执行任务（传入会话锁以便释放）
+                future = self._executor.submit(
+                    self._execute_task_with_conv_lock,
+                    task_id, task_meta, conv_lock
+                )
                 self._futures[task_id] = future
-                
+
             except Exception as e:
                 logger.error(f"❌ Worker loop error: {e}", exc_info=True)
                 time.sleep(1.0)
-    
-    def _acquire_next_task(self) -> Optional[PriorityTask]:
-        """从堆中获取下一个待执行任务"""
-        with self._heap_lock:
-            while self._task_heap:
-                task = heapq.heappop(self._task_heap)
+
+    def _acquire_next_task(self) -> Optional[QueuedTask]:
+        """从 FIFO 队列中获取下一个待执行任务"""
+        with self._queue_lock:
+            while self._task_queue:
+                task = self._task_queue.popleft()  # FIFO：从队首取出
                 task_id = task.task_id
-                
+
                 # 检查任务是否已被取消
                 if task_id in self._task_map and self._task_map[task_id]["status"] != TaskStatus.CANCELLED.value:
                     return task
             return None
+
+    def _get_conversation_lock(self, conversation_id: str) -> threading.Lock:
+        """获取或创建指定会话的互斥锁（线程安全）"""
+        with self._conversation_locks_lock:
+            if conversation_id not in self._conversation_locks:
+                self._conversation_locks[conversation_id] = threading.Lock()
+                logger.debug(f"🔒 创建会话锁: {conversation_id}")
+            return self._conversation_locks[conversation_id]
+
+    def _execute_task_with_conv_lock(
+        self,
+        task_id: str,
+        task_meta: dict,
+        conv_lock: threading.Lock
+    ):
+        """带会话锁的任务执行包装器（确保 finally 中释放会话锁）"""
+        try:
+            return self._execute_task_wrapper(task_id, task_meta)
+        finally:
+            # ✅ 无论成功/失败/超时，都必须释放会话锁
+            conv_lock.release()
+            logger.debug(f"🔓 释放会话锁: {task_meta.get('payload', {}).get('conversation_id', 'global')}")
     
     def _check_resource_availability(self, task_meta: dict) -> bool:
         """检查系统资源是否足够执行任务"""
-        # 检查并发槽位
-        if self._semaphore._value <= 0:  # 非标准用法，仅用于快速检查
+        # 检查并发槽位（用 acquire(blocking=False) 原子操作，避免访问私有属性 _value 的竞态）
+        if not self._semaphore.acquire(blocking=False):
             return False
-        
+        # 立即释放：这里只是"检查"而非"获取"，真正获取在 _execute_task_wrapper 中
+        self._semaphore.release()
+
         # 检查内存
         required_memory = task_meta.get("estimated_memory_mb", 100)
         with self._memory_lock:
             available_memory = self._max_memory_mb - self._current_memory_mb
             if required_memory > available_memory * 0.8:  # 保留20%余量
                 return False
-        
+
         return True
     
     def _execute_task_wrapper(self, task_id: str, task_meta: dict):
         """任务执行包装器（包含资源获取/释放、超时控制、错误处理）"""
         start_time = time.time()
-        
+        db = None
+        release_event = threading.Event()  # #3 修复：通知重试线程"资源已释放"
+
         # 获取并发许可
         acquired = self._semaphore.acquire(timeout=1.0)
         if not acquired:
             logger.warning(f"⚠️ 无法获取并发许可: {task_id}")
             return
-        
+
         try:
             # 更新状态为运行中
             self._update_task_status(task_id, TaskStatus.RUNNING.value)
             self._update_memory_usage(task_meta.get("estimated_memory_mb", 100), delta=True)
-            
+
             # 更新数据库状态
             from devpartner_agent.core.database import get_db
             db = get_db()
@@ -287,13 +368,14 @@ class TaskQueue:
                 UPDATE task_queue SET status = 'running', started_at = ?, worker_id = ?
                 WHERE task_id = ?
             """, (datetime.now().isoformat(), threading.current_thread().name, task_id))
-            
-            # 执行实际任务逻辑
-            result = self._dispatch_task_execution(task_meta)
-            
+
+            # 执行实际任务逻辑（带超时控制）
+            timeout_seconds = task_meta.get("timeout_seconds", 300)
+            result = self._execute_with_timeout(task_meta, timeout_seconds)
+
             # 计算执行时间
             execution_time = time.time() - start_time
-            
+
             # 更新统计信息
             with self._stats_lock:
                 self._stats["total_completed"] += 1
@@ -302,40 +384,87 @@ class TaskQueue:
                 self._stats["avg_execution_time_sec"] = (
                     (old_avg * (new_count - 1) + execution_time) / new_count
                 )
-            
+
             # 标记完成
             self._update_task_status(task_id, TaskStatus.COMPLETED.value, result=result)
             db.query_local("""
-                UPDATE task_queue SET status = 'completed', result = ?, completed_at = ?, progress = 1.0
+                UPDATE task_queue SET status = 'completed', result = ?, completed_at = ?, progress = 1.0,
+                    actual_memory_mb = ?
                 WHERE task_id = ?
             """, (json.dumps(result, ensure_ascii=False) if result else None,
-                  datetime.now().isoformat(), task_id))
-            
+                  datetime.now().isoformat(), task_meta.get("estimated_memory_mb", 100), task_id))
+
             logger.info(f"✅ 任务完成: {task_id} | 耗时: {execution_time:.2f}s")
-            
+
             # 执行回调（如果有）
             callback_name = task_meta.get("callback")
             if callback_name:
                 self._invoke_callback(callback_name, task_id, result)
-            
+
         except TimeoutError:
             logger.error(f"⏰ 任务超时: {task_id} (>{task_meta.get('timeout_seconds', 300)}s)")
-            self._handle_task_failure(task_id, "Timeout exceeded", db)
+            self._handle_task_failure(task_id, "Timeout exceeded", db, release_event)
             self._update_task_status(task_id, TaskStatus.TIMEOUT.value)
-            
+
         except Exception as e:
             error_msg = f"{type(e).__name__}: {str(e)}"
             logger.error(f"❌ 任务执行失败: {task_id} | 错误: {error_msg}", exc_info=True)
-            self._handle_task_failure(task_id, error_msg, db)
-            
+            self._handle_task_failure(task_id, error_msg, db, release_event)
+
         finally:
-            # 释放资源
+            # 先释放资源（semaphore + 内存）
             self._semaphore.release()
             self._update_memory_usage(task_meta.get("estimated_memory_mb", 100), delta=False)
-            
+            release_event.set()  # #3 修复：通知重试线程"资源已释放，可以入队了"
+
+            # db 连接失败时也确保任务状态不卡死
+            if db is None:
+                try:
+                    from devpartner_agent.core.database import get_db
+                    db = get_db()
+                    db.query_local(
+                        "UPDATE task_queue SET status = 'failed', error_message = ? WHERE task_id = ? AND status = 'running'",
+                        ("db_unavailable", task_id)
+                    )
+                except Exception:
+                    pass
+
             if task_id in self._futures:
                 del self._futures[task_id]
     
+    def _execute_with_timeout(self, task_meta: dict, timeout_seconds: int) -> Any:
+        """在独立线程中执行任务，带超时保护
+
+        ponytail: 用 Thread + join(timeout) 而非 future，当超时或 LLM 卡死时直接中断线程
+        """
+        result_container = {"result": None, "error": None, "done": False}
+        lock = threading.Lock()
+
+        def worker():
+            try:
+                r = self._dispatch_task_execution(task_meta)
+                with lock:
+                    result_container["result"] = r
+                    result_container["done"] = True
+            except Exception as e:
+                with lock:
+                    result_container["error"] = e
+                    result_container["done"] = True
+
+        t = threading.Thread(target=worker, name=f"timeout_worker_{task_meta.get('task_id', '')}", daemon=True)
+        t.start()
+        t.join(timeout=timeout_seconds)
+
+        with lock:
+            if result_container["done"]:
+                if result_container["error"]:
+                    raise result_container["error"]
+                return result_container["result"]
+
+        # 超时：join 返回但线程仍在运行（LLM 推理卡死场景）
+        logger.error(f"⏰ 任务执行超时 ({timeout_seconds}s)，LLM 推理可能已卡死")
+        raise TimeoutError(f"Task execution exceeded {timeout_seconds}s")
+
     def _dispatch_task_execution(self, task_meta: dict) -> Any:
         """根据任务类型分发到具体的执行逻辑"""
         task_type = task_meta["task_type"]
@@ -369,6 +498,8 @@ class TaskQueue:
         
         用户未来可以按图索骥，通过知识点搜索快速找到解决方案。
         """
+        step_start = datetime.now()  # v7.2: 记录步骤开始时间，用于计算实际耗时
+
         conversation_id = payload.get("conversation_id", "")
         step_id = payload.get("step_id", "")
         step_name = payload.get("step_name", "")
@@ -447,10 +578,10 @@ class TaskQueue:
             logger.warning(f"LLM 步骤分析失败（非致命）: {e}")
 
         # 1. 如果提供了知识点，写入 knowledge_points 表
+        kp_ids = []
         if knowledge_points:
             from devpartner_agent.services.conversation_manager import ConversationManager
             mgr = ConversationManager()
-            kp_ids = []
             for kp in knowledge_points:
                 kp_id = mgr._create_knowledge_point(
                     title=kp.get("title", "未命名知识点"),
@@ -464,17 +595,22 @@ class TaskQueue:
                 if kp_id:
                     kp_ids.append(kp_id)
             results["knowledge_points_created"] = len(kp_ids)
-        
-        # 2. 更新步骤状态为已完成（output_data 记录 LLM 分析详情）
+
+        # v7.2: 计算实际耗时
+        actual_duration_ms = int((datetime.now() - step_start).total_seconds() * 1000)
+
+        # 2. 更新步骤状态为已完成（output_data 记录 LLM 分析详情 + knowledge_point_ids）
         db.query_local("""
             UPDATE conversation_steps SET
                 status = 'completed', output_data = ?,
+                knowledge_point_ids = ?,
                 completed_at = ?, duration_ms = ?
             WHERE step_id = ?
         """, (
             json.dumps(results, ensure_ascii=False),
+            json.dumps(kp_ids, ensure_ascii=False) if kp_ids else "",
             datetime.now().isoformat(),
-            0,  # 实际耗时由外层计算
+            actual_duration_ms,
             step_id
         ))
         
@@ -663,8 +799,23 @@ class TaskQueue:
                     mgr = ConversationManager()
                     kp_count = 0
                     for node in nodes:
+                        title = node.get("label", node.get("title", "未知节点"))
+                    # v7.2: 检查是否已有同名知识点，有则递增 usage_count
+                    existing = db.query_local(
+                        "SELECT id FROM knowledge_points WHERE title = ? LIMIT 1",
+                        (title,)
+                    )
+                    if existing:
+                        db.query_local("""
+                            UPDATE knowledge_points SET
+                                usage_count = usage_count + 1,
+                                last_used_at = ?
+                            WHERE id = ?
+                        """, (datetime.now().isoformat(), existing[0]["id"]))
+                        kp_count += 1
+                    else:
                         kp_id = mgr._create_knowledge_point(
-                            title=node.get("label", node.get("title", "未知节点")),
+                            title=title,
                             content=node.get("description", ""),
                             category="knowledge_graph",
                             domain=node.get("domain", "General"),
@@ -712,32 +863,108 @@ class TaskQueue:
                     {"system_data": enhanced_system_data}
                 )
                 results["optimization_suggestions"] = opt_result.get("output", {}).get("suggestions_generated", 0)
+
+                # v7.2: 当优化建议中包含自动应用的变更时，写入 evolution_log
+                auto_applied = opt_result.get("auto_applied")
+                if auto_applied:
+                    from devpartner_agent.core.config import get_project_version
+                    current_version = get_project_version()
+                    db.log_evolution(
+                        change_type="auto_optimize",
+                        description=f"对话 {conversation_id} 触发自动优化: {opt_result.get('description', '')}",
+                        files_changed=opt_result.get("files", ""),
+                        version=current_version,
+                    )
+                    results["evolution_logged"] = True
             except Exception as e:
                 logger.error(f"系统优化建议生成失败: {e}")
         
+        # 4.5 🆕 统一知识提取（技能+业务+关联分析）+ Vault 导出
+        results["skill_extracted"] = 0
+        results["business_extracted"] = 0
+        results["vault_exported"] = 0
+        try:
+            # 构建完整对话文本（供 LLM 提取知识）
+            conversation_text_parts = []
+            for step in (steps_summary or []):
+                name = step.get("name", "")
+                stype = step.get("type", "")
+                if name:
+                    conversation_text_parts.append(f"[{stype}] {name}")
+            conversation_text = "\n".join(conversation_text_parts) if conversation_text_parts else summary
+
+            from devpartner_agent.services.knowledge_extractor import get_knowledge_extractor
+            extractor = get_knowledge_extractor()
+            extract_result = extractor.extract_all(
+                conversation_id=conversation_id,
+                conversation_text=conversation_text,
+                key_decisions=key_decisions,
+                source_session_id=conversation_id,
+            )
+            results["skill_extracted"] = extract_result.get("skill_extracted", 0)
+            results["business_extracted"] = extract_result.get("business_extracted", 0)
+            results["knowledge_ids"] = extract_result.get("knowledge_ids", [])
+
+            # 🆕 导出到 Obsidian Vault（仅知识卡片，对话/统计走 SQL 直连）
+            from devpartner_agent.services.vault_exporter import get_vault_exporter
+            exporter = get_vault_exporter()
+            vault_result = exporter.export_batch(
+                conversation_id=conversation_id,
+                summary=summary,
+                key_decisions=key_decisions,
+                steps_summary=steps_summary,
+                knowledge_ids=extract_result.get("knowledge_ids", []),
+            )
+            results["vault_exported"] = (
+                vault_result.get("skills_exported", 0) +
+                vault_result.get("business_exported", 0)
+            )
+            results["vault_errors"] = vault_result.get("errors", [])
+        except Exception as e:
+            logger.warning(f"知识提取/Vault导出失败（非致命）: {e}")
+        
         # 5. 标记 conversations 表 analyzed=1 + 存储 LLM 深层分析结果
-        llm_deep_result_json = json.dumps({
-            "system_issues": results.get("system_issues", []),
-            "system_deficiencies": results.get("system_deficiencies", []),
-            "user_insights": results.get("user_insights", []),
-            "recurring_patterns": results.get("recurring_patterns", []),
-            "overall_assessment": results.get("overall_assessment", ""),
-            "risk_areas": results.get("risk_areas", []),
-            "positive_patterns": results.get("positive_patterns", []),
-        }, ensure_ascii=False)
-        
-        db.query_local("""
-            UPDATE conversations SET analyzed = 1, updated_at = ?,
-                actions = CASE WHEN actions IS NULL OR actions = '' 
-                    THEN ? ELSE actions || ' | LLM_DEEP: ' || ? END
-            WHERE conversation_id = ?
-        """, (
-            datetime.now().isoformat(),
-            f"LLM深层分析: {results.get('overall_assessment', '')[:500]}",
-            f"系统问题={len(results.get('system_issues', []))}个, 不足={len(results.get('system_deficiencies', []))}个, 风险={len(results.get('risk_areas', []))}个",
-            conversation_id
-        ))
-        
+        overall = results.get('overall_assessment', '')
+        summary_stats = (
+            f"系统问题={len(results.get('system_issues', []))}个, "
+            f"不足={len(results.get('system_deficiencies', []))}个, "
+            f"风险={len(results.get('risk_areas', []))}个"
+        )
+
+        # v7.2: 空值保护 — overall_assessment 为空时不拼接空文本
+        if overall:
+            llm_actions = f"LLM深层分析: {overall[:500]}"
+            db.query_local("""
+                UPDATE conversations SET analyzed = 1, updated_at = ?,
+                    actions = CASE WHEN actions IS NULL OR actions = '' 
+                        THEN ? ELSE actions || ' | LLM_DEEP: ' || ? END
+                WHERE conversation_id = ?
+            """, (
+                datetime.now().isoformat(),
+                llm_actions,
+                summary_stats,
+                conversation_id
+            ))
+        else:
+            db.query_local("""
+                UPDATE conversations SET analyzed = 1, updated_at = ?
+                WHERE conversation_id = ?
+            """, (datetime.now().isoformat(), conversation_id))
+
+        # v7.2: 将本对话关联的 pending improvement_log 标记为 reviewed
+        try:
+            reviewed = db.query_local("""
+                UPDATE improvement_log SET status = 'reviewed'
+                WHERE conversations_id = (
+                    SELECT id FROM conversations WHERE conversation_id = ?
+                ) AND status = 'pending'
+            """, (conversation_id,))
+            reviewed_count = reviewed if isinstance(reviewed, int) else (reviewed.rowcount if hasattr(reviewed, 'rowcount') else 0)
+            if reviewed_count > 0:
+                results["improvements_reviewed"] = reviewed_count
+                logger.info(f"📋 improvement_log 流转: {reviewed_count} pending → reviewed (会话: {conversation_id})")
+        except Exception as e:
+            logger.warning(f"improvement_log 状态流转失败（非致命）: {e}")
         logger.info(f"🎉 对话全局分析完成: {conversation_id} | LLM深层: {results['llm_deep_analyzed']} | {json.dumps({k: v for k, v in results.items() if k not in ('system_issues', 'system_deficiencies', 'user_insights', 'recurring_patterns')}, ensure_ascii=False)}")
         return results
     
@@ -876,53 +1103,78 @@ class TaskQueue:
             "suggestions": suggestions or [],
         }
     
-    def _handle_task_failure(self, task_id: str, error_msg: str, db):
-        """处理任务失败（重试或标记失败）"""
+    def _handle_task_failure(self, task_id: str, error_msg: str, db, release_event: threading.Event = None):
+        """处理任务失败（重试或标记失败）
+
+        Args:
+            release_event: #3 修复 — 通知重试线程等待资源释放后再入队，
+                          避免 semaphore 槽位被"僵尸任务"占用导致假死锁。
+        """
         task_meta = self._task_map.get(task_id)
         if not task_meta:
             return
-        
+
         retry_count = task_meta.get("retry_count", 0)
         max_retries = task_meta.get("max_retries", 3)
-        
+
         if retry_count < max_retries:
             # 安排重试（指数退避）
             new_retry_count = retry_count + 1
             delay = min(2 ** new_retry_count, 30)  # 最大延迟30秒
-            
+
             task_meta["retry_count"] = new_retry_count
             task_meta["error_message"] = error_msg
             task_meta["status"] = TaskStatus.PENDING.value
-            
-            # 更新数据库
-            db.query_local("""
-                UPDATE task_queue SET
-                    status = 'pending', retry_count = ?, error_message = ?
-                WHERE task_id = ?
-            """, (new_retry_count, error_msg, task_id))
-            
-            # 重新入队（延迟后）
+
+            # v7.0: 计算下次重试时间（用于跨进程重启后的重试调度）
+            next_retry = (datetime.now().isoformat()
+                          if delay == 0
+                          else (datetime.now().replace(microsecond=0).isoformat()
+                                if delay <= 1
+                                else (datetime.now() + datetime.timedelta(seconds=delay)).isoformat()))
+
+            # 更新数据库（db 可能为 None，安全处理）
+            if db is not None:
+                try:
+                    db.query_local("""
+                        UPDATE task_queue SET
+                            status = 'pending', retry_count = ?, error_message = ?,
+                            next_retry_at = ?
+                        WHERE task_id = ?
+                    """, (new_retry_count, error_msg, next_retry, task_id))
+                except Exception:
+                    pass
+
+            # #3 修复：重新入队前等待资源释放（semaphore + 内存），
+            #  避免任务在资源释放前就推回队列导致假死锁
             def requeue():
+                # 先等指数退避延迟
                 time.sleep(delay)
-                with self._heap_lock:
-                    heapq.heappush(
-                        self._task_heap,
-                        PriorityTask(-task_meta["priority"], task_id, task_meta)
-                    )
+                # 再等资源释放（如果调用方传了 release_event）
+                if release_event is not None:
+                    release_event.wait()
+                with self._queue_lock:
+                    self._task_queue.append(
+                        QueuedTask(task_id, task_meta)
+                    )  # FIFO 入队到队尾
                 logger.info(f"🔄 重试任务: {task_id} | 第{new_retry_count}次 | 延迟{delay}s")
-            
+
             threading.Thread(target=requeue, daemon=True).start()
-            
+
             with self._stats_lock:
                 self._stats["total_failed"] += 1
         else:
             # 达到最大重试次数，永久失败
             self._update_task_status(task_id, TaskStatus.FAILED.value, error=error_msg)
-            db.query_local("""
-                UPDATE task_queue SET status = 'failed', error_message = ?, completed_at = ?
-                WHERE task_id = ?
-            """, (error_msg, datetime.now().isoformat(), task_id))
-            
+            if db is not None:
+                try:
+                    db.query_local("""
+                        UPDATE task_queue SET status = 'failed', error_message = ?, completed_at = ?
+                        WHERE task_id = ?
+                    """, (error_msg, datetime.now().isoformat(), task_id))
+                except Exception:
+                    pass
+
             with self._stats_lock:
                 self._stats["total_failed"] += 1
     
@@ -1031,20 +1283,292 @@ class TaskQueue:
             "available_slots": self._semaphore._value,
         }
     
+    def get_diagnostics(self) -> dict:
+        """获取队列诊断信息（用于排查阻塞问题）v6.0"""
+        with self._queue_lock:
+            pending_count = len(self._task_queue)
+            pending_tasks = [
+                {"id": t.task_id, "type": t.task_data.get("task_type"),
+                 "conv": t.task_data.get("payload", {}).get("conversation_id", "global")}
+                for t in list(self._task_queue)[:5]
+            ]
+
+        with self._memory_lock:
+            memory_info = {
+                "current_mb": self._current_memory_mb,
+                "max_mb": self._max_memory_mb,
+                "usage_percent": (self._current_memory_mb / self._max_memory_mb * 100) if self._max_memory_mb > 0 else 0
+            }
+
+        status_count = {}
+        for task_meta in self._task_map.values():
+            status = task_meta.get("status", "unknown")
+            status_count[status] = status_count.get(status, 0) + 1
+
+        running_tasks = [
+            {"id": tid, "type": meta.get("task_type"), "started": meta.get("started_at"),
+             "conv": meta.get("payload", {}).get("conversation_id", "global")}
+            for tid, meta in self._task_map.items()
+            if meta.get("status") == TaskStatus.RUNNING.value
+        ]
+
+        conv_locks_status = {}
+        with self._conversation_locks_lock:
+            for conv_id, lock in self._conversation_locks.items():
+                conv_locks_status[conv_id] = {"locked": lock.locked()}
+
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "scheduler_mode": "FIFO + conversation_mutex (v6.0)",
+            "semaphore_value": self._semaphore._value if hasattr(self._semaphore, '_value') else "unknown",
+            "active_futures": len(self._futures),
+            "pending_in_queue": pending_count,
+            "pending_preview": pending_tasks,
+            "total_tracked": len(self._task_map),
+            "active_conversation_locks": len([l for l in self._conversation_locks.values() if l.locked()]),
+            "total_conversation_locks": len(self._conversation_locks),
+            "conversation_locks": conv_locks_status,
+            "memory": memory_info,
+            "status_breakdown": status_count,
+            "running_tasks": running_tasks,
+            "stats": self._stats.copy()
+        }
+
+    def _recover_interrupted_tasks(self):
+        """
+        v7.0: 启动恢复 — 将上次异常中断卡在 processing/running 的任务重置为 pending。
+
+        场景：进程崩溃/强制重启时，正在执行的任务状态停留在 processing，
+        重启后不会被 Worker 消费（Worker 只取 pending），导致任务永久挂起。
+        """
+        try:
+            from devpartner_agent.core.database import get_db
+            db = get_db()
+            rows = db.query_local(
+                "SELECT task_id, status FROM task_queue WHERE status IN ('processing', 'running') AND is_deleted = 0"
+            )
+            if rows:
+                count = len(rows)
+                db.query_local(
+                    "UPDATE task_queue SET status = 'pending', started_at = NULL, worker_id = NULL, error_message = 'Recovered after restart' WHERE status IN ('processing', 'running') AND is_deleted = 0"
+                )
+                logger.info(f"🔄 启动恢复: {count} 个中断任务已重置为 pending")
+        except Exception as e:
+            logger.warning(f"⚠️ 启动恢复失败（非致命）: {e}")
+
+    def _retry_scheduler_loop(self):
+        """
+        v7.0: 重试调度线程 — 定时扫描 failed 且已到达重试时间的任务，重置为 pending。
+
+        与 _handle_task_failure 中的即时重试互补：
+        - 即时重试：指数退避延迟后直接入队（同一进程内）
+        - 调度重试：跨进程重启后，根据 next_retry_at 字段重新调度
+        """
+        while not self._shutdown_flag:
+            try:
+                time.sleep(10)  # 每 10 秒扫描一次
+                from devpartner_agent.core.database import get_db
+                db = get_db()
+                now = datetime.now().isoformat()
+                rows = db.query_local(
+                    "SELECT task_id, retry_count, max_retries FROM task_queue "
+                    "WHERE status = 'failed' AND is_deleted = 0 "
+                    "AND next_retry_at IS NOT NULL AND next_retry_at <= ?",
+                    (now,)
+                )
+                for row in (rows or []):
+                    task_id = row["task_id"]
+                    retry_count = row["retry_count"]
+                    max_retries = row["max_retries"]
+
+                    if retry_count < max_retries:
+                        db.query_local(
+                            "UPDATE task_queue SET status = 'pending', next_retry_at = NULL WHERE task_id = ?",
+                            (task_id,)
+                        )
+                        logger.info(f"🔄 重试调度: {task_id} | 第{retry_count + 1}次")
+                    else:
+                        # 超过最大重试，标记为 dead
+                        db.query_local(
+                            "UPDATE task_queue SET status = 'dead', error_message = 'Max retries exceeded' WHERE task_id = ?",
+                            (task_id,)
+                        )
+                        logger.warning(f"💀 任务永久失败: {task_id} | 已达最大重试 {max_retries} 次")
+            except Exception as e:
+                logger.warning(f"⚠️ 重试调度异常（非致命）: {e}")
+
+    def _auto_cleanup_zombies(self):
+        """自动清理僵尸任务 — 在 _worker_loop 中定期调用
+
+        ponytail: 只检查 DB 中 running 状态的任务（不依赖 _task_map，因为进程重启后 _task_map 为空），
+        将超时的任务标记为 timeout，释放 semaphore 槽位。
+        """
+        try:
+            from devpartner_agent.core.database import get_db
+            db = get_db()
+            rows = db.query_local(
+                "SELECT task_id, started_at FROM task_queue WHERE status='running'"
+            )
+            if not rows:
+                return
+
+            now = datetime.now()
+            max_age = 600  # 10分钟僵尸阈值
+            cleaned = 0
+            for row in rows:
+                started_at = row.get("started_at")
+                if not started_at:
+                    continue
+                try:
+                    started = datetime.fromisoformat(started_at)
+                    age_s = (now - started).total_seconds()
+                    if age_s > max_age:
+                        logger.warning(f"🧹 自动清理僵尸任务: {row['task_id']} | 运行时长: {age_s/3600:.1f}h")
+                        db.query_local(
+                            "UPDATE task_queue SET status='timeout', error_message=?, completed_at=? WHERE task_id=?",
+                            (f"Auto zombie cleanup after {age_s/3600:.1f}h", now.isoformat(), row['task_id'])
+                        )
+                        cleaned += 1
+                except Exception:
+                    pass
+
+            if cleaned > 0:
+                # 释放被僵尸任务占用的 semaphore 槽位
+                self.reset_semaphore_leak()
+                logger.info(f"✅ 自动清理完成: {cleaned} 个僵尸任务")
+        except Exception as e:
+            logger.warning(f"⚠️ 僵尸任务检查失败（非致命）: {e}")
+
+    def _auto_cleanup_orphan_steps(self):
+        """
+        v7.2: 自动清理孤儿 conversation_steps — 在 _worker_loop 中定期调用。
+
+        状态机兜底策略：
+          - pending 超过 24 小时 → 标记为 orphaned（不删除，保留数据）
+          - in_progress 超过 10 分钟 → 回退为 pending（允许 Worker 重新拾取）
+
+        ponytail: 只查 DB，不依赖内存状态。
+        """
+        try:
+            from devpartner_agent.core.database import get_db
+            db = get_db()
+            now = datetime.now()
+
+            # 1. pending 超过 24h → orphaned
+            orphaned = db.query_local("""
+                UPDATE conversation_steps SET status = 'orphaned', error_message = ?
+                WHERE status = 'pending'
+                  AND created_at < ?
+                  AND created_at IS NOT NULL
+            """, (f"Auto orphaned after 24h at {now.isoformat()}", (now - timedelta(hours=24)).isoformat()))
+            orphaned_count = orphaned if isinstance(orphaned, int) else (orphaned.rowcount if hasattr(orphaned, 'rowcount') else 0)
+
+            # 2. in_progress 超过 10min → 回退为 pending
+            reset = db.query_local("""
+                UPDATE conversation_steps SET status = 'pending', error_message = ?
+                WHERE status = 'in_progress'
+                  AND started_at < ?
+                  AND started_at IS NOT NULL
+            """, (f"Auto reset from in_progress after 10min at {now.isoformat()}", (now - timedelta(minutes=10)).isoformat()))
+            reset_count = reset if isinstance(reset, int) else (reset.rowcount if hasattr(reset, 'rowcount') else 0)
+
+            if orphaned_count > 0 or reset_count > 0:
+                logger.info(f"🧹 孤儿步骤清理: {orphaned_count} orphaned, {reset_count} reset → pending")
+        except Exception as e:
+            logger.warning(f"⚠️ 孤儿步骤检查失败（非致命）: {e}")
+
+    def force_cleanup_zombie_tasks(self, max_age_seconds: int = 300) -> int:
+        """强制清理僵尸任务（运行时间超过阈值的 RUNNING 任务）"""
+        cleaned_count = 0
+        now = datetime.now()
+
+        for task_id, task_meta in list(self._task_map.items()):
+            if task_meta.get("status") != TaskStatus.RUNNING.value:
+                continue
+
+            started_at = task_meta.get("started_at")
+            if not started_at:
+                continue
+
+            try:
+                start_time = datetime.fromisoformat(started_at)
+                age_seconds = (now - start_time).total_seconds()
+
+                if age_seconds > max_age_seconds:
+                    logger.warning(f"🧹 清理僵尸任务: {task_id} | 运行时长: {age_seconds:.1f}s")
+
+                    self._update_task_status(task_id, TaskStatus.TIMEOUT.value, error=f"Force cleanup after {age_seconds:.1f}s")
+
+                    try:
+                        from devpartner_agent.core.database import get_db
+                        db = get_db()
+                        db.query_local("""
+                            UPDATE task_queue SET status = 'timeout', error_message = ?, completed_at = ?
+                            WHERE task_id = ?
+                        """, (f"Zombie cleanup after {age_seconds:.1f}s", now.isoformat(), task_id))
+                    except Exception as e:
+                        logger.warning(f"⚠️ 更新僵尸任务状态失败: {e}")
+
+                    if task_id in self._futures:
+                        self._futures[task_id].cancel()
+                        del self._futures[task_id]
+
+                    cleaned_count += 1
+            except Exception as e:
+                logger.error(f"❌ 清理僵尸任务异常: {task_id} | {e}")
+
+        if cleaned_count > 0:
+            logger.info(f"✅ 僵尸任务清理完成，共清理 {cleaned_count} 个任务")
+
+        return cleaned_count
+
+    def reset_semaphore_leak(self) -> int:
+        """重置 semaphore 泄漏（根据实际运行任务数调整）"""
+        actual_running = sum(
+            1 for meta in self._task_map.values()
+            if meta.get("status") == TaskStatus.RUNNING.value
+        )
+
+        expected_value = max(0, 2 - actual_running)
+        current_value = 0
+        if hasattr(self._semaphore, '_value'):
+            current_value = self._semaphore._value
+
+        leak_count = actual_running - (2 - current_value) if current_value < 2 else 0
+
+        if leak_count > 0:
+            logger.warning(f"🔧 检测到 Semaphore 泄漏: {leak_count} 个 | 实际运行: {actual_running} | 当前值: {current_value}")
+
+            for _ in range(leak_count):
+                try:
+                    self._semaphore.release()
+                except ValueError:
+                    break
+
+            logger.info(f"✅ 已释放 {leak_count} 个泄漏的信号量")
+            return leak_count
+
+        return 0
+
     def shutdown(self, wait: bool = True):
         """优雅关闭任务队列"""
         logger.info("🛑 正在关闭任务队列...")
         self._shutdown_flag = True
-        
+
         if wait:
-            # 等待运行中的任务完成
             for future in list(self._futures.values()):
                 future.result(timeout=10.0)
-        
+
         self._executor.shutdown(wait=wait)
         logger.info("✅ 任务队列已关闭")
 
 
+# PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入
+_task_queue_instance: Optional[TaskQueue] = None
+
 def get_task_queue() -> TaskQueue:
     """获取全局任务队列单例"""
-    return TaskQueue()
+    global _task_queue_instance
+    if _task_queue_instance is None:
+        _task_queue_instance = TaskQueue()
+    return _task_queue_instance

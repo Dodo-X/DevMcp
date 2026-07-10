@@ -7,6 +7,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [7.3.0] - 2026-07-10
+
+### 🎉 LLM 引擎迁移：llama-cpp-python → Ollama
+
+#### ✨ 核心变更
+- **引擎替换**：完全移除 `llama-cpp-python`，改用本地 Ollama HTTP API
+- **LLMService 重写**：`_infer()` 通过 `POST /api/chat` 调用 Ollama，`_ensure_model()` 移除
+- **配置精简**：LLMConfig 移除 `model_path`/`n_ctx`/`n_gpu_layers`/`n_threads`/`n_batch`/`verbose`/`cache_size_kb`/`use_mmap`/`use_mlock`/`retry_on_error`，新增 `ollama_model`/`ollama_timeout`
+- **零模型文件管理**：模型由 Ollama 自行管理，不再需要 `.gguf` 文件
+- **版本升级 MCP 工具**：新增 `record_version_upgrade` 手动触发版本记录
+
+#### 🔧 移除
+- `llama-cpp-python` 依赖（pyproject.toml optional-deps、requirements.txt）
+- `models/` 目录下的 GGUF 模型文件管理逻辑
+- `modelscope` 依赖（不再需要模型下载）
+
+---
+
+## [7.2.0] - 2026-07-09
+
+### 🎉 四阶段优化：数据写入修复 + 生命周期兜底 + 文档规范 + 新功能
+
+#### 🐛 P0 修复
+- **conversation_steps 数据回写**：`_execute_step_analysis()` 添加 `step_start` 计时 + `knowledge_point_ids` 回写 + `duration_ms` 计算；`record_step()` 自动设置 `started_at`
+- **conversation_archive 标记 deprecated**：建表注释添加 `@deprecated v7.0`
+
+#### 🔧 P1 修复
+- **LLM 分析结果空值保护**：`overall_assessment` 为空时跳过 `actions` 拼接
+- **生命周期兜底清理**：`_auto_cleanup_orphan_steps()` — pending>24h→orphaned, in_progress>10min→回退pending
+- **evolution_log 触发路径**：auto_applied 变更时写入 evolution_log
+- **improvement_log status 流转**：finalize 末尾标记 pending→reviewed
+
+#### 🔧 P2 修复
+- **knowledge_points source_id 统一**：`_create_knowledge_point()` 添加 `source_type` 断言
+- **knowledge_points usage_count 更新**：finalize 时对同名知识点递增 `usage_count` + 更新 `last_used_at`
+- **task_queue result 回写**：`actual_memory_mb` 回写
+- **数据库表文档规范**：11 张表全部添加结构化文档注释
+- **索引补充**：新增 `idx_conversation_steps_created` / `idx_knowledge_points_usage`
+
+#### ✨ P3 新功能
+- **技能复习提醒**：`get_stale_skills(days=7)` 查找超过 N 天未使用的技能和知识点
+- **遗忘曲线可视化**：`get_forgetting_curve(domain=None)` 按领域展示遗忘风险
+- **知识关联同步**：`sync_knowledge_relations(min_weight=0.5)` 图谱共现关系写回 `knowledge_points.related_knowledge_ids`
+
+#### 🔄 Schema 收敛
+- **conversation_id 双FK策略**：optimization_feedback 删除废弃 TEXT `conversation_id` 列；conversation_steps 添加 `conversations_id` INTEGER FK
+- **迁移脚本**：`scripts/migrate_v70.py` 无损迁移
+
+#### 📊 版本号统一
+- 全系统版本号统一为 `7.2.0`（pyproject.toml → config.yaml → server.py → 各服务 → MEMORY.md）
+
+---
+
+## [7.1.0] - 2026-07-07
+
+### ✨ 新增功能
+- **LLM 双层分析引擎**：Step 级 `analyze_step_content()` + Conversation 级 `analyze_conversation_deep()`
+- **Step→Task 链式**：record_step 自动创建 step_analysis 异步任务
+
+---
+
+## [7.0.0] - 2026-07-07
+
+### 🎉 总分总对话分析架构重构
+
+#### ✨ 核心变更
+- **总分总三步走模式**：create_conversation → record_step×N → finalize_conversation
+- **Schema 收敛**：conversation_id 双FK策略，conversation_archive 标记 @deprecated
+- **数据清理服务**：软删除 + 物理删除 + VACUUM
+- **会话管理器**：conversation_manager.py 统一管理会话生命周期
+- **任务队列增强**：启动恢复 + 重试调度 + sort_order FIFO
+
+#### 🔄 迁移指南
+```bash
+python scripts/migrate_v70.py
+```
+
+---
+
 ## [6.0.4] - 2026-07-05
 
 ### 🐛 修复: CodeBuddy 连接后不显示工具列表
@@ -281,17 +360,16 @@ python scripts/upgrade_to_v5.py --auto-backup
 
 ## 📋 版本规划路线图
 
-### [6.0.0] (计划中 - 2026 Q3)
-- 多模态支持（图像+文本联合分析）
-- Agent 协作模式（多个 DevPartner 实例协同）
-- 知识库向量搜索（RAG 增强）
-- 插件市场（第三方工具集成）
-
-### [5.3.0] (开发中)
+### [7.3.0] (计划中)
 - Prompt 模板外部化（YAML 配置）
 - A/B 测试框架（对比不同 Prompt 效果）
 - 分析结果导出（PDF/Excel 格式）
-- 国际化支持（i18n）
+- 多模态支持（图像+文本联合分析）
+
+### [8.0.0] (远期规划)
+- Agent 协作模式（多个 DevPartner 实例协同）
+- 知识库向量搜索（RAG 增强）
+- 插件市场（第三方工具集成）
 
 ---
 
@@ -303,15 +381,16 @@ python scripts/upgrade_to_v5.py --auto-backup
 | v4.0 | ~8,000 | 5,000 | 1,000 | 2,000 |
 | v5.0 | ~12,000 | 8,000 | 1,500 | 2,500 |
 | v5.2 | **~9,000** | **~5,500** | **1,800** | **~1,700** |
+| v7.2 | **~12,000** | **~7,000** | **2,200** | **~2,800** |
 
-**v5.2 优化点**: 通过 LLM 驱动架构，核心业务代码减少 31%，但功能反而增强！
+**v7.2 优化点**: 四阶段优化（数据写入修复+生命周期兜底+文档规范+新功能），新增技能复习/遗忘曲线/知识关联，Schema 收敛。
 
 ### 功能覆盖
 - ✅ 对话管理: 100%
-- ✅ 智能分析: 95%（LLM 化进行中）
-- ✅ MCP 工具: 90%（持续扩充）
-- ✅ 自我进化: 80%（规则引擎 → LLM）
-- ✅ 监控运维: 85%
+- ✅ 智能分析: 98%（LLM 双层分析 + Step/Conversation 级）
+- ✅ MCP 工具: 95%（持续扩充，新增复习/遗忘/关联）
+- ✅ 自我进化: 90%（规则引擎 → LLM + improvement_log 流转）
+- ✅ 监控运维: 90%（数据清理服务 + 孤儿步骤回收）
 
 ---
 
@@ -324,4 +403,4 @@ python scripts/upgrade_to_v5.py --auto-backup
 ---
 
 **维护者**: DevPartner Team  
-**最后更新**: 2026-07-03
+**最后更新**: 2026-07-10

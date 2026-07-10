@@ -62,7 +62,7 @@ DevPartner MCP 服务器 v6.0.0
 import sys
 import json
 import threading
-import re
+import asyncio
 from pathlib import Path
 from datetime import datetime
 
@@ -74,7 +74,7 @@ if str(_project_root) not in sys.path:
 from fastmcp import FastMCP
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
+from starlette.responses import HTMLResponse, JSONResponse
 import os as _os
 import logging
 
@@ -262,7 +262,7 @@ from devpartner_tools.tools.growth_analytics import (
     get_system_evolution_stats,
     get_user_skill_radar,
     get_learning_timeline,
-    get_user_activity_heatmap
+    get_user_activity_heatmap,
 )
 
 @mcp.custom_route("/api/growth/user-overview", methods=["GET"])
@@ -397,13 +397,14 @@ async def api_tasks_list(request: Request) -> JSONResponse:
                 "name": task_name if isinstance(task_name, str) else str(task_name),
                 "type": task_data.get("task_type", "general"),
                 "status": task_data.get("status", "pending"),
-                "created_at": task_data.get("queued_at", ""),
+                "created_at": task_data.get("queued_at") or "",
                 "priority": task_data.get("priority", 0),
             })
-        # 按排队时间升序（队列顺序：先排队的先展示）
-        tasks.sort(key=lambda t: t["created_at"])
+        # 按排队时间升序，None/空字符串放最后
+        tasks.sort(key=lambda t: t["created_at"] or "z")
         return JSONResponse(content=tasks[:limit])
     except Exception as e:
+        _diag_logger.error(f"API /api/tasks/list error: {e}", exc_info=True)
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
@@ -503,10 +504,10 @@ async def api_health_check(request: Request) -> JSONResponse:
     try:
         from devpartner_agent.services.llm_service import get_llm_service
         llm = get_llm_service()
-        has_model = llm and hasattr(llm, "model") and llm.model is not None
+        available = llm.is_available() if llm else False
         result["services"]["llm_service"] = {
-            "healthy": has_model,
-            "detail": "模型已加载" if has_model else "模型未加载",
+            "healthy": available,
+            "detail": "Ollama 已连接" if available else "Ollama 不可达",
         }
     except Exception as e:
         result["services"]["llm_service"] = {"healthy": False, "detail": str(e)}
@@ -583,6 +584,107 @@ async def api_system_trends(request: Request) -> JSONResponse:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 
+# ── 项目知识库查询 API（v7.4.0）──
+@mcp.custom_route("/api/projects/list", methods=["GET"])
+async def api_projects_list(request: Request) -> JSONResponse:
+    """获取有业务知识的项目列表（供前端下拉框）"""
+    try:
+        from devpartner_agent.core.database import get_db
+        db = get_db()
+        rows = db.query_local(
+            "SELECT DISTINCT domain FROM knowledge_points WHERE type = 'business' ORDER BY domain"
+        )
+        projects = [r["domain"] for r in (rows or [])]
+        return JSONResponse(content={"success": True, "projects": projects})
+    except Exception as e:
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
+@mcp.custom_route("/api/projects/query", methods=["POST"])
+async def api_projects_query(request: Request) -> JSONResponse:
+    """交互式项目知识搜索（支持 project_name + type 筛选）"""
+    try:
+        body = await request.json()
+        question = body.get("question", "")
+        project_name = body.get("project_name", "")
+        category = body.get("category", "")
+        limit = body.get("limit", 5)
+
+        from devpartner_agent.core.database import get_db
+        db = get_db()
+
+        conditions = []
+        params = []
+
+        if category and category in ("skill", "business"):
+            conditions.append("kp.type = ?")
+            params.append(category)
+
+        if project_name:
+            conditions.append("kp.type = 'business' AND kp.domain = ?")
+            params.append(project_name)
+
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+        if question:
+            search_term = f"%{question}%"
+            sql = f"""
+                SELECT kp.knowledge_id, kp.title, kp.content, kp.type, kp.domain,
+                       kp.tags, kp.category, kp.difficulty, kp.usage_count, kp.created_at
+                FROM knowledge_points kp
+                WHERE {where_clause}
+                  AND (kp.title LIKE ? OR kp.content LIKE ?)
+                ORDER BY kp.usage_count DESC, kp.created_at DESC
+                LIMIT ?
+            """
+            params.extend([search_term, search_term, limit])
+        else:
+            sql = f"""
+                SELECT kp.knowledge_id, kp.title, kp.content, kp.type, kp.domain,
+                       kp.tags, kp.category, kp.difficulty, kp.usage_count, kp.created_at
+                FROM knowledge_points kp
+                WHERE {where_clause}
+                ORDER BY kp.usage_count DESC, kp.created_at DESC
+                LIMIT ?
+            """
+            params.append(limit)
+
+        rows = db.query_local(sql, tuple(params))
+
+        results = []
+        for row in (rows or []):
+            tags = row.get("tags", "[]")
+            if isinstance(tags, str):
+                try:
+                    tags = json.loads(tags)
+                except Exception:
+                    tags = [tags]
+            content = row.get("content", "")
+            results.append({
+                "knowledge_id": row["knowledge_id"],
+                "title": row["title"],
+                "summary": content[:300] + "..." if len(content) > 300 else content,
+                "content": content,
+                "type": row.get("type", "skill"),
+                "domain": row.get("domain", ""),
+                "tags": tags,
+                "category": row.get("category", ""),
+                "difficulty": row.get("difficulty", "medium"),
+                "usage_count": row.get("usage_count", 0),
+            })
+
+        return JSONResponse(content={
+            "success": True,
+            "question": question,
+            "project_name": project_name,
+            "category_filter": category,
+            "total": len(results),
+            "results": results,
+        })
+    except Exception as e:
+        return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+
 print("=" * 60)
 print(f"  DevPartner 服务器 v{VERSION} 启动中...")
 print("  devpartner-tools + devpartner-agent → 单一入口")
@@ -604,18 +706,14 @@ _AUTO_LOG_SKIP_TOOLS = {
     "get_approval_chain", "check_module_messages",
     "list_directory", "search_files", "search_content",
     "detect_client", "environment_scan", "validate_path",
-    "list_known_mcp_servers", "list_mindmaps",
     "get_auto_log_stats", "check_optimization_needed",
     "mark_optimization_done",
     # v2.4.0 元工具（不产生对话内容）
     "get_skill_profile", "get_optimization_report",
     "apply_optimization", "file_watcher_control",
     "get_skill_domains",
-    # v4.0 新增
     "save_self_iterate_results",
-    # v5.2 已移除的废弃工具
-    "import_daily_log_to_db", "sync_all_logs_to_db",
-    # v5.2: record_dialogue/record_conversation/process_user_feedback 不再跳过
+    # record_dialogue/record_conversation/process_user_feedback 不再跳过
     # 它们通过 _NO_FEEDBACK_DETECTION_TOOLS 排除反馈检测，但仍参与工具计数和有意义对话计数
 }
 
@@ -729,7 +827,7 @@ class AutoLogMiddleware(Middleware):
     1. 记录所有工具调用次数到 mcp_tool_registry 表（用于使用率分析）
     2. 检测用户反馈信号（纠正/不满/重试/追问），写入 optimization_hint.json
     3. 区分"有意义的对话工具"和"简单查询工具"
-       - 有意义：record_dialogue, log_conversation, self_iterate, self_upgrade 等
+       - 有意义：record_dialogue, record_conversation, self_iterate, self_upgrade 等
        - 简单查询：read_file, search_content, list_directory 等
     4. 有意义对话计数持久化到 data/.conversation_counter.json
 
@@ -987,7 +1085,7 @@ try:
     print(f"[INFO] devpartner-tools: {_tools_count} 个纯工具已注册")
     # 调试: 验证工具是否在 mcp 实例上
     try:
-        _reg_tools = [t.name for t in mcp._tool_manager._tools.values()]
+        _reg_tools = [t.name for t in asyncio.run(mcp._list_tools())]
         print(f"[DEBUG] mcp 实例上注册的工具: {_reg_tools}")
     except Exception as de:
         print(f"[DEBUG] 无法列出工具: {de}")
@@ -1053,6 +1151,14 @@ def _ensure_core():
         except Exception as e:
             print(f"[WARN] 自动清理调度器启动失败: {e}")
 
+        # v7.0: 启动任务数据清理服务（软删除 + 物理删除 + VACUUM）
+        try:
+            from devpartner_agent.services.cleanup_service import get_cleanup_service
+            cs = get_cleanup_service()  # 构造即启动后台线程
+            print("[INFO] 任务数据清理服务已启动 (v7.0)")
+        except Exception as e:
+            print(f"[WARN] 任务数据清理服务启动失败: {e}")
+
         # ── v2.4.0 启动文件监控 ──
         try:
             from devpartner_agent.services.file_watcher import get_watcher
@@ -1068,7 +1174,7 @@ def _ensure_core():
                 from devpartner_agent.services.llm_service import get_llm_service
                 llm = get_llm_service()
                 if llm.preload():
-                    print(f"[INFO] 本地 LLM 已预加载: {cfg.llm.model_path}")
+                    print(f"[INFO] Ollama LLM 已就绪: {getattr(cfg.llm, 'ollama_model', 'qwen3')}")
                 elif llm.is_enabled():
                     status = llm.get_status()
                     print(f"[WARN] 本地 LLM 预加载跳过: {status.get('load_error') or '模型不可用'}")
@@ -1084,7 +1190,6 @@ def _ensure_core():
 
 
 # ── 模块协作消息 ─────────────────────────────────────────────
-@mcp.tool()
 def send_module_message(target_module: str, message: str,
                         message_type: str = "info",
                         priority: int = 1) -> str:
@@ -1111,7 +1216,6 @@ def send_module_message(target_module: str, message: str,
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool()
 def check_module_messages() -> str:
     """检查未读的模块间消息"""
     _ensure_core()
@@ -1125,7 +1229,6 @@ def check_module_messages() -> str:
 
 
 # ── 自我迭代引擎 ─────────────────────────────────────────────
-@mcp.tool()
 def self_iterate(mode: str = "auto", dry_run: bool = False,
                  require_approval: bool = False) -> str:
     """
@@ -1157,7 +1260,6 @@ def self_iterate(mode: str = "auto", dry_run: bool = False,
 
         chain = ApprovalChain(
             auto_approve_enabled=True,
-            ai_approve_enabled=False,
             user_approve_enabled=require_approval,
             dry_run=dry_run or mode == "analyze"
         )
@@ -1211,7 +1313,6 @@ def self_iterate(mode: str = "auto", dry_run: bool = False,
         return json.dumps({"success": False, "error": str(e), "steps": []}, ensure_ascii=False)
 
 
-@mcp.tool()
 def self_upgrade(file_path: str, new_content: str,
                  validate: bool = True) -> str:
     """自我升级 - 修改自身代码（备份+验证+回滚）"""
@@ -1225,7 +1326,6 @@ def self_upgrade(file_path: str, new_content: str,
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool()
 def self_create_file(file_path: str, content: str,
                      validate: bool = True) -> str:
     """自我创建新文件"""
@@ -1240,7 +1340,6 @@ def self_create_file(file_path: str, content: str,
 
 
 # ── 规则引擎 ─────────────────────────────────────────────────
-@mcp.tool()
 def get_rules() -> str:
     """获取所有已注册的规则"""
     _ensure_core()
@@ -1255,7 +1354,6 @@ def get_rules() -> str:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool()
 def trigger_rule(rule_name: str, context: str = "{}") -> str:
     """手动触发指定规则"""
     _ensure_core()
@@ -1270,7 +1368,6 @@ def trigger_rule(rule_name: str, context: str = "{}") -> str:
 
 
 # ── 日志管理 ─────────────────────────────────────────────────
-@mcp.tool()
 def get_daily_summary(date: str = "") -> str:
     """获取每日工作总结"""
     _ensure_core()
@@ -1282,7 +1379,6 @@ def get_daily_summary(date: str = "") -> str:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool()
 def read_daily_log(date: str = "") -> str:
     """读取指定日期的对话日志（v6.2: 从数据库读取）"""
     _ensure_core()
@@ -1291,14 +1387,17 @@ def read_daily_log(date: str = "") -> str:
         db = get_db()
         if not date:
             date = datetime.now().strftime("%Y-%m-%d")
-        # 从 conversation_archive 表读取指定日期的对话
-        archives = db.query_local(
-            """SELECT conversation_id, timestamp, summary, raw_content, complexity, skill_domains
-               FROM conversation_archive
-               WHERE date(timestamp) = ?
-               ORDER BY timestamp ASC""",
-            (date,)
-        )
+        # 从 conversation_archive 表读取指定日期的对话（v7.0: 表可能不存在）
+        try:
+            archives = db.query_local(
+                """SELECT conversation_id, timestamp, summary, raw_content, complexity, skill_domains
+                   FROM conversation_archive
+                   WHERE date(timestamp) = ?
+                   ORDER BY timestamp ASC""",
+                (date,)
+            )
+        except Exception:
+            archives = []
         conversations = db.query_local(
             """SELECT * FROM conversations
                WHERE date(timestamp) = ?
@@ -1317,7 +1416,6 @@ def read_daily_log(date: str = "") -> str:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool()
 def list_logs() -> str:
     """列出所有有对话记录的日期（v6.2: 从数据库读取）"""
     _ensure_core()
@@ -1341,7 +1439,6 @@ def list_logs() -> str:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool()
 def check_log_gaps(date: str = "") -> str:
     """检查指定日期对话的时间间隙（v6.2: 从数据库读取）"""
     _ensure_core()
@@ -1383,7 +1480,6 @@ def check_log_gaps(date: str = "") -> str:
 
 
 # ── 每日总结数据接口 ─────────────────────────────────────────
-@mcp.tool()
 def get_daily_work_data(date: str = "", fallback_to_log: bool = True) -> str:
     """获取指定日期的工作原始数据（供 AI 客户端分析用）"""
     _ensure_core()
@@ -1395,7 +1491,6 @@ def get_daily_work_data(date: str = "", fallback_to_log: bool = True) -> str:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool()
 def save_daily_analysis(analysis_json: str) -> str:
     """保存 AI 客户端的每日分析结果"""
     _ensure_core()
@@ -1407,7 +1502,6 @@ def save_daily_analysis(analysis_json: str) -> str:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool()
 def get_weekly_work_data() -> str:
     """获取最近7天的工作数据概览"""
     _ensure_core()
@@ -1419,7 +1513,6 @@ def get_weekly_work_data() -> str:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool()
 def get_work_schema_guide() -> str:
     """获取 save_daily_analysis 所需的数据结构说明"""
     schema = {
@@ -1438,41 +1531,8 @@ def get_work_schema_guide() -> str:
     return json.dumps(schema, ensure_ascii=False, indent=2)
 
 
-@mcp.tool()
-def import_daily_log_to_db(date: str = "") -> str:
-    """
-    [DEPRECATED v6.2] 将本地 Markdown 日志导入到 SQLite 数据库
-    
-    v6.2 已废弃：daily_log Markdown 文件不再写入，此工具仅用于迁移历史数据。
-    新对话直接通过 record_dialogue 写入 SQLite，无需导入。
-    """
-    _ensure_core()
-    try:
-        from devpartner_agent.skills.daily_summary import import_daily_log_to_db as import_log
-        result = import_log(date if date else None)
-        return json.dumps(result, ensure_ascii=False)
-    except Exception as e:
-        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
-
-
-@mcp.tool()
-def sync_all_logs_to_db() -> str:
-    """
-    [DEPRECATED v6.2] 批量同步所有本地日志到数据库
-    
-    v6.2 已废弃：daily_log Markdown 文件不再写入，此工具仅用于一次性迁移历史数据。
-    """
-    _ensure_core()
-    try:
-        from devpartner_agent.skills.daily_summary import sync_all_logs_to_db as sync_all
-        result = sync_all()
-        return json.dumps(result, ensure_ascii=False)
-    except Exception as e:
-        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
-
 
 # ── 并行任务分解引擎 ─────────────────────────────────────────
-@mcp.tool()
 def parallel_plan(tasks: str) -> str:
     """
     并行任务分解引擎
@@ -1533,7 +1593,6 @@ def _analyze_parallel_plan(tasks):
 
 
 # ── 注册表管理 ───────────────────────────────────────────────
-@mcp.tool()
 def get_tool_registry() -> str:
     """获取工具注册表"""
     _ensure_core()
@@ -1546,7 +1605,6 @@ def get_tool_registry() -> str:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool()
 def register_custom_tool(tool_name: str, tool_code: str,
                          category: str = "custom") -> str:
     """注册自定义工具"""
@@ -1554,27 +1612,25 @@ def register_custom_tool(tool_name: str, tool_code: str,
     try:
         from devpartner_agent.core.tool_registry import get_tool_registry as get_registry
         registry = get_registry()
-        result = registry.register(tool_name, tool_code, category)
+        result = registry.register(tool_name, category=category)
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
 # ── 能力授权 ─────────────────────────────────────────────────
-@mcp.tool()
 def get_capabilities() -> str:
     """获取当前能力授权状态"""
     _ensure_core()
     try:
         from devpartner_agent.core.capabilities import get_capability_manager
         mgr = get_capability_manager()
-        result = mgr.get_status()
+        result = mgr.get_status_report()
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool()
 def authorize_capability(module: str, capability: str,
                          reason: str = "") -> str:
     """授权指定模块的能力"""
@@ -1588,7 +1644,6 @@ def authorize_capability(module: str, capability: str,
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool()
 def revoke_capability(module: str, capability: str,
                       reason: str = "") -> str:
     """撤销指定模块的能力授权"""
@@ -1603,7 +1658,6 @@ def revoke_capability(module: str, capability: str,
 
 
 # ── 审批链管理 ───────────────────────────────────────────────
-@mcp.tool()
 def get_approval_chain(operation: str = "") -> str:
     """获取审批链状态"""
     _ensure_core()
@@ -1616,7 +1670,6 @@ def get_approval_chain(operation: str = "") -> str:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool()
 def approve_operation(operation_id: str, reason: str = "") -> str:
     """手动审批操作"""
     _ensure_core()
@@ -1629,7 +1682,6 @@ def approve_operation(operation_id: str, reason: str = "") -> str:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool()
 def reject_operation(operation_id: str, reason: str) -> str:
     """拒绝审批操作"""
     _ensure_core()
@@ -1643,7 +1695,6 @@ def reject_operation(operation_id: str, reason: str) -> str:
 
 
 # ── 规则检测 ─────────────────────────────────────────────────
-@mcp.tool()
 def check_rule(rule_name: str, content: str = "") -> str:
     """检查指定规则是否会被触发"""
     _ensure_core()
@@ -1657,7 +1708,6 @@ def check_rule(rule_name: str, content: str = "") -> str:
 
 
 # ── 热重载 ───────────────────────────────────────────────────
-@mcp.tool()
 def hot_reload(module: str = "all") -> str:
     """热重载指定模块"""
     try:
@@ -1717,7 +1767,6 @@ def hot_reload(module: str = "all") -> str:
 
 
 # ── 自动日志统计 ─────────────────────────────────────────────
-@mcp.tool()
 def get_auto_log_stats() -> str:
     """
     获取系统工具调用统计与优化状态。
@@ -1741,7 +1790,6 @@ def get_auto_log_stats() -> str:
 
 
 # ── 优化触发检查（v4.0.0 对话驱动版）─────────────────────────
-@mcp.tool()
 def check_optimization_needed() -> str:
     """
     检查系统是否需要自我优化。
@@ -1845,7 +1893,6 @@ def check_optimization_needed() -> str:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool()
 def mark_optimization_done(action_type: str = "optimize") -> str:
     """
     标记优化/总结已完成。
@@ -1892,7 +1939,6 @@ def mark_optimization_done(action_type: str = "optimize") -> str:
 
 
 # ── 安全审计 ─────────────────────────────────────────────────
-@mcp.tool()
 def security_audit(scope: str = "quick") -> str:
     """执行安全审计"""
     _ensure_core()
@@ -1906,7 +1952,6 @@ def security_audit(scope: str = "quick") -> str:
 
 
 # ── 系统诊断 ─────────────────────────────────────────────────
-@mcp.tool()
 def system_diagnose() -> str:
     """系统诊断"""
     _ensure_core()
@@ -1959,7 +2004,6 @@ def system_diagnose() -> str:
 
 
 # ── 数据完整性检查（v4.3 新增）───────────────────────────────
-@mcp.tool()
 def check_data_integrity(include_write_stats: bool = True) -> str:
     """
     [v4.3 NEW] 检查数据库数据完整性：关键字段非空 + FK 关联有效性 + 写入成功率。
@@ -1993,114 +2037,59 @@ def check_data_integrity(include_write_stats: bool = True) -> str:
 
 
 # ── 数据清理 ─────────────────────────────────────────────────
-@mcp.tool()
 def cleanup_data(scope: str = "all", dry_run: bool = False) -> str:
-    """数据清理"""
+    """
+    数据清理（v7.0 增强 — 支持任务级清理）
+
+    scope 取值:
+      - "all": 全面清理（对话旧记录 + 软删除任务）
+      - "conversations": 仅清理过期对话记录
+      - "tasks": 仅清理软删除的任务数据
+      - "tasks_force": 强制清理所有软删除任务（忽略保留天数）
+      - "stats": 仅返回清理统计信息
+    """
     _ensure_core()
     try:
         from devpartner_agent.services.cleanup_scheduler import get_cleanup_scheduler
-        scheduler = get_cleanup_scheduler()
-        result = scheduler.cleanup(scope, dry_run)
+        from devpartner_agent.services.cleanup_service import get_cleanup_service
+
+        result = {"scope": scope, "dry_run": dry_run, "actions": []}
+
+        if scope in ("all", "conversations"):
+            scheduler = get_cleanup_scheduler()
+            conv_result = scheduler.cleanup(scope, dry_run)
+            result["conversations"] = conv_result
+
+        if scope in ("all", "tasks", "tasks_force", "stats"):
+            cs = get_cleanup_service()
+
+            if scope == "stats":
+                result["tasks"] = cs.get_cleanup_stats()
+            elif scope == "tasks_force":
+                if dry_run:
+                    stats = cs.get_cleanup_stats()
+                    result["tasks"] = {"dry_run": True, "would_delete": stats["soft_deleted_count"]}
+                else:
+                    force_result = cs.force_cleanup(retention_days=0)
+                    result["tasks"] = force_result
+            else:
+                if dry_run:
+                    stats = cs.get_cleanup_stats()
+                    result["tasks"] = {"dry_run": True, "soft_deleted_count": stats["soft_deleted_count"]}
+                else:
+                    cs_result = cs._physical_delete_expired()
+                    result["tasks"] = cs_result
+
         return json.dumps(result, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
 # ============================================================
-# v2.4.0 对话经验沉淀系统
+# v7.3 对话系统重构：统一为总分总模式（3个工具）
 # ============================================================
-
-# ── 记录对话（主动拉取通道）──────────────────────────────────
-@mcp.tool()
-def record_conversation(conversation_content: str,
-                         source: str = "unknown",
-                         client: str = "unknown",
-                         conversation_id: str = "",
-                         user_traits: str = "") -> str:
-    """
-    记录完整对话内容，自动分析技能标签、优化建议和用户画像。
-
-    这是 MCP 主动拉取通道：AI 客户端在每次对话结束时调用此工具，
-    将完整对话内容提交给 MCP 进行分析和存档。
-
-    **双向画像协同协议（v4.2）**：
-    - 下行：MCP 通过 request_user_profile_analysis 主动下发分析任务
-    - 上行：客户端完成分析后通过本工具的 user_traits 参数回传结果
-    - 融合：MCP 将 user_traits 9 维数据写入 user_skills / improvement_log / user_skill_plan
-
-    Args:
-        conversation_content: 完整的对话文本内容（用户问题 + AI 回答）
-        source: 来源标识（codebuddy/cursor/windsurf/trae/手动）
-        client: 客户端名称
-        conversation_id: 对话唯一 ID（可选，不传则自动生成）
-        user_traits: 客户端分析的用户特征（JSON格式）。
-            包含 9 个维度: skills_observed, behavior_notes, mistakes, strengths,
-            communication_style, decision_pattern, tech_interests, areas_for_growth,
-            emotional_state, learning_progress
-            例如: {"skills_observed":["Python","数据库"],"behavior_notes":"喜欢先理解全貌再动手",
-                  "mistakes":["忘了更新关联表"],"strengths":["问题定位快"],
-                  "communication_style":"直接", "decision_pattern":"数据驱动",
-                  "tech_interests":["AI/ML","系统设计"],"areas_for_growth":["代码质量"],
-                  "emotional_state":"专注"}
-
-    Returns:
-        JSON: {success, analysis, skill_domains, optimization_suggestions, user_profile_updates, ...}
-    """
-    _ensure_core()
-    try:
-        from devpartner_agent.services.conversation_analyzer import get_analyzer
-        from devpartner_agent.services.file_watcher import get_watcher
-
-        analyzer = get_analyzer()
-        result = analyzer.analyze_and_store(
-            content=conversation_content,
-            source=source,
-            client=client,
-            conversation_id=conversation_id,
-        )
-
-        # ── v5.2: 后处理异步化 ──
-        if user_traits:
-            _enqueue_background_task(
-                lambda _traits=user_traits, _source=source:
-                    (_apply_user_traits(
-                        json.loads(_traits) if isinstance(_traits, str) else _traits,
-                        _source, None),
-                     None)[1],
-            )
-        _enqueue_background_task(
-            lambda: (lambda: None)(  # 仅做追踪
-                __import__('devpartner_agent.services.data_integrity', fromlist=['log_write_result'])
-                .log_write_result("record_conversation", True)
-            ) if False else None
-        )
-        # 简化：后台写入追踪
-        def _rc_track():
-            try:
-                from devpartner_agent.services.data_integrity import log_write_result
-                log_write_result("record_conversation", True)
-            except Exception:
-                pass
-        _enqueue_background_task(_rc_track)
-
-        return json.dumps({
-            "success": True,
-            "message": "对话已记录并分析（v6.0 异步版）",
-            "skill_domains": result["skill_domains"],
-            "complexity": result["complexity"],
-            "tool_gaps": result["tool_gap"]["gaps"],
-            "user_feedback": result["user_feedback"],
-            "optimization_suggestions": result["optimization_suggestions"],
-            "summary": result["summary"][:200],
-            "analysis_method": result.get("analysis_method", "rules"),
-        }, ensure_ascii=False)
-    except Exception as e:
-        try:
-            from devpartner_agent.services.data_integrity import log_write_result
-            log_write_result("record_conversation", False, str(e)[:200])
-        except Exception:
-            pass
-        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+# 删除了 record_conversation / record_dialogue（冗余入口）
+# 统一使用: start_conversation → record_step ×N → finalize_conversation
 
 
 def _get_project_analysis_strategy(project_id: str) -> dict:
@@ -2203,277 +2192,7 @@ def _apply_user_traits(traits: dict, source: str, conversations_id: int = None) 
     return apply_user_traits(traits, source, conversations_id)
 
 
-# ── 记录对话知识点（v3.0 精简结构化通道）─────────────────────────
-@mcp.tool()
-def record_dialogue(user_question: str,
-                    topic: str = "",
-                    task_type: str = "问题排查",
-                    source: str = "unknown",
-                    symptom: str = "",
-                    root_cause: str = "",
-                    solution: str = "",
-                    verify_commands: str = "",
-                    knowledge_points: str = "",
-                    files_changed: str = "",
-                    self_reflection: str = "",
-                    user_traits: str = "") -> str:
-    """
-    记录每一次完整对话的详细信息到数据库（v4.2 双向画像协同版）。
-
-    这是 DevPartner 最核心的对话沉淀工具。每次与用户完成一轮对话后必须调用。
-
-    **双向画像协同协议（v4.2）**：
-    - 下行：MCP 通过 request_user_profile_analysis 主动下发分析任务
-    - 上行：客户端完成分析后通过本工具的 user_traits 参数回传结果
-    - 数据流：客户端 → record_dialogue(user_traits) → MCP → SQLite 多表融合
-
-    字段设计原则（v3.0）：
-    - 现象只保留1处（symptom），消除多处重复文字
-    - 严格分层：现象 → 根因 → 方案 → 验证 → 知识点
-    - 命令分组：data_check（数据核查）/ code_search（代码检索）
-    - 知识点轻量：只保留 title + desc，去掉冗余示例
-    - 反思聚焦架构缺陷，不复述故障过程
-
-    Args:
-        user_question: 用户的原始问题
-        topic: 对话主题（可选，不传则自动从 user_question 截取）
-        task_type: 任务类型（修改/创建/删除/查询/配置/部署/设计/问题排查）
-        source: 来源标识（codebuddy/cursor/windsurf/trae/手动）
-        symptom: 现象列表（JSON 字符串数组，只写客观事实，不加分析）
-            例如：["conversations表仅有7条记录","archive表为空"]
-        root_cause: 问题的根因（架构/机制层面的缺陷，不重复描述现象）
-        solution: 解决方案（代码改造 + 配套约束/策略）
-        verify_commands: 验证命令（JSON 对象，按类型分组）
-            格式：{"data_check": ["sql1", "sql2"], "code_search": ["grep xxx", "检索yyy"]}
-        knowledge_points: 沉淀的知识点（JSON 数组，每项只含 title/desc）
-            格式：[{"title":"xxx","desc":"yyy"}]
-        files_changed: 修改的文件列表（JSON 字符串数组）
-            例如：["server.py", "database.py"]
-        self_reflection: 复盘反思（聚焦机制/架构缺陷，不重复描述故障）
-        user_traits: (v4.1) 客户端分析的用户特征 JSON。
-            包含: skills_observed, behavior_notes, mistakes, strengths,
-                  communication_style, decision_pattern, tech_interests, areas_for_growth
-
-    Returns:
-        JSON: {success, conversation_id, conversations_id, skill_domains, ...}
-    """
-    _ensure_core()
-    try:
-        from devpartner_agent.core.database import get_db
-        from devpartner_agent.services.conversation_analyzer import get_analyzer
-
-        db = get_db()
-        conv_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
-
-        # ── 解析参数（统一 JSON 解析）──
-        def _safe_json(val, default):
-            if not val:
-                return default
-            if isinstance(val, (list, dict)):
-                return val
-            try:
-                return json.loads(val)
-            except (json.JSONDecodeError, TypeError):
-                return default
-
-        symptom_list = _safe_json(symptom, [])
-        kp_list = _safe_json(knowledge_points, [])
-        vcmd_map = _safe_json(verify_commands, {})
-        files_list = _safe_json(files_changed, [])
-
-        # 自动提取 topic
-        if not topic and user_question:
-            topic = user_question[:80] + ("..." if len(user_question) > 80 else "")
-
-        # ── 构建 v3.0 标准化 raw_json ──
-        raw_json = {
-            "timestamp": datetime.now().isoformat(),
-            "client": source,
-            "topic": topic,
-            "task_type": task_type,
-            "user_intent": user_question[:500],
-            "symptom": symptom_list if isinstance(symptom_list, list) else [symptom_list],
-            "root_cause": root_cause,
-            "solution": solution,
-            "verify_commands": {
-                "data_check": vcmd_map.get("data_check", []) if isinstance(vcmd_map, dict) else [],
-                "code_search": vcmd_map.get("code_search", []) if isinstance(vcmd_map, dict) else [],
-            },
-            "files_touched": files_list if isinstance(files_list, list) else [files_list] if files_list else [],
-            "knowledge_points": kp_list if isinstance(kp_list, list) else [kp_list] if kp_list else [],
-            "self_reflection": self_reflection,
-        }
-
-        # ── 先做技能领域/复杂度分析（LLM 可用时使用全量内容）──
-        try:
-            analyzer = get_analyzer()
-            symptom_text_for_analysis = (
-                "; ".join(symptom_list) if isinstance(symptom_list, list) and symptom_list
-                else str(symptom_list or "")
-            )
-            analysis_text = "\n".join(filter(None, [
-                f"主题: {topic}",
-                f"用户问题: {user_question}",
-                f"现象: {symptom_text_for_analysis}",
-                f"根因: {root_cause}",
-                f"方案: {solution}",
-                f"复盘: {self_reflection}",
-            ]))
-            analysis = analyzer.analyze(analysis_text, source, source)
-            skill_domains_list = analysis.get("skill_domains", [])
-            complexity = analysis.get("complexity", "simple")
-            analysis_method = analysis.get("analysis_method", "rules")
-            feedback_type_val = task_type  # task_type 直接作为 feedback_type
-        except Exception:
-            skill_domains_list = []
-            complexity = "simple"
-            analysis_method = "rules"
-            feedback_type_val = task_type or ""
-
-        # ── 写入 conversations 表（raw_json 即全量结构化数据）──
-        # 旧字段仅保留核心索引字段，详细内容全部在 raw_json 中
-        conv_data = {
-            "timestamp": raw_json["timestamp"],
-            "client": source,
-            "topic": topic,
-            "task_type": task_type,
-            "user_intent": user_question[:500],
-            "actions": json.dumps({
-                "symptom": symptom_list if isinstance(symptom_list, list) else [],
-                "root_cause": root_cause[:300] if root_cause else "",
-                "solution": solution[:300] if solution else "",
-            }, ensure_ascii=False),
-            "problems": "; ".join(symptom_list) if isinstance(symptom_list, list) and symptom_list else "",
-            "solutions": solution[:500] if solution else "",
-            "decisions": root_cause[:500] if root_cause else "",
-            "files_touched": files_list,
-            "thinking_steps": [
-                {"phase": "现象", "content": "; ".join(symptom_list) if isinstance(symptom_list, list) else str(symptom_list)},
-                {"phase": "根因", "content": root_cause},
-                {"phase": "方案", "content": solution},
-            ] if root_cause or solution else [],
-            "self_reflection": self_reflection[:1000] if self_reflection else "",
-            # v3.0 raw_json 是唯一全量数据源
-            "raw_json_override": raw_json,
-            # v4.2: skill_domains/feedback_type/complexity 实时填充，不再依赖批量回填
-            "skill_domains": skill_domains_list,
-            "complexity": complexity,
-            "feedback_type": feedback_type_val,
-            "analyzed": 0,  # v4.3: 初始值为 0，后续由 auto_analyzer 标记为 1
-        }
-        insert_result = db.insert_conversation(conv_data)
-        # 获取 conversations.id 主键（用于跨表关联）
-        conversations_id = insert_result[0].get("last_id") if insert_result else None
-
-        # ── 构建纯文本版（用于 archive）──
-        symptom_text = "; ".join(symptom_list) if isinstance(symptom_list, list) and symptom_list else str(symptom_list or "")
-        vcmd_text = ""
-        if isinstance(vcmd_map, dict):
-            parts = []
-            if vcmd_map.get("data_check"):
-                parts.append("数据核查: " + "; ".join(vcmd_map["data_check"]))
-            if vcmd_map.get("code_search"):
-                parts.append("代码检索: " + "; ".join(vcmd_map["code_search"]))
-            vcmd_text = " | ".join(parts)
-
-        # ── 纯文本极简日志行 ──
-        plain_log = (
-            f"【时间】{raw_json['timestamp'][:19]}\n"
-            f"【主题】{topic}\n"
-            f"【现象】{symptom_text}\n"
-            f"【根因】{root_cause}\n"
-            f"【方案】{solution}\n"
-            f"【改动文件】{', '.join(files_list) if isinstance(files_list, list) else str(files_list)}\n"
-            f"【复盘】{self_reflection}"
-        )
-
-        # ── 写入 conversation_archive 表（复用已分析的 skill_domains/complexity）──
-        skill_domains_str = json.dumps(skill_domains_list, ensure_ascii=False) if isinstance(skill_domains_list, (list, dict)) else str(skill_domains_list)
-
-        db.archive_conversation({
-            "timestamp": raw_json["timestamp"],
-            "source": source,
-            "client": source,
-            "conversation_id": conv_id,
-            "conversations_id": conversations_id,
-            "raw_content": plain_log,
-            "summary": topic,
-            "skill_domains": skill_domains_str,
-            "complexity": complexity,
-            "tool_calls": vcmd_text,
-            "user_feedback": json.dumps(analysis.get("user_feedback", {}), ensure_ascii=False) if analysis.get("user_feedback") else "[]",
-            "analyzed": 0,
-        })
-
-        # ── v5.2: 后处理任务异步化 ──
-        # 将耗时操作（数据完整性校验、自动分析触发、用户特征处理、写入追踪）
-        # 放入后台线程异步执行，不阻塞客户端交互
-        def _background_post_process(_conversations_id, _source, _user_traits):
-            """后台处理：校验 + 自动分析 + 用户特征 + 写入追踪"""
-            try:
-                from devpartner_agent.core.database import get_db as _get_db
-                _db = _get_db()
-
-                # 1. 数据完整性校验（后台执行，不影响主流程）
-                try:
-                    integrity = _db.validate_conversation_integrity()
-                    if integrity["status"] in ("warning", "error"):
-                        print(f"[record_dialogue] ⚠️ 数据完整性校验: {integrity['status']} — "
-                              f"{integrity.get('issues', [])[:3]}")
-                except Exception:
-                    pass
-
-                # 2. 自动分析触发（每10条未分析存档触发一次批量分析）
-                try:
-                    unanalyzed = _db.get_unanalyzed_archives_count()
-                    if unanalyzed >= 10:
-                        from devpartner_agent.services.auto_analyzer import analyze_pending_conversations
-                        analyze_pending_conversations(_db, limit=10)
-                except Exception:
-                    pass
-
-                # 3. 用户特征数据融合
-                if _user_traits:
-                    try:
-                        traits = json.loads(_user_traits) if isinstance(_user_traits, str) else _user_traits
-                        _apply_user_traits(traits, _source, _conversations_id)
-                    except Exception:
-                        pass
-
-                # 4. 写入成功追踪
-                try:
-                    from devpartner_agent.services.data_integrity import log_write_result
-                    log_write_result("record_dialogue", True, f"id={_conversations_id}")
-                except Exception:
-                    pass
-            except Exception:
-                pass  # 后台任务静默失败，不影响主流程
-
-        _enqueue_background_task(_background_post_process, conversations_id, source, user_traits)
-
-        return json.dumps({
-            "success": True,
-            "conversation_id": conv_id,
-            "conversations_id": conversations_id,
-            "message": "对话已记录（v6.0 异步后处理版）",
-            "skill_domains": skill_domains_list,
-            "complexity": complexity,
-            "analysis_method": analysis_method,
-            "knowledge_points_count": len(kp_list) if isinstance(kp_list, list) else 0,
-            "commands_count": len(vcmd_map.get("data_check", [])) + len(vcmd_map.get("code_search", [])),
-        }, ensure_ascii=False)
-    except Exception as e:
-        # 写入失败追踪
-        try:
-            from devpartner_agent.services.data_integrity import log_write_result
-            log_write_result("record_dialogue", False, str(e)[:200])
-        except Exception:
-            pass
-        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
-
-
 # ── 处理用户反馈（优化闭环入口）───────────────────────────────
-@mcp.tool()
 def process_user_feedback(tool_name: str, feedback: str,
                            result_content: str = "",
                            conversation_context: str = "") -> str:
@@ -2517,7 +2236,6 @@ def process_user_feedback(tool_name: str, feedback: str,
 
 
 # ── 获取技能画像 ─────────────────────────────────────────────
-@mcp.tool()
 def get_skill_profile(domain: str = "") -> str:
     """
     获取个人技能画像，包括各技术领域的熟练度和成长趋势。
@@ -2577,7 +2295,6 @@ def get_skill_profile(domain: str = "") -> str:
 
 
 # ── 获取优化报告 ─────────────────────────────────────────────
-@mcp.tool()
 def get_optimization_report() -> str:
     """
     获取 MCP 优化报告：汇总所有待处理的反馈，给出优先级排序的优化建议。
@@ -2607,7 +2324,6 @@ def get_optimization_report() -> str:
 
 
 # ── 应用优化 ─────────────────────────────────────────────────
-@mcp.tool()
 def apply_optimization(feedback_id: int) -> str:
     """
     应用指定的优化建议（标记为已处理）。
@@ -2631,7 +2347,6 @@ def apply_optimization(feedback_id: int) -> str:
 
 
 # ── 保存自我迭代结果到数据库（v4.0 新增）────────────────────
-@mcp.tool()
 def save_self_iterate_results(results_json: str, conversations_id: int = 0) -> str:
     """
     将 self_iterate 的分析结果写入数据库对应表，并执行 MCP 工具优化。
@@ -2857,7 +2572,6 @@ def save_self_iterate_results(results_json: str, conversations_id: int = 0) -> s
 
 
 # ── 用户画像 CRUD ───────────────────────────────────────────
-@mcp.tool()
 def get_user_profile(domain: str = "") -> str:
     """
     获取完整的用户画像数据（技能、领域统计、对话历史摘要）。
@@ -2895,7 +2609,6 @@ def get_user_profile(domain: str = "") -> str:
 
 
 # ── 跨会话记忆管理 ──────────────────────────────────────────
-@mcp.tool()
 def get_memory(key: str = "") -> str:
     """
     获取跨会话持久记忆（替代本地 MEMORY.md / YYYY-MM-DD.md）。
@@ -2913,15 +2626,18 @@ def get_memory(key: str = "") -> str:
         from devpartner_agent.core.database import get_db
         db = get_db()
 
-        if key:
-            rows = db.query_local(
-                "SELECT * FROM conversation_archive WHERE summary LIKE ? ORDER BY timestamp DESC LIMIT 10",
-                (f"%{key}%",)
-            )
-        else:
-            rows = db.query_local(
-                "SELECT * FROM conversation_archive WHERE analyzed = 1 ORDER BY timestamp DESC LIMIT 20"
-            )
+        try:
+            if key:
+                rows = db.query_local(
+                    "SELECT * FROM conversation_archive WHERE summary LIKE ? ORDER BY timestamp DESC LIMIT 10",
+                    (f"%{key}%",)
+                )
+            else:
+                rows = db.query_local(
+                    "SELECT * FROM conversation_archive WHERE analyzed = 1 ORDER BY timestamp DESC LIMIT 20"
+                )
+        except Exception:
+            rows = []  # v7.0: 表可能不存在
 
         memories = []
         for row in rows:
@@ -2942,7 +2658,6 @@ def get_memory(key: str = "") -> str:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
-@mcp.tool()
 def update_memory(key: str, content: str, category: str = "general") -> str:
     """
     写入/更新跨会话持久记忆。
@@ -2989,7 +2704,6 @@ def update_memory(key: str, content: str, category: str = "general") -> str:
 
 
 # ── 对话检索 ────────────────────────────────────────────────
-@mcp.tool()
 def search_conversations(keyword: str, limit: int = 10) -> str:
     """
     按关键词检索历史对话记录。
@@ -3029,14 +2743,17 @@ def search_conversations(keyword: str, limit: int = 10) -> str:
                 "conversation_id": row.get("conversation_id", ""),
             })
 
-        # 搜索 archive 表
-        arch_rows = db.query_local(
-            """SELECT conversation_id, summary, complexity, timestamp
-               FROM conversation_archive
-               WHERE summary LIKE ? OR raw_content LIKE ?
-               ORDER BY timestamp DESC LIMIT ?""",
-            (like_kw, like_kw, limit),
-        )
+        # 搜索 archive 表（v7.0: 表可能不存在）
+        try:
+            arch_rows = db.query_local(
+                """SELECT conversation_id, summary, complexity, timestamp
+                   FROM conversation_archive
+                   WHERE summary LIKE ? OR raw_content LIKE ?
+                   ORDER BY timestamp DESC LIMIT ?""",
+                (like_kw, like_kw, limit),
+            )
+        except Exception:
+            arch_rows = []
         for row in arch_rows:
             results.append({
                 "source": "conversation_archive",
@@ -3057,10 +2774,9 @@ def search_conversations(keyword: str, limit: int = 10) -> str:
 
 
 # ── 本地 LLM 状态 ─────────────────────────────────────────────
-@mcp.tool()
 def llm_status(action: str = "status") -> str:
     """
-    查看或控制本地 LLM 服务（llama-cpp-python）。
+    查看或控制本地 LLM 服务（Ollama）。
 
     Args:
         action: 操作类型
@@ -3086,8 +2802,74 @@ def llm_status(action: str = "status") -> str:
         return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
 
+# ── 版本升级记录 ─────────────────────────────────────────────
+def record_version_upgrade(
+    version: str = "",
+    previous_version: str = "",
+    change_summary: str = "",
+    changelog: str = "",
+    triggered_by: str = "manual",
+    bug_fix: str = "",
+    new_feature: str = "",
+    data_change: str = "",
+) -> str:
+    """
+    手动记录版本升级到 version_history 表。
+
+    在版本发布或重大变更后调用此工具，将变更信息持久化到数据库。
+    如果未提供 version，自动从 pyproject.toml 读取当前版本号。
+
+    Args:
+        version: 新版本号（留空自动检测）
+        previous_version: 上一个版本号
+        change_summary: 变更摘要（一句话）
+        changelog: 完整变更日志（Markdown 格式）
+        triggered_by: 触发方式: manual(手动) / startup(启动检测) / auto(自动)
+        bug_fix: Bug 修复说明
+        new_feature: 新功能说明
+        data_change: 数据变更说明（如 Schema 迁移）
+
+    Returns:
+        JSON: {success, version, previous_version, recorded_at}
+    """
+    _ensure_core()
+    try:
+        from devpartner_agent.core.database import get_db
+        from devpartner_agent.core.config import get_project_version
+
+        db = get_db()
+
+        if not version:
+            version = get_project_version()
+
+        if not previous_version:
+            latest = db.get_latest_version()
+            previous_version = latest or "unknown"
+
+        db.record_version(
+            version=version,
+            previous_version=previous_version,
+            change_summary=change_summary,
+            changelog=changelog,
+            triggered_by=triggered_by,
+            bug_fix=bug_fix,
+            new_feature=new_feature,
+            data_change=data_change,
+        )
+
+        import datetime as _dt
+        return json.dumps({
+            "success": True,
+            "version": version,
+            "previous_version": previous_version,
+            "recorded_at": _dt.datetime.now().isoformat(),
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+
+
 # ── 文件监控控制 ─────────────────────────────────────────────
-@mcp.tool()
 def file_watcher_control(action: str = "status",
                           watch_path: str = "",
                           source: str = "") -> str:
@@ -3156,7 +2938,6 @@ def file_watcher_control(action: str = "status",
 
 
 # ── 获取已知领域映射 ─────────────────────────────────────────
-@mcp.tool()
 def get_skill_domains() -> str:
     """
     获取当前已知的技能领域映射（包括自动发现的新术语）。
@@ -3182,7 +2963,6 @@ def get_skill_domains() -> str:
 
 
 # ── 用户画像分析请求（MCP → 客户端主动下发）────────────────
-@mcp.tool()
 def request_user_profile_analysis(analysis_scope: str = "full",
                                    conversation_id: str = "",
                                    project_id: str = "") -> str:
@@ -3368,146 +3148,131 @@ def git_rollback(commit_hash: str = "HEAD~1", hard: bool = False) -> str:
 
 def _record_version_on_startup():
     """
-    启动时自动记录版本到数据库（v4.2: 扩充结构化字段）
-    
-    v6.0.1: 仅在版本升级时写入，服务重启不再填充重复记录。
-    根据 previous_version 判断是升级还是重复启动，生成不同的 changelog。
-    v4.2 新增 5 个结构化字段：diff_detail / optimize_point / bug_fix / new_feature / data_change
+    启动时记录版本快照（仅版本号 + 工具数，不含 changelog 文本）
+
+    v7.2: 精简为轻量级启动记录。
+    - 相同版本重复启动 → 跳过（不污染历史）
+    - 版本升级时仅写入 version + tools_count + triggered_by="startup"
+    - 完整的 changelog/summary/diff_detail 等 5 个结构化字段
+      由人工通过 MCP 工具 record_version_upgrade() 单独填写
     """
     try:
         from devpartner_agent.core.database import get_db
         db = get_db()
         previous = db.get_latest_version()
 
-        # v6.0.1: 相同版本重复启动 → 跳过记录，不污染版本历史
         if previous == VERSION:
             print(f"[INFO] 版本未变化 ({VERSION})，跳过版本记录")
             return
 
-        # ── v4.2: 版本变更字典（包含 5 个结构化字段）──
-        version_changelogs = {
-            "4.2.0": {
-                "summary": "v4.2 全链路数据关联完善 + 闲置字段实时填充 + 版本记录结构化",
-                "changelog": (
-                    "【主键关联】evolution_log / improvement_log 新增 conversations_id 外键，支持全链路联查；"
-                    "【字段激活】conversations 表 skill_domains/feedback_type 实时填充（record_dialogue 写入时分析）；"
-                    "【优化闭环】self_iterate 写入 optimization_feedback 自动标记 applied_at/result；"
-                    "【版本记录】version_history 扩充 diff_detail/optimize_point/bug_fix/new_feature/data_change 五字段；"
-                    "【联查增强】get_conversation_with_relations 补充 evolution_log / improvement_log"
-                ),
-                "diff_detail": "conversations.id 关联到全部 6 张子表（archive/feedback/evolution/improvement/skills/plans）",
-                "optimize_point": "skill_domains/feedback_type 从批量回填改为实时写入；applied_at/result 从手动改为自动标记",
-                "bug_fix": "evolution_log/improvement_log 长期无 conversations_id 导致无法联查历史对话的全链路数据",
-                "new_feature": "version_history 结构化字段支持版本间精确差异对比；improvement_log 支持 conversations_id 追溯",
-                "data_change": "evolution_log 新增 conversations_id；improvement_log 新增 conversations_id；version_history 新增 5 个结构化字段",
-            },
-            "4.1.0": {
-                "summary": "v4.1 数据库关联重构：conversations.id 跨表关联 + analyzed 激活 + 自动分析引擎",
-                "changelog": (
-                    "【数据关联】conversations.id 主键关联 conversation_archive.conversations_id / "
-                    "optimization_feedback.conversations_id；"
-                    "【字段激活】conversations.skill_domains/complexity/feedback_type 填充；"
-                    "conversation_archive.analyzed 字段激活；"
-                    "【自动分析】auto_analyzer 引擎：每10条未分析存档触发批量分析 → 回写字段 + 更新画像 + 写入反馈；"
-                    "【版本记录】version_history changelog 差异化生成，不再重复固定文本"
-                ),
-                "diff_detail": "conversations.id 主键 → conversation_archive.conversations_id / optimization_feedback.conversations_id",
-                "optimize_point": "skill_domains/complexity/feedback_type 字段激活；auto_analyzer 批量回写",
-                "bug_fix": "conversations 表与子表（archive/feedback）无外键关联，无法串联全链路数据",
-                "new_feature": "auto_analyzer 自动分析引擎；version_history 差异化 changelog",
-                "data_change": "conversation_archive 新增 conversations_id；optimization_feedback 新增 conversations_id",
-            },
-            "4.0.0": {
-                "summary": "v4.0 self_iterate 自动触发：20次有意义对话 → 用户画像/技能/批评/规划/MCP工具全维度分析",
-                "changelog": (
-                    "触发机制：基于 conversations 表有意义对话计数（非工具调用次数）；"
-                    "输出增强：用户画像/技能评估/批评指点/未来规划/MCP工具优化/系统反馈；"
-                    "新增 save_self_iterate_results 工具；"
-                    "AutoLogMiddleware v4.0：有意义对话计数持久化"
-                ),
-                "diff_detail": "self_iterate 触发从工具调用次数改为有意义对话计数（20次阈值）",
-                "optimize_point": "self_iterate 输出从单维度扩展为 6 维度（画像/技能/批评/规划/工具/反馈）",
-                "bug_fix": "self_iterate 结果无法持久化到数据库（save_self_iterate_results 缺失）",
-                "new_feature": "save_self_iterate_results；AutoLogMiddleware v4.0；conversation_counter 持久化",
-                "data_change": "新增 .conversation_counter.json；新增 .optimization_state.json",
-            },
-            "5.1.0": {
-                "summary": "v5.1.0 llama-cpp-python 单引擎 + 异步后处理 + 代码清理",
-                "changelog": (
-                    "【引擎迁移】Ollama 双引擎 → llama-cpp-python 单引擎；"
-                    "【异步化】record_dialogue 后处理（数据校验/自动分析/用户特征）移至后台线程；"
-                    "【代码清理】移除 log_conversation 废弃工具；精简 log_service.py；"
-                    "【Bug修复】_agent_tools_count 被清零导致 tools_count 不准确；"
-                    "【版本统一】全系统版本号统一为 5.1.0；"
-                    "【对话计数修复】record_dialogue/record_conversation 重新纳入有意义对话计数"
-                ),
-                "diff_detail": "LLM 引擎从 Ollama API 调用改为 llama-cpp-python 本地加载 GGUF；移除 httpx 依赖",
-                "optimize_point": "record_dialogue 同步后处理改为后台线程异步执行，减少客户端等待时间",
-                "bug_fix": "_agent_tools_count 在 _collect_tool_names() 后被错误清零；版本号多处不一致",
-                "new_feature": "后台任务队列（_background_task_queue）；_NO_FEEDBACK_DETECTION_TOOLS 机制",
-                "data_change": "log_service.py 移除 Markdown 文件操作方法；conversation_archive.user_feedback 不再硬编码 []",
-            },
-        }
-
-        current_changelog = version_changelogs.get(VERSION, {
-            "summary": f"v{VERSION} 版本发布",
-            "changelog": f"版本 {VERSION} 发布",
-            "diff_detail": "",
-            "optimize_point": "",
-            "bug_fix": "",
-            "new_feature": "",
-            "data_change": "",
-        })
-
-        # v6.0.1: 相同版本已在函数开头跳过，此处只处理升级/首次启动
-        is_upgrade = previous and previous != VERSION
-
-        # 计算工具总数（_agent_tools_count 可能在 _collect_tool_names 前为零，兜底用 mcp._tool_manager 实时计算）
         total_tools = _tools_count + _agent_tools_count
         if total_tools <= _tools_count:
             try:
-                tool_manager = getattr(mcp, '_tool_manager', None)
-                if tool_manager:
-                    total_tools = len(getattr(tool_manager, '_tools', {}))
+                total_tools = len(asyncio.run(mcp._list_tools()))
             except Exception:
                 pass
         if total_tools <= 0:
-            total_tools = _tools_count  # 至少工具层的数量
+            total_tools = _tools_count
+
+        is_upgrade = previous and previous != VERSION
 
         db.record_version(
             version=VERSION,
             previous_version=previous or "",
-            change_summary=current_changelog["summary"],
-            changelog=current_changelog["changelog"],
+            change_summary=f"v{VERSION} 启动",
+            changelog=f"系统启动时自动记录，详细变更请使用 record_version_upgrade() 补充",
             tools_count=total_tools,
-            triggered_by="upgrade" if is_upgrade else "startup",
-            diff_detail=current_changelog.get("diff_detail", ""),
-            optimize_point=current_changelog.get("optimize_point", ""),
-            bug_fix=current_changelog.get("bug_fix", ""),
-            new_feature=current_changelog.get("new_feature", ""),
-            data_change=current_changelog.get("data_change", ""),
+            triggered_by="startup",
+            diff_detail="",
+            optimize_point="",
+            bug_fix="",
+            new_feature="",
+            data_change="",
         )
         if is_upgrade:
-            print(f"[INFO] 版本升级: {previous} → {VERSION}")
+            print(f"[INFO] 版本升级: {previous} → {VERSION}（changelog 待补充）")
         else:
             print(f"[INFO] 首次版本记录: {VERSION}")
     except Exception as e:
         print(f"[WARN] 版本记录失败: {e}")
 
 
+def record_version_upgrade(
+    version: str,
+    change_summary: str = "",
+    changelog: str = "",
+    diff_detail: str = "",
+    optimize_point: str = "",
+    bug_fix: str = "",
+    new_feature: str = "",
+    data_change: str = "",
+) -> str:
+    """
+    人工记录版本升级信息（补充启动时自动记录的空缺字段）
+
+    启动时 _record_version_on_startup() 仅写入 version + tools_count，
+    完整的变更描述由人工通过此工具填写。
+
+    Args:
+        version: 版本号（如 "7.3.0"）
+        change_summary: 一句话总结（如 "v7.3 性能优化 + 新功能X"）
+        changelog: 详细变更描述（支持多行，用分号/换行分隔）
+        diff_detail: 代码差异详情
+        optimize_point: 优化点说明
+        bug_fix: Bug 修复列表
+        new_feature: 新功能列表
+        data_change: 数据库 Schema 变更
+
+    Returns:
+        JSON: {"success": true, "version": "7.3.0", "updated": true}
+    """
+    try:
+        from devpartner_agent.core.database import get_db
+        db = get_db()
+
+        previous = db.get_latest_version() or ""
+
+        db.record_version(
+            version=version,
+            previous_version=previous,
+            change_summary=change_summary or f"v{version} 升级",
+            changelog=changelog or f"版本 {version} 发布",
+            tools_count=_tools_count + _agent_tools_count,
+            triggered_by="manual",
+            diff_detail=diff_detail,
+            optimize_point=optimize_point,
+            bug_fix=bug_fix,
+            new_feature=new_feature,
+            data_change=data_change,
+        )
+
+        return json.dumps({
+            "success": True,
+            "version": version,
+            "previous_version": previous,
+            "updated": True,
+        }, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
+
+
 # ══════════════════════════════════════════════════════════════
-# v5.0: 会话生命周期管理工具
+# v7.3: 对话生命周期管理工具（3个核心工具）
+# ══════════════════════════════════════════════════════════════
+# start_conversation → record_step ×N → finalize_conversation
 # ══════════════════════════════════════════════════════════════
 
 @mcp.tool()
-def create_conversation(client: str = "unknown", topic: str = "",
-                        task_type: str = "general", user_intent: str = "",
-                        priority: str = "medium") -> str:
+def start_conversation(client: str = "unknown", topic: str = "",
+                       task_type: str = "general", user_intent: str = "",
+                       priority: str = "medium") -> str:
     """
-    创建新会话并获取唯一 conversation_id。
+    【总分总·总】开始一次新对话，创建会话并获取唯一 conversation_id。
 
     每次有意义的对话开始前都应调用此工具获取会话 ID，
-    后续的步骤创建、状态查询、知识点落地都需要此 ID。
+    后续的 record_step 和 finalize_conversation 都需要此 ID。
+
+    对话流程：start_conversation → record_step ×N → finalize_conversation
 
     Args:
         client: 客户端标识（codebuddy/trae/cursor 等）
@@ -3532,13 +3297,12 @@ def create_conversation(client: str = "unknown", topic: str = "",
         return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
 
 
-@mcp.tool()
 def get_conversation_status(conversation_id: str) -> str:
     """
     查询会话的详细状态，包括所有步骤的执行进度。
 
     Args:
-        conversation_id: 会话唯一ID（由 create_conversation 返回）
+        conversation_id: 会话唯一ID（由 start_conversation 返回）
 
     Returns:
         JSON: 会话详情 + 步骤列表 + 进度百分比
@@ -3554,98 +3318,9 @@ def get_conversation_status(conversation_id: str) -> str:
         return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
 
 
-@mcp.tool()
-def create_conversation_steps(conversation_id: str, steps_json: str) -> str:
-    """
-    为会话创建执行步骤。
-
-    将复杂任务拆分为有序步骤，支持依赖关系和异步执行。
-
-    steps_json 格式：
-    [
-      {
-        "step_type": "analysis|knowledge_gen|user_profile|system_optimize|data_migration|validation",
-        "step_name": "步骤名称",
-        "order": 1,
-        "input_data": {},
-        "depends_on": [],
-        "max_retries": 3,
-        "timeout_seconds": 300
-      }
-    ]
-
-    Args:
-        conversation_id: 会话ID
-        steps_json: 步骤配置 JSON 数组
-
-    Returns:
-        JSON: {"step_ids": [...], "total": N}
-    """
-    try:
-        from devpartner_agent.services.conversation_manager import (
-            get_conversation_manager, StepConfig, StepType
-        )
-        mgr = get_conversation_manager()
-
-        steps_data = json.loads(steps_json)
-        step_configs = []
-
-        type_map = {
-            "analysis": StepType.ANALYSIS,
-            "knowledge_gen": StepType.KNOWLEDGE_GEN,
-            "user_profile": StepType.USER_PROFILE,
-            "system_optimize": StepType.SYSTEM_OPTIMIZE,
-            "data_migration": StepType.DATA_MIGRATION,
-            "validation": StepType.VALIDATION,
-        }
-
-        for s in steps_data:
-            step_type = type_map.get(s.get("step_type", "analysis"), StepType.ANALYSIS)
-            config = StepConfig(
-                step_type=step_type,
-                step_name=s.get("step_name", f"Step {s.get('order', 1)}"),
-                order=s.get("order", 1),
-                input_data=s.get("input_data", {}),
-                depends_on=s.get("depends_on", []),
-                max_retries=s.get("max_retries", 3),
-                timeout_seconds=s.get("timeout_seconds", 300),
-            )
-            step_configs.append(config)
-
-        step_ids = mgr.create_steps(conversation_id, step_configs)
-        return json.dumps({"step_ids": step_ids, "total": len(step_ids)}, ensure_ascii=False)
-    except Exception as e:
-        return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
 
 
-@mcp.tool()
-def execute_steps_async(conversation_id: str, priority: str = "medium") -> str:
-    """
-    异步提交会话的所有步骤到后台任务队列执行。
 
-    此方法非阻塞，提交后立即返回。使用 get_task_status 轮询进度。
-
-    Args:
-        conversation_id: 会话ID
-        priority: 执行优先级（low/medium/high/critical）
-
-    Returns:
-        JSON: {"task_id": "task_xxx", "status": "submitted"}
-    """
-    try:
-        from devpartner_agent.services.conversation_manager import get_conversation_manager
-        mgr = get_conversation_manager()
-        success = mgr.execute_steps_async(conversation_id, priority=priority)
-        return json.dumps({
-            "success": success,
-            "conversation_id": conversation_id,
-            "message": "任务已提交到后台队列" if success else "提交失败，请检查会话状态",
-        }, ensure_ascii=False)
-    except Exception as e:
-        return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
-
-
-@mcp.tool()
 def execute_single_step(step_id: str, force_retry: bool = False) -> str:
     """
     执行或重试单个步骤。
@@ -3670,13 +3345,12 @@ def execute_single_step(step_id: str, force_retry: bool = False) -> str:
 # v5.0: 异步任务队列管理工具
 # ══════════════════════════════════════════════════════════════
 
-@mcp.tool()
 def get_task_status(task_id: str) -> str:
     """
     查询异步任务的状态和进度。
 
     Args:
-        task_id: 任务ID（由 execute_steps_async 返回）
+        task_id: 任务ID
 
     Returns:
         JSON: 任务状态、进度、结果等
@@ -3692,7 +3366,6 @@ def get_task_status(task_id: str) -> str:
         return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
 
 
-@mcp.tool()
 def get_queue_stats() -> str:
     """
     获取任务队列的统计信息，包括资源使用和并发状态。
@@ -3709,7 +3382,6 @@ def get_queue_stats() -> str:
         return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
 
 
-@mcp.tool()
 def cancel_task(task_id: str) -> str:
     """
     取消等待中的异步任务（仅在 pending/queued 状态有效）。
@@ -3737,7 +3409,6 @@ def cancel_task(task_id: str) -> str:
 # v5.0: 知识库管理工具
 # ══════════════════════════════════════════════════════════════
 
-@mcp.tool()
 def list_knowledge_points(domain: str = "", category: str = "",
                           limit: int = 50, offset: int = 0) -> str:
     """
@@ -3784,7 +3455,6 @@ def list_knowledge_points(domain: str = "", category: str = "",
         return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
 
 
-@mcp.tool()
 def search_knowledge(query: str, domain: str = "", limit: int = 20) -> str:
     """
     搜索知识库中的知识点。
@@ -3827,7 +3497,6 @@ def search_knowledge(query: str, domain: str = "", limit: int = 20) -> str:
         return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
 
 
-@mcp.tool()
 def create_knowledge_point(title: str, content: str, domain: str,
                            category: str = "concept", tags_json: str = "[]",
                            difficulty: str = "medium", confidence: float = 0.8) -> str:
@@ -3874,7 +3543,205 @@ def create_knowledge_point(title: str, content: str, domain: str,
         return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
 
 
+# ── 知识检索（v7.4.0 扩展：支持 type + project_name 筛选）──────────
 @mcp.tool()
+def question_with_context(question: str, project_name: str = "",
+                           category: str = "", limit: int = 5) -> str:
+    """
+    基于知识库的智能问答。根据用户问题检索相关的技能知识和业务知识。
+
+    v7.4.0 扩展：
+    - 支持 project_name 筛选业务知识（限定 type='business' AND domain=project_name）
+    - 支持 category 过滤（skill / business / all）
+    - 使用 type 字段区分技能和业务知识（数据层隔离）
+
+    Args:
+        question: 用户的问题
+        project_name: 项目名称（用于筛选业务知识，不传则返回所有知识）
+        category: 知识类型过滤（'skill'/'business'/''，空=全部）
+        limit: 返回数量限制（默认 5）
+
+    Returns:
+        JSON: {"results": [{"title","content","type","domain","knowledge_id",...}], ...}
+    """
+    _ensure_core()
+    try:
+        from devpartner_agent.core.database import get_db
+        db = get_db()
+
+        # 构建查询条件
+        conditions = []
+        params = []
+
+        # 类型过滤
+        if category and category in ("skill", "business"):
+            conditions.append("kp.type = ?")
+            params.append(category)
+
+        # 项目过滤（仅对 business 类型生效）
+        if project_name:
+            conditions.append("(kp.type = 'business' AND kp.domain = ?)")
+            params.append(project_name)
+
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+        # 先按 question 关键词匹配 title/content（简单的 LIKE 搜索）
+        search_term = f"%{question}%"
+        sql = f"""
+            SELECT kp.knowledge_id, kp.title, kp.content, kp.type, kp.domain,
+                   kp.tags, kp.category, kp.difficulty, kp.usage_count, kp.created_at
+            FROM knowledge_points kp
+            WHERE {where_clause}
+              AND (kp.title LIKE ? OR kp.content LIKE ?)
+            ORDER BY kp.usage_count DESC, kp.created_at DESC
+            LIMIT ?
+        """
+        params.extend([search_term, search_term, limit])
+
+        rows = db.query_local(sql, tuple(params))
+
+        if not rows:
+            # 无精确匹配时返回最相关的记录
+            sql_fallback = f"""
+                SELECT kp.knowledge_id, kp.title, kp.content, kp.type, kp.domain,
+                       kp.tags, kp.category, kp.difficulty, kp.usage_count, kp.created_at
+                FROM knowledge_points kp
+                WHERE {where_clause}
+                ORDER BY kp.usage_count DESC, kp.created_at DESC
+                LIMIT ?
+            """
+            rows = db.query_local(sql_fallback, (*params[:len(params)-2], limit))
+
+        results = []
+        for row in (rows or []):
+            tags = row.get("tags", "[]")
+            if isinstance(tags, str):
+                try:
+                    tags = json.loads(tags)
+                except Exception:
+                    tags = [tags]
+
+            # 截取内容摘要（前 300 字符）
+            content = row.get("content", "")
+            summary = content[:300] + "..." if len(content) > 300 else content
+
+            results.append({
+                "knowledge_id": row["knowledge_id"],
+                "title": row["title"],
+                "summary": summary,
+                "type": row.get("type", "skill"),
+                "domain": row.get("domain", ""),
+                "tags": tags,
+                "category": row.get("category", ""),
+                "difficulty": row.get("difficulty", "medium"),
+                "usage_count": row.get("usage_count", 0),
+            })
+
+        return json.dumps({
+            "success": True,
+            "question": question,
+            "project_name": project_name,
+            "category_filter": category,
+            "total": len(results),
+            "results": results,
+        }, ensure_ascii=False)
+
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+
+
+# ── 知识库全量导出工具（v7.4.0）──
+def export_knowledge_to_vault() -> str:
+    """
+    全量导出所有 auto_synced_to_md=1 的知识点到 Obsidian Vault。
+
+    用于首次同步或修复 MD 文件缺失的情况。
+    """
+    _ensure_core()
+    try:
+        from devpartner_agent.services.vault_exporter import get_vault_exporter
+        exporter = get_vault_exporter()
+        result = exporter.export_all_knowledge()
+        return json.dumps({
+            "success": True,
+            **result,
+        }, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+
+
+# ── Vault 双向同步工具（v7.4.0）──
+def sync_vault_to_db(full_scan: bool = False) -> str:
+    """
+    将 Obsidian Vault 中手动修改的知识卡片同步回数据库。
+
+    场景：用户在 Obsidian 中编辑了知识卡片的标题/内容/标签后，
+    调用此工具将修改回写到数据库。
+
+    Args:
+        full_scan: True=全量扫描所有文件，False=仅扫描有变更的文件
+
+    Returns:
+        JSON: {"synced": N, "skipped": N, "errors": [...]}
+    """
+    _ensure_core()
+    try:
+        from devpartner_agent.services.vault_watchdog import get_vault_watchdog
+        watchdog = get_vault_watchdog()
+        result = watchdog.sync_vault_to_db(full_scan=full_scan)
+        return json.dumps({
+            "success": True,
+            "direction": "vault→db",
+            **result,
+        }, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+
+
+def start_vault_watchdog(interval: int = 30) -> str:
+    """
+    启动 Vault 后台自动同步监控。
+
+    启动后，系统会每隔 interval 秒自动扫描 Vault 中的 MD 文件变化，
+    并将用户手动修改的内容回写到数据库。
+
+    Args:
+        interval: 扫描间隔（秒），默认 30
+
+    Returns:
+        JSON: {"running": true, "interval": 30}
+    """
+    _ensure_core()
+    try:
+        from devpartner_agent.services.vault_watchdog import get_vault_watchdog
+        watchdog = get_vault_watchdog()
+        watchdog.start_watchdog(interval=interval)
+        return json.dumps({
+            "success": True,
+            "running": True,
+            "interval": interval,
+        }, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+
+
+def stop_vault_watchdog() -> str:
+    """
+    停止 Vault 后台自动同步监控。
+
+    Returns:
+        JSON: {"running": false}
+    """
+    _ensure_core()
+    try:
+        from devpartner_agent.services.vault_watchdog import get_vault_watchdog
+        watchdog = get_vault_watchdog()
+        watchdog.stop_watchdog()
+        return json.dumps({"success": True, "running": False}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+
+
 def get_system_health() -> str:
     """
     获取 DevPartner 系统整体健康状态。
@@ -3912,7 +3779,6 @@ def get_system_health() -> str:
         return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
 
 
-@mcp.tool()
 def get_v5_status() -> str:
     """
     检查 DevPartner v5.0 升级状态和核心功能可用性。
@@ -3956,7 +3822,6 @@ def get_v5_status() -> str:
         return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
 
 
-@mcp.tool()
 def get_callback_stats() -> str:
     """
     获取回调注册表的统计信息。
@@ -3977,7 +3842,6 @@ def get_callback_stats() -> str:
 # v5.2: 知识图谱工具
 # ══════════════════════════════════════════════════════════
 
-@mcp.tool()
 def build_knowledge_graph(force: str = "false") -> str:
     """
     构建知识图谱索引。从 knowledge_points 表自动分析知识点间的关联关系。
@@ -3997,7 +3861,6 @@ def build_knowledge_graph(force: str = "false") -> str:
         return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
 
 
-@mcp.tool()
 def get_knowledge_graph_stats() -> str:
     """
     获取知识图谱统计信息。包括节点总数、边总数、Top 领域分布、Hub 节点排名等。
@@ -4014,7 +3877,6 @@ def get_knowledge_graph_stats() -> str:
         return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
 
 
-@mcp.tool()
 def get_knowledge_neighbors(knowledge_id: str, max_depth: str = "1",
                             min_weight: str = "0.3") -> str:
     """
@@ -4043,7 +3905,6 @@ def get_knowledge_neighbors(knowledge_id: str, max_depth: str = "1",
         return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
 
 
-@mcp.tool()
 def find_knowledge_path(source_id: str, target_id: str,
                         max_depth: str = "5") -> str:
     """
@@ -4067,7 +3928,29 @@ def find_knowledge_path(source_id: str, target_id: str,
         return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
 
 
-@mcp.tool()
+def sync_knowledge_relations(min_weight: str = "0.5") -> str:
+    """
+    v7.2: 将知识图谱中发现的共现关联同步回 knowledge_points.related_knowledge_ids。
+
+    基于现有图谱边的权重筛选高质量关联（≥ min_weight），
+    以逗号分隔的 knowledge_id 列表写回数据库。
+
+    Args:
+        min_weight: 最小关联权重阈值（0.0-1.0，默认 0.5）
+
+    Returns:
+        JSON: {"updated": N, "skipped": M, "nodes_with_relations": K}
+    """
+    try:
+        from devpartner_agent.services.knowledge_graph import get_knowledge_graph
+        kg = get_knowledge_graph()
+        kg.build_index()
+        result = kg.sync_relations_to_db(min_weight=float(min_weight))
+        return json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
+
+
 def get_knowledge_cluster(domain: str = "", tag: str = "") -> str:
     """
     获取某个领域或标签的知识点聚类。
@@ -4090,7 +3973,6 @@ def get_knowledge_cluster(domain: str = "", tag: str = "") -> str:
         return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
 
 
-@mcp.tool()
 def export_knowledge_graph(format: str = "nodes_and_edges") -> str:
     """
     导出知识图谱数据，用于外部可视化（如 D3.js、Gephi）。
@@ -4112,7 +3994,7 @@ def export_knowledge_graph(format: str = "nodes_and_edges") -> str:
 
 
 # ══════════════════════════════════════════════════════════════
-# v5.3: 总分总对话分析 — record_step + finalize_conversation
+# v7.3: 总分总对话分析 — record_step + finalize_conversation
 # ══════════════════════════════════════════════════════════════
 
 @mcp.tool()
@@ -4125,14 +4007,14 @@ def record_step(conversation_id: str, step_name: str, step_type: str = "general"
 
     设计理念：
       - 对话被拆分为多个子任务（todo items），每个子任务完成后立即调用此工具
-      - 数据提交后立即返回，不阻塞 CodeBuddy 继续处理下一个任务
+      - 数据提交后立即返回，不阻塞 Agent 继续处理下一个任务
       - 后端异步执行：内容分析 → 知识点提取 → 用户画像更新
 
     调用时机：
       每完成一个 todo 项（文件修改、问题排查、配置变更等）后立即调用。
 
     Args:
-        conversation_id: 会话唯一ID（由 create_conversation 创建）
+        conversation_id: 会话唯一ID（由 start_conversation 返回）
         step_name: 步骤名称（对应 todo 项名称，如 "修复数据库锁问题"）
         step_type: 步骤类型
             - "code_change": 代码变更（创建/修改/删除文件）
@@ -4162,6 +4044,10 @@ def record_step(conversation_id: str, step_name: str, step_type: str = "general"
         db = get_db()
         mgr = get_conversation_manager()
         queue = get_task_queue()
+
+        # v6.0.3: FK 自保护 — 确保会话父行存在，规避 create/record 跨请求可见性竞态
+        # （共享 WAL 连接的读快照可能尚未看到刚创建的会话，导致 conversation_steps FK 失败）
+        mgr.ensure_conversation_exists(conversation_id, client="codebuddy", topic=step_name[:200] or "自动创建的会话")
 
         # 解析参数
         def _safe_json(val, default):
@@ -4207,6 +4093,11 @@ def record_step(conversation_id: str, step_name: str, step_type: str = "general"
             step_name, json.dumps(step_input, ensure_ascii=False),
             datetime.now().isoformat()
         ))
+
+        # v7.2: 设置 started_at 为当前时间
+        db.query_local("""
+            UPDATE conversation_steps SET started_at = ? WHERE step_id = ?
+        """, (datetime.now().isoformat(), step_id))
 
         # 更新会话总步骤数
         total = db.query_local(
@@ -4273,13 +4164,13 @@ def record_step(conversation_id: str, step_name: str, step_type: str = "general"
                 ).fetchone()
                 
                 if not exists:
+                    ts = datetime.now().isoformat()
                     cursor.execute("""
-                        INSERT INTO conversations (conversation_id, client, topic, task_type, status, created_at, updated_at)
-                        VALUES (?, 'codebuddy', ?, 'general', 'active', ?, ?)
-                    """, (conversation_id, 
+                        INSERT INTO conversations (conversation_id, timestamp, client, topic, task_type, status, priority, created_at, updated_at)
+                        VALUES (?, ?, 'codebuddy', ?, 'general', 'active', 'medium', ?, ?)
+                    """, (conversation_id, ts,
                           step_name[:200] if step_name else '自动创建',
-                          datetime.now().isoformat(),
-                          datetime.now().isoformat()))
+                          ts, ts))
                     db._local_conn.commit()
                     print(f"[record_step] ✅ 自动创建 conversations 记录: {conversation_id}")
                 
@@ -4349,11 +4240,12 @@ def finalize_conversation(conversation_id: str, summary: str = "",
 
     调用时机：
       对话中所有 todo 项完成、record_step 全部调用完毕后调用。
+      短对话（无需拆分步骤）可直接在 start_conversation 后调用，跳过 record_step。
 
     Args:
-        conversation_id: 会话唯一ID
+        conversation_id: 会话唯一ID（由 start_conversation 返回）
         summary: 对话全局总结（技术要点、关键决策、值得记住的解决方案）
-        user_traits: 用户画像特征（JSON，同 record_dialogue 的 user_traits 格式）
+        user_traits: 用户画像特征（JSON）
             包含: skills_observed, behavior_notes, mistakes, strengths,
                   communication_style, decision_pattern, tech_interests, areas_for_growth
         key_decisions: 关键决策列表（JSON数组，每项 {"decision":"xxx","reason":"yyy","tradeoff":"zzz"}）
@@ -4421,6 +4313,23 @@ def finalize_conversation(conversation_id: str, summary: str = "",
         # 标记会话为已完成
         mgr.complete_conversation(conversation_id)
 
+        # v7.0: 标记总结已生成（清理前置校验） + 触发软删除
+        db.query_local("""
+            UPDATE conversations SET summary_generated = 1, updated_at = ?
+            WHERE conversation_id = ?
+        """, (datetime.now().isoformat(), conversation_id))
+
+        # 异步软删除：不在主流程中阻塞
+        def _soft_delete():
+            try:
+                from devpartner_agent.services.cleanup_service import get_cleanup_service
+                cs = get_cleanup_service()
+                cs.soft_delete_conversation_tasks(conversation_id)
+            except Exception as e:
+                logger.warning(f"软删除失败（非致命）: {e}")
+
+        threading.Thread(target=_soft_delete, daemon=True).start()
+
         return json.dumps({
             "success": True,
             "conversation_id": conversation_id,
@@ -4468,13 +4377,10 @@ def _collect_tool_names():
     """从 mcp 实例中收集所有已注册的工具名"""
     global _all_tool_names, _agent_tools_count
     try:
-        tool_manager = getattr(mcp, '_tool_manager', None)
-        if tool_manager:
-            tools = getattr(tool_manager, '_tools', {})
-            _all_tool_names = sorted(tools.keys())
-            _agent_tools_count = len(_all_tool_names) - _tools_count
-            if _agent_tools_count < 0:
-                _agent_tools_count = 0
+        _all_tool_names = sorted(t.name for t in asyncio.run(mcp._list_tools()))
+        _agent_tools_count = len(_all_tool_names) - _tools_count
+        if _agent_tools_count < 0:
+            _agent_tools_count = 0
     except Exception:
         pass
 
@@ -4506,7 +4412,7 @@ if __name__ == "__main__":
     print("        审批链 | 能力授权 | 注册表 | 并行任务分解")
     print("        日志管理 | 每日总结 | 系统诊断 | 规则检测")
     print("        热重载 | 安全审计 | Git版本控制")
-    print("        [NEW v6.0] LLM驱动分析 | 总分总会话 | 知识图谱 | 双向仪表盘")
+    print("        [NEW v7.3.0] Ollama引擎 | 总分总会话 | 知识图谱 | 双向仪表盘")
     print("=" * 60)
 
     # ============================================================

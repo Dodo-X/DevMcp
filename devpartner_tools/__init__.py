@@ -1,7 +1,7 @@
 """
 DevPartner Tools - 纯工具层（无状态）
 
-5 大类共 21 个无状态 MCP 工具。
+5 大类共 23 个无状态 MCP 工具。
 设计原则：无状态、无副作用、即用即弃。
 """
 
@@ -22,7 +22,7 @@ from .tools.growth_analytics import (
     get_system_evolution_stats,
     get_user_skill_radar,
     get_learning_timeline,
-    get_user_activity_heatmap
+    get_user_activity_heatmap,
 )
 
 __all__ = [

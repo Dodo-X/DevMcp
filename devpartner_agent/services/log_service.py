@@ -15,17 +15,8 @@ from typing import Optional
 class LogService:
     """轻量日志服务 — 仅保留 pending log 机制"""
 
-    _instance: Optional["LogService"] = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
     def __init__(self):
-        if hasattr(self, "_initialized"):
-            return
-        self._initialized = True
+        pass
 
     def _get_data_dir(self) -> Path:
         """获取数据根目录"""
@@ -70,5 +61,11 @@ class LogService:
         return data
 
 
+# PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入
+_log_service_instance: Optional[LogService] = None
+
 def get_log_service() -> LogService:
-    return LogService()
+    global _log_service_instance
+    if _log_service_instance is None:
+        _log_service_instance = LogService()
+    return _log_service_instance

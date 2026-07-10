@@ -8,7 +8,7 @@
 - 文件内容中标记来源（source）
 - 增量监控：只处理新增/修改的文件
 - 自动调用 ConversationAnalyzer 进行分析
-- 可选 LLM 增强 Markdown 解析（llama-cpp-python）
+- 可选 LLM 增强 Markdown 解析（Ollama）
 - 支持多客户端兼容（CodeBuddy/Cursor/Windsurf/Trae/自定义）
 """
 
@@ -34,18 +34,8 @@ class FileWatcher:
     监控统一路径下的 Markdown 文件，自动解析对话内容。
     文件命名规范：YYYY-MM-DD.md（每日日志）或 conversation_*.md
     """
-
-    _instance: Optional["FileWatcher"] = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
+    
     def __init__(self):
-        if hasattr(self, "_initialized"):
-            return
-        self._initialized = True
 
         self._watch_path: Optional[Path] = None
         self._known_files: dict[str, float] = {}  # 文件名 → 最后修改时间
@@ -318,5 +308,11 @@ class FileWatcher:
         }
 
 
+# PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入
+_watcher_instance: Optional[FileWatcher] = None
+
 def get_watcher() -> FileWatcher:
-    return FileWatcher()
+    global _watcher_instance
+    if _watcher_instance is None:
+        _watcher_instance = FileWatcher()
+    return _watcher_instance
