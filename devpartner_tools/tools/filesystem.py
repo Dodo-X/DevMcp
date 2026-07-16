@@ -247,3 +247,42 @@ def search_content(directory: str, pattern: str, file_pattern: str = "*",
         }
     except Exception as e:
         return {"success": False, "results": [], "error": str(e)}
+
+
+def register_filesystem_tools(mcp):
+    """注册文件系统工具到 MCP"""
+
+    @mcp.tool()
+    def fs_read_file(file_path: str, encoding: str = "utf-8", max_size_mb: int = 10) -> str:
+        """读取文件内容。"""
+        import json
+        return json.dumps(read_file(file_path, encoding, max_size_mb), ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def fs_write_file(file_path: str, content: str, encoding: str = "utf-8",
+                       create_dirs: bool = True, backup: bool = True) -> str:
+        """写入文件内容。"""
+        import json
+        return json.dumps(write_file(file_path, content, encoding, create_dirs, backup), ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def fs_list_directory(dir_path: str = ".", max_depth: int = 3,
+                           include_hidden: bool = False, max_files: int = 500) -> str:
+        """列出目录结构。"""
+        import json
+        return json.dumps(list_directory(dir_path, max_depth, include_hidden, max_files), ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def fs_search_files(directory: str, pattern: str, recursive: bool = True,
+                         max_results: int = 100) -> str:
+        """搜索文件名匹配的文件。"""
+        import json
+        return json.dumps(search_files(directory, pattern, recursive, max_results), ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def fs_search_content(directory: str, pattern: str, file_pattern: str = "*",
+                           recursive: bool = True, case_sensitive: bool = False,
+                           context_lines: int = 2, max_results: int = 50) -> str:
+        """搜索文件内容。"""
+        import json
+        return json.dumps(search_content(directory, pattern, file_pattern, recursive, case_sensitive, context_lines, max_results), ensure_ascii=False, default=str)

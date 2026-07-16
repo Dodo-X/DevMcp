@@ -8,9 +8,6 @@ DevPartner Tools - 纯工具层（无状态）
 from .tools.filesystem import (
     read_file, write_file, list_directory, search_files, search_content
 )
-from .tools.git_operations import (
-    git_status, git_log, git_diff
-)
 from .tools.web_requests import (
     fetch_url, github_search_code, github_search_repositories, context7_search
 )
@@ -28,8 +25,6 @@ from .tools.growth_analytics import (
 __all__ = [
     # filesystem
     "read_file", "write_file", "list_directory", "search_files", "search_content",
-    # git
-    "git_status", "git_log", "git_diff",
     # web
     "fetch_url", "github_search_code", "github_search_repositories", "context7_search",
     # system

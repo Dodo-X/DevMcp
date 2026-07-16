@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "devpartner-agent"
-version = "7.4.0"
+version = "8.0.0"
 description = "DevPartner 智能管家层 - 有状态 MCP 工具包"
 requires-python = ">=3.10"
 dependencies = [

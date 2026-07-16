@@ -1,4 +1,4 @@
-﻿# DevPartner v7.3.0 - AI 驱动的开发者智能伴侣
+﻿# DevPartner v7.5 - AI 驱动的开发者智能伴侣
 
 <p align="center">
   <strong>基于本地 Ollama (Qwen3 等) 的全栈开发辅助系统</strong><br>
@@ -9,7 +9,13 @@
 
 ## ✨ 核心特性
 
-### 🤖 LLM 驱动架构 (v7.3.0)
+### 🏗️ Engine Pattern 架构 (v7.5)
+- **领域引擎模式**: 8 个独立 Engine 按业务域封装，server.py 仅 360 行薄壳入口
+- **统一装饰器**: `@mcp_tool_handler` 消除 74 个裸函数的重复 try/except + json.dumps
+- **关注点分离**: core/ 有状态引擎 vs services/ 无状态工具 vs routes/ HTTP 端点
+- **可插拔注册**: 每个 Engine 自带 `register_*_tools(mcp)` 函数，按需加载
+
+### 🤖 LLM 驱动架构 (v7.3.0+)
 - **零硬编码**: 所有数据分析由本地 Ollama 模型智能推理
 - **统一提示词工程**: 结构化 Prompt 确保输出精准可控
 - **双模式运行**: LLM 可用时智能分析，不可用时优雅降级
@@ -92,20 +98,25 @@ python -m server
 **预期输出**:
 ```
 ============================================================
-🚀 DevPartner v5.2 Agent Starting...
+  DevPartner v7.5 (Engine Pattern)
+  架构: server.py(薄壳) → core/*_engine.py(业务)
 ============================================================
-✅ 配置加载成功
-✅ 数据库连接正常
-✅ LLM 模型加载中... (首次需 10-30 秒)
-✅ LLM 服务就绪: Qwen3.5-9B-Q4_1
-🌐 Web Dashboard: http://localhost:8082
-📡 MCP Server: stdio mode
+
+  工具层: 32 个工具已注册
+  管家层: 已加载
+
+  启动模式: MCP 服务 (Streamable HTTP)
+  运行环境: 本地开发
+  监听端口: 7860
+  MCP端点: http://127.0.0.1:7860/mcp
+
+  待命状态: 等待 MCP 客户端连接...
 ============================================================
 ```
 
 ### Step 5: 验证安装
 
-访问 http://localhost:8082 查看 Dashboard，或运行测试：
+访问 http://localhost:7860/dashboard 查看 Dashboard，或运行测试：
 
 ```bash
 # 运行核心功能测试
@@ -121,94 +132,109 @@ python tests/test_llm_analyzer.py
 
 ```
 devPartner/
-├── README.md                      # ← 你在这里（主文档）
-├── CHANGELOG.md                   # 版本迭代记录
+├── README.md                          # ← 你在这里（主文档）
+├── CHANGELOG.md                       # 版本迭代记录
 │
-├── devpartner_agent/              # 🎯 核心 Agent 系统
-│   ├── core/                      #    ├─ 核心引擎层
-│   │   ├── llm_unified_analyzer.py #    │  ⭐ LLM 统一分析引擎
-│   │   ├── database.py             #    │  数据库操作
-│   │   ├── config.py               #    │  配置管理
-│   │   └── ...                     #    └─ 其他核心组件
+├── server.py                          # 🚀 MCP 薄壳入口 (~360行)
+│                                      #    4 个核心 @mcp.tool + 引擎注册
+│
+├── devpartner_agent/                  # 🎯 核心 Agent 系统
+│   ├── core/                          #    ├─ 核心引擎层 (有状态, 单例)
+│   │   ├── conversation_engine.py     #    │  ⭐ 对话引擎 (总分三步走)
+│   │   ├── knowledge_engine.py        #    │  📚 知识引擎 (图谱+检索)
+│   │   ├── system_engine.py           #    │  🔧 系统引擎 (诊断+清理)
+│   │   ├── daily_engine.py            #    │  📋 日报引擎 (总结+日志)
+│   │   ├── optimization_engine.py     #    │  🔄 优化引擎 (反馈+闭环)
+│   │   ├── memory_engine.py           #    │  🧠 记忆引擎 (跨会话)
+│   │   ├── iteration_engine.py        #    │  🧬 迭代引擎 (自我进化+规则+权限)
+│   │   ├── vault_engine.py            #    │  🏦 Vault 引擎 (归档+回调+任务)
+│   │   ├── llm_engine.py              #    │  🤖 LLM 推理引擎 (Ollama)
+│   │   ├── bootstrap.py               #    │  🏗️ 启动与初始化
+│   │   ├── decorators.py              #    │  🎯 @mcp_tool_handler 统一装饰器
+│   │   ├── database.py                #    │  💾 数据库操作
+│   │   └── config.py                  #    │  ⚙️ 配置管理
 │   │
-│   ├── services/                  #    ├─ 业务服务层
-│   │   ├── conversation_analyzer.py#    │  对话分析（v6.0 LLM驱动）
-│   │   ├── llm_service.py          #    │  LLM 推理服务
-│   │   ├── daily_summary.py        #    │  每日总结生成
-│   │   └── ...                     #    └─ 其他服务
+│   ├── routes/                        #    ├─ HTTP 路由层
+│   │   └── rest_api.py                #    │  REST API 端点 (/dashboard, /health, /api/*)
 │   │
-│   ├── skills/                    #    ├─ 技能模块
-│   │   ├── daily_summary.py        #    │  日报生成技能
-│   │   └── self_iterate.py         #    │  自我迭代技能
+│   ├── services/                      #    ├─ 无状态服务层
+│   │   ├── task_queue.py              #    │  异步任务队列
+│   │   ├── knowledge_graph.py         #    │  知识图谱服务
+│   │   ├── callback_registry.py       #    │  回调注册表
+│   │   ├── cleanup_scheduler.py       #    │  清理调度器
+│   │   ├── optimization_loop.py       #    │  优化闭环
+│   │   └── ...                        #    └─ 其他无状态服务
 │   │
-│   ├── config.yaml                #    Agent 配置文件
-│   ├── pyproject.toml             #    Agent 依赖
-│   └── requirements.txt           #    Agent 依赖列表
+│   ├── skills/                        #    ├─ 技能模块
+│   │   ├── daily_summary.py           #    │  日报生成技能
+│   │   └── self_iterate.py            #    │  自我迭代技能
+│   │
+│   └── config.yaml                    #    Agent 配置文件
 │
-├── devpartner_tools/              # 🔧 MCP 工具集
-│   └── tools/                     #    ├─ 工具实现
-│       ├── filesystem.py          #    │  文件系统操作
-│       ├── git_operations.py      #    │  Git 命令封装
-│       ├── web_requests.py        #    │  HTTP 请求
-│       └── ...                    #    └─ 其他工具
+├── devpartner_tools/                  # 🔧 MCP 工具集 (无状态, 21个纯工具)
+│   └── tools/
+│       ├── filesystem.py              #    文件系统操作 (5个工具)
+│       ├── git_operations.py          #    Git 命令封装 (3个工具)
+│       ├── web_requests.py            #    HTTP 请求 (3个工具)
+│       ├── system_utils.py            #    系统工具 (4个工具)
+│       └── growth_analytics.py        #    成长分析 (5个工具)
 │
-├── scripts/                       # 📜 运维 & 部署脚本
-│   ├── upgrade_to_v5.py           #    数据库升级工具
-│   ├── backfill_conversation.py   #    数据回填脚本
-│   └── *.sql                     #    SQL 升级脚本
-│
-├── tests/                         # 🧪 测试套件
-│   ├── test_llm_analyzer.py       #    LLM 引擎测试
-│   ├── test_v5_core.py            #    核心功能测试
-│   └── test_integration.py        #    集成测试
-│
-├── docs/                          # 📚 深度技术文档
-│   ├── architecture.md            #    系统架构设计
-│   ├── api-reference.md           #    API 接口文档
-│   └── troubleshooting.md         #    故障排查指南
-│
-├── data/                          # 💾 运行时数据（gitignore）
-│   ├── databases/                 #    SQLite 数据库
-│   ├── daily_logs/               #    历史日志
-│   ├── memories/                 #    对话记忆
-│   └── reports/                  #    生成的报告
-│
-├── deploy/                        # 🐳 部署配置
-│   ├── Dockerfile                 #    容器镜像定义
-│   ├── docker-compose.yml         #    编排配置
-│   └── .env.example              #    环境变量模板
-│
-├── server.py                      # 🚀 主入口文件
-├── pyproject.toml                 # 项目元数据
-├── requirements.txt              # 全局依赖
-└── .gitignore                    # Git 忽略规则
+├── tests/                             # 🧪 测试套件
+├── scripts/                           # 📜 运维脚本
+├── docs/                              # 📚 技术文档
+├── data/                              # 💾 运行时数据 (gitignore)
+├── deploy/                            # 🐳 部署配置
+├── pyproject.toml                     # 项目元数据
+└── requirements.txt                   # 全局依赖
 ```
 
 ### 📂 模块职责说明
 
-#### `devpartner_agent/` - 大脑 🧠
-**定位**: 核心业务逻辑，承载所有智能分析能力  
+#### `server.py` - 薄壳入口 🚀
+**定位**: MCP 服务入口，仅负责注册工具和启动服务  
+**核心原则**: 不包含任何业务逻辑，所有调用委托给 Engine  
+**包含**:
+- 4 个核心 `@mcp.tool`: `start_conversation`, `record_step`, `finalize_conversation`, `question_with_context`
+- `_register_tool_layer()`: 注册工具层 21 个纯工具
+- `_register_agent_engines()`: 注册 8 个领域引擎
+- `_register_rest_routes()`: 注册 HTTP REST 路由
+
+#### `devpartner_agent/core/` - 核心引擎层 🧠
+**定位**: 有状态的业务引擎，单例模式，线程安全  
+**设计原则**: 每个 Engine 对应一个业务域，自带 `register_*_tools(mcp)` 函数
+
+| Engine | 职责 | MCP 工具数 |
+|--------|------|-----------|
+| ConversationEngine | 对话生命周期 (start→record→finalize) | 4 (在 server.py 直接注册) |
+| KnowledgeEngine | 知识点 + 图谱 + 检索 | 10 |
+| SystemEngine | 诊断 + 清理 + LLM状态 + 热重载 | 9 |
+| DailyEngine | 日报 + 日志 + 工作数据 | 9 |
+| OptimizationEngine | 反馈 + 优化闭环 + 检查 | 5 |
+| MemoryEngine | 跨会话记忆 + 对话检索 | 3 |
+| IterationEngine | 自我迭代 + 规则 + 权限 + Git + 并行 | 27 |
+| VaultEngine | 归档 + 回调 + 任务状态 | 8 |
+
+#### `devpartner_agent/services/` - 无状态服务层 ⚙️
+**定位**: 无状态的辅助工具，被 Engine 调用  
 **关键组件**:
-- `core/llm_unified_analyzer.py`: ⭐ **LLM 统一引擎**（v6.0 新增）
-- `services/conversation_analyzer.py`: 对话深度分析
-- `services/llm_service.py`: Ollama 本地推理服务
-- `services/daily_summary.py`: 智能日报生成
+- `task_queue.py`: 异步任务队列 (FIFO + 对话级互斥)
+- `knowledge_graph.py`: 知识图谱构建与查询
+- `callback_registry.py`: 回调通知注册表
+- `cleanup_scheduler.py`: 数据清理调度
+- `optimization_loop.py`: 优化闭环处理
 
-**何时修改**: 
-- 新增分析场景 → 修改 Prompt 或添加分析方法
-- 调整业务逻辑 → 修改 services 层
+#### `devpartner_agent/routes/` - HTTP 路由层 🌐
+**定位**: REST API 端点，从 server.py 提取  
+**端点**:
+- `/dashboard` - 运维面板
+- `/health` - 健康检查
+- `/api/growth/*` - 成长分析 API
+- `/api/system/*` - 系统状态 API
+- `/api/projects/*` - 项目知识 API
 
-#### `devpartner_tools/` - 手部 👐
-**定位**: MCP 工具集，提供具体的操作能力  
-**关键组件**:
-- `tools/filesystem.py`: 读写文件、搜索内容
-- `tools/git_operations.py`: Git 操作（commit/branch/PR）
-- `tools/web_requests.py`: HTTP API 调用
-- `tools/reasoning.py`: 逻辑推理增强
-
-**何时修改**:
-- 新增工具 → 在 tools/ 下新建文件
-- 修改工具行为 → 编辑对应工具文件
+#### `devpartner_tools/` - 工具层 🔧
+**定位**: 无状态纯工具，不依赖 Agent 层  
+**设计原则**: 每个工具文件自带 `register_*_tools(mcp)` 函数
 
 #### `scripts/` - 运维工具 🛠️
 **定位**: 一次性运维任务，非核心业务  
@@ -238,55 +264,49 @@ devPartner/
 
 ### 基础用法
 
-#### 1️⃣ 对话记录与分析
+#### 1️⃣ 对话记录与分析 (总分三步走)
 
 ```python
-from devpartner_agent.services.conversation_analyzer import get_analyzer
+from devpartner_agent.core.conversation_engine import get_conversation_engine
 
-analyzer = get_analyzer()
+engine = get_conversation_engine()
 
-# 记录一段对话
-result = analyzer.analyze_and_store(
-    content="我在用 React 开发前端项目...",
-    source="trae",
-    client="vscode"
+# 第一步: 开始对话
+result = engine.start_conversation(
+    client="trae", topic="React前端开发", task_type="development"
+)
+conv_id = result["conversation_id"]
+
+# 第二步: 记录步骤
+engine.record_step(
+    conversation_id=conv_id, step_number=1,
+    step_name="创建组件", step_type="implementation",
+    step_input='{"file": "src/App.tsx", "action": "create"}'
 )
 
-print(f"识别领域: {[d['domain'] for d in result['skill_domains']]}")
-print(f"复杂度评估: {result['complexity']}")
-print(f"置信度: {result['confidence']}")
+# 第三步: 结束对话 (自动触发 LLM 分析)
+summary = engine.finalize_conversation(conversation_id=conv_id)
+print(f"总结: {summary['summary']}")
 ```
 
 #### 2️⃣ 生成每日总结
 
 ```python
-from devpartner_agent.core.llm_unified_analyzer import get_unified_analyzer
-from devpartner_agent.skills.daily_summary import get_daily_work_data
+from devpartner_agent.core.daily_engine import get_daily_engine
 
-analyzer = get_unified_analyzer()
-
-# 获取今日工作数据
-work_data = get_daily_work_data()  # 从数据库读取
-
-# LLM 智能生成日报
-report = analyzer.generate_daily_summary(work_data)
-
-if report:
-    print(f"📊 今日摘要: {report['summary']}")
-    print(f"💡 明日计划: {report['tomorrow_plan']}")
+engine = get_daily_engine()
+report = engine.get_daily_summary(date="2026-07-13")
+print(f"📊 今日摘要: {report.get('summary', '')}")
 ```
 
 #### 3️⃣ 触发自我优化
 
 ```python
-from devpartner_agent.skills.self_iterate import execute_self_iterate
+from devpartner_agent.core.iteration_engine import get_iteration_engine
 
-# 执行完整的自我迭代流程
-result = await execute_self_iterate(mode="auto")
-
-print(f"生成建议: {len(result['suggestions_generated'])} 条")
-print(f"应用改进: {len(result['improvements_applied'])} 个")
-print(f"报告:\n{result['report']}")
+engine = get_iteration_engine()
+result = engine.self_iterate(mode="auto")
+print(f"生成建议: {len(result.get('suggestions_generated', []))} 条")
 ```
 
 #### 4️⃣ 使用 MCP 工具
@@ -295,20 +315,29 @@ print(f"报告:\n{result['report']}")
 
 ```json
 {
-  "tool": "read_file",
+  "tool": "start_conversation",
   "params": {
-    "path": "./src/main.py"
+    "client": "trae",
+    "topic": "React前端开发",
+    "task_type": "development"
   }
 }
 ```
 
-**可用工具列表**:
-- `read_file` / `write_file` - 文件读写
-- `search_content` - 内容搜索
-- `execute_system_command` - 执行命令
-- `git_status` / `git_commit` - Git 操作
-- `fetch_url` - HTTP 请求
-- `record_dialogue` - 记录对话
+**核心 MCP 工具 (4个)**:
+- `start_conversation` - 开始对话
+- `record_step` - 记录步骤
+- `finalize_conversation` - 结束对话
+- `question_with_context` - 基于上下文提问
+
+**领域 MCP 工具 (75+个)**:
+- 知识域: `list_knowledge_points`, `search_knowledge`, `build_knowledge_graph` 等
+- 系统域: `get_system_health`, `system_diagnose`, `hot_reload` 等
+- 日报域: `get_daily_summary`, `read_daily_log`, `list_logs` 等
+- 优化域: `process_user_feedback`, `check_optimization_needed` 等
+- 记忆域: `get_memory`, `update_memory`, `search_conversations` 等
+- 迭代域: `self_iterate`, `self_upgrade`, `get_rules`, `git_auto_commit` 等
+- Vault域: `archive_conversation`, `register_callback`, `get_task_status` 等
 
 ---
 
@@ -360,7 +389,7 @@ llm:
 
 ### Web Dashboard
 
-启动后访问: **http://localhost:8082**
+启动后访问: **http://localhost:7860/dashboard**
 
 功能概览:
 - 📈 实时统计（对话数、活跃用户、工具调用）
@@ -397,6 +426,38 @@ python scripts/check_db_integrity.py
 ---
 
 ## 🔄 版本迭代记录
+
+### v7.5.0 (2026-07-13) - Engine Pattern 架构重构 ⭐
+**重大变更**:
+- ✅ server.py 从 4240 行 → 360 行薄壳入口（减少 91%）
+- ✅ 8 个领域引擎按业务域封装 (core/*_engine.py)
+- ✅ `@mcp_tool_handler` 统一装饰器消除样板代码
+- ✅ HTTP REST 路由提取到 `routes/rest_api.py`
+- ✅ 启动逻辑提取到 `core/bootstrap.py`
+- ✅ 工具层添加 `register_*_tools(mcp)` 注册函数
+- ✅ 删除废弃文件: `conversation_manager.py`, `conversation_analyzer.py`, `log_service.py`
+
+**新增文件**:
+- `core/conversation_engine.py` - 对话引擎 (已有，补充 register 函数)
+- `core/knowledge_engine.py` - 知识引擎
+- `core/system_engine.py` - 系统引擎
+- `core/daily_engine.py` - 日报引擎
+- `core/optimization_engine.py` - 优化引擎
+- `core/memory_engine.py` - 记忆引擎
+- `core/iteration_engine.py` - 迭代引擎
+- `core/vault_engine.py` - Vault 引擎
+- `core/bootstrap.py` - 启动与初始化
+- `core/decorators.py` - 统一装饰器
+- `routes/rest_api.py` - REST API 路由
+
+**架构对比**:
+| 维度 | v7.3 | v7.5 |
+|------|------|------|
+| server.py 行数 | 4240 | 360 |
+| 业务逻辑位置 | 散落在 server.py | 集中在 core/*_engine.py |
+| MCP 工具注册 | 内联在 server.py | 每个 Engine 自带 register 函数 |
+| HTTP 路由 | 混在 server.py | 独立 routes/rest_api.py |
+| 启动逻辑 | 内嵌 server.py | 独立 core/bootstrap.py |
 
 详见 [CHANGELOG.md](./CHANGELOG.md)
 

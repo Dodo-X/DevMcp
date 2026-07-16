@@ -756,3 +756,32 @@ def _calculate_learning_efficiency(db) -> float:
     
     except Exception:
         return 0.0
+
+
+def register_growth_analytics_tools(mcp):
+    """注册成长分析工具到 MCP"""
+
+    @mcp.tool()
+    def get_user_growth_overview_tool() -> str:
+        """获取用户成长概览。"""
+        return get_user_growth_overview()
+
+    @mcp.tool()
+    def get_system_evolution_stats_tool() -> str:
+        """获取系统进化统计。"""
+        return get_system_evolution_stats()
+
+    @mcp.tool()
+    def get_user_skill_radar_tool() -> str:
+        """获取用户技能雷达图数据。"""
+        return get_user_skill_radar()
+
+    @mcp.tool()
+    def get_learning_timeline_tool(limit: int = 20) -> str:
+        """获取学习时间线。"""
+        return get_learning_timeline(limit)
+
+    @mcp.tool()
+    def get_user_activity_heatmap_tool() -> str:
+        """获取用户活跃度热力图数据。"""
+        return get_user_activity_heatmap()

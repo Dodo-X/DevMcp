@@ -107,3 +107,26 @@ def context7_search(query: str) -> Dict[str, Any]:
         return {"success": False, "results": [], "error": "Node.js/npx 未安装"}
     except subprocess.TimeoutExpired:
         return {"success": False, "results": [], "error": "Context7 超时"}
+
+
+def register_web_request_tools(mcp):
+    """注册 Web 请求工具到 MCP"""
+
+    @mcp.tool()
+    def fetch_url_tool(url: str, method: str = "GET", headers: str = "{}", body: str = "", timeout: int = 30) -> str:
+        """发起 HTTP 请求。"""
+        import json as _json
+        h = _json.loads(headers) if isinstance(headers, str) else headers
+        return _json.dumps(fetch_url(url, method, h, body, timeout), ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def github_search_code_tool(query: str) -> str:
+        """搜索 GitHub 代码。"""
+        import json as _json
+        return _json.dumps(github_search_code(query), ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def github_search_repositories_tool(query: str) -> str:
+        """搜索 GitHub 仓库。"""
+        import json as _json
+        return _json.dumps(github_search_repositories(query), ensure_ascii=False, default=str)

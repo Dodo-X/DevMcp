@@ -48,37 +48,58 @@ if errorlevel 1 (
 )
 
 REM ============================================================
-REM 步骤 3: 检查 Ollama 服务（v7.3.0 核心：本地 Ollama HTTP API）
+REM 步骤 3: 检查并自动启动 Ollama 服务
 REM ============================================================
 echo.
 echo [步骤 3/4] 检查 Ollama 服务...
 echo   📍 Ollama 地址: %OLLAMA_BASE_URL%
 
+REM 设置 Ollama 并行请求数
+if not defined OLLAMA_NUM_PARALLEL set OLLAMA_NUM_PARALLEL=2
+
 python -c "import urllib.request,os,sys; sys.exit(0 if urllib.request.urlopen((os.environ.get('OLLAMA_BASE_URL') or 'http://localhost:11434')+'/api/tags',timeout=3) else 1)" 2>nul
 set CHECK_RESULT=%errorlevel%
 
 if %CHECK_RESULT% equ 0 (
-    echo   ✅ Ollama 服务可连接
+    echo   ✅ Ollama 服务已运行
 ) else (
-    echo   ⚠️ 未检测到 Ollama 服务！
+    echo   ⚠️ 未检测到 Ollama 服务，正在自动启动...
     echo.
-    echo   请选择操作：
-    echo     1. 继续启动（LLM 推理不可用，自动降级到规则引擎）
-    echo     2. 退出并查看 Ollama 安装指南
-    echo.
-    choice /C 12 /N /M "请选择 [1-2]: "
-    if errorlevel 2 (
+    REM 检查 ollama 命令是否可用
+    where ollama >nul 2>&1
+    if errorlevel 1 (
+        echo   ❌ 未找到 ollama 命令
+        echo   📥 请先安装 Ollama: https://ollama.com/download
         echo.
-        echo   📥 Ollama 安装方法：
-        echo     方式一: 访问 https://ollama.com/download 安装并启动 Ollama
-        echo     方式二: ollama pull qwen3   （拉取推理模型）
-        echo     方式三: 设置 OLLAMA_BASE_URL 指向远程 Ollama
+        echo   选择操作：
+        echo     1. 继续启动（无 LLM 推理，降级到规则引擎）
+        echo     2. 退出
         echo.
-        pause
-        exit /b 0
+        choice /C 12 /N /M "请选择 [1-2]: "
+        if errorlevel 2 exit /b 0
+        echo   ⚠️ 将以降级模式启动
+    ) else (
+        REM 启动 Ollama 后台服务
+        start "" /B ollama serve >nul 2>&1
+        echo   ✅ ollama serve 已启动，等待就绪...
+        REM 等待 Ollama 就绪（最多等待 30 秒）
+        set /a WAIT_COUNT=0
+        :wait_ollama
+        python -c "import urllib.request,os,sys; sys.exit(0 if urllib.request.urlopen((os.environ.get('OLLAMA_BASE_URL') or 'http://localhost:11434')+'/api/tags',timeout=3) else 1)" 2>nul
+        if %errorlevel% equ 0 (
+            echo   ✅ Ollama 已就绪
+            goto ollama_ready
+        )
+        set /a WAIT_COUNT+=1
+        if %WAIT_COUNT% geq 15 (
+            echo   ⚠️ Ollama 启动超时，将以降级模式运行
+            goto ollama_ready
+        )
+        timeout /t 2 /nobreak >nul
+        goto wait_ollama
     )
-    echo   ⚠️ 将以降级模式启动（无 LLM 推理能力，规则引擎兜底）
 )
+:ollama_ready
 
 REM ============================================================
 REM 步骤 4: 启动服务

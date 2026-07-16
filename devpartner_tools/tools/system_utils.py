@@ -122,3 +122,30 @@ def validate_path(path: str) -> Dict[str, Any]:
         result["error"] = "不可读"
     
     return result
+
+def register_system_tools(mcp):
+    """注册系统工具到 MCP"""
+
+    @mcp.tool()
+    def execute_system_command_tool(command: str, cwd: str = ".", timeout: int = 60) -> str:
+        """执行系统命令。"""
+        import json as _json
+        return _json.dumps(execute_system_command(command, cwd, timeout), ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def detect_client_tool(workspace_path: str = "") -> str:
+        """检测客户端环境。"""
+        import json as _json
+        return _json.dumps(detect_client(workspace_path), ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def environment_scan_tool() -> str:
+        """扫描运行环境。"""
+        import json as _json
+        return _json.dumps(environment_scan(), ensure_ascii=False, default=str)
+
+    @mcp.tool()
+    def validate_path_tool(path: str) -> str:
+        """验证路径安全性。"""
+        import json as _json
+        return _json.dumps(validate_path(path), ensure_ascii=False, default=str)

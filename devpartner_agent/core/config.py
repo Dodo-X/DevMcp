@@ -57,8 +57,8 @@ def get_project_version() -> str:
 class ServerConfig:
     """服务器配置"""
     host: str = "0.0.0.0"
-    port: int = 8082
-    transport: str = "stdio"
+    port: int = 7860
+    transport: str = "streamable-http"
 
 
 @dataclass
@@ -71,10 +71,6 @@ class DataConfig:
     @property
     def databases_dir(self) -> str:
         return f"{self.root_dir}/databases"
-
-    @property
-    def daily_logs_dir(self) -> str:
-        return f"{self.root_dir}/daily_logs"
 
     @property
     def logs_dir(self) -> str:
@@ -118,12 +114,8 @@ class DialogueServiceConfig:
 
 @dataclass
 class EvolutionServiceConfig:
-    """进化引擎配置"""
+    """进化引擎配置（v8.2: 保留兼容，仅 known_mcp_servers 仍在使用）"""
     enabled: bool = True
-    max_changes_per_day: int = 3
-    require_approval: bool = True
-    backup_before_change: bool = True
-    auto_discover_interval_hours: int = 24
     known_mcp_servers: list[str] = field(default_factory=lambda: [
         "@modelcontextprotocol/server-filesystem",
         "@modelcontextprotocol/server-github",
@@ -136,12 +128,18 @@ class EvolutionServiceConfig:
 
 @dataclass
 class DataLifecycleConfig:
-    """数据生命周期管理"""
+    """数据生命周期管理（v8.0 增强：分层归档策略）"""
     log_retention_days: int = 90
     db_cleanup_days: int = 90
     auto_cleanup: bool = True
-    auto_cleanup_interval_hours: int = 24  # 自动清理间隔（小时）
+    auto_cleanup_interval_hours: int = 24
     backup_before_cleanup: bool = True
+    conversation_hot_days: int = 30        # 热数据：最近30天，完整保留
+    conversation_warm_days: int = 180      # 温数据：30-180天，保留摘要+信号，清理steps详情
+    conversation_cold_days: int = 365      # 冷数据：180-365天，仅保留archived_conversations摘要
+    archive_before_cleanup: bool = True    # 清理前先归档到archived_conversations
+    ensure_md_exported_before_archive: bool = True  # 归档前确保MD已导出
+    pending_analyses_max_retry: int = 10   # pending_analyses 最大重试次数，超过则标记failed
 
 
 @dataclass
@@ -178,6 +176,7 @@ class LLMConfig:
     # ── Ollama 连接 ──
     ollama_model: str = "qwen3"                        # Ollama 模型名称（ollama list 查看）
     ollama_timeout: int = 120                          # 推理超时（秒）
+    ollama_num_parallel: int = 2                       # Ollama 并行请求数（OLLAMA_NUM_PARALLEL）
     
     # ── 生成参数 ──
     max_tokens: int = 2048                             # 最大生成 token 数
@@ -198,6 +197,8 @@ class LLMConfig:
     enhance_file_parsing: bool = True                  # 文件解析增强
     enhance_daily_summary: bool = True                 # LLM 智能日报生成 ⭐ 强烈推荐
     enhance_self_improvement: bool = True              # LLM 自我改进建议 ⭐ 推荐
+    enhance_profile_merge: bool = True                 # 每日用户画像合并 ⭐ v8.0
+    enhance_system_merge: bool = True                  # 每日系统认知合并 ⭐ v8.0
 
 
 @dataclass
@@ -274,7 +275,7 @@ class ConfigManager:
         # data
         if "data" in data:
             d = data["data"]
-            for k in ["root_dir", "databases_dir", "daily_logs_dir",
+            for k in ["root_dir", "databases_dir",
                        "logs_dir", "logs_archive_dir",
                        "memories_dir", "backups_dir", "reports_dir", "temp_dir"]:
                 if k in d:
@@ -322,6 +323,7 @@ class ConfigManager:
             "DEVPARTNER_LOG_RETENTION_DAYS": ("data_lifecycle", "log_retention_days", int),
             "DEVPARTNER_LLM_ENABLED": ("llm", "enabled", lambda v: v.lower() in ("1", "true", "yes")),
             "DEVPARTNER_LLM_MODEL": ("llm", "ollama_model", str),
+            "DEVPARTNER_LLM_NUM_PARALLEL": ("llm", "ollama_num_parallel", int),
         }
 
         for env_key, target in env_map.items():
@@ -340,7 +342,6 @@ class ConfigManager:
         dirs = [
             config.data.root_dir,
             config.data.databases_dir,
-            config.data.daily_logs_dir,
             config.data.logs_dir,
             config.data.logs_archive_dir,
             config.data.memories_dir,

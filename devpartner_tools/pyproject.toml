@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "devpartner-tools"
-version = "7.3.0"
+version = "7.5.0"
 description = "DevPartner 纯工具层 - 无状态 MCP 工具包"
 requires-python = ">=3.10"
 dependencies = [

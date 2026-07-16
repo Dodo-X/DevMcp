@@ -9,7 +9,7 @@ v5.0 变更：
   - ★ 自动创建三张新表 + 补全缺失列，无需外部 SQL 脚本
 
 v4.3 变更：
-  - ★ FK 外键约束：conversation_archive / optimization_feedback / evolution_log /
+  - ★ FK 外键约束：optimization_feedback / evolution_log /
     improvement_log 增加 FOREIGN KEY(conversations_id) REFERENCES conversations(id)
   - ★ conversations 表新增 analyzed 列（标记是否完成用户画像分析）
   - ★ 数据完整性保障：insert 后校验关键字段非空 + 日志埋点记录写入成功率
@@ -97,6 +97,10 @@ class Database:
                 self._migrate_v60()
                 # v7.4: 知识库系统扩展 — type/aliases/source_session/source_step/auto_synced
                 self._migrate_v74()
+                # v8.0: 多系统隔离 + 用户画像 + 系统认知片段
+                self._migrate_v80()
+                # v8.1: 系统成长分析表（growth_analysis）
+                self._migrate_v81()
                 # 记录当前 schema 版本
                 self._set_schema_version(current_version)
                 print(f"[DB] Schema 迁移完成 → {current_version}")
@@ -399,6 +403,58 @@ class Database:
         """)
 
         # ════════════════════════════════════════════════════════════════
+        # 表: growth_analysis — 系统成长分析表（v8.1.0）
+        # 用途: 月报触发，汇总系统优化建议，经 Dashboard 人工审核后执行
+        #       取代原 conversation_engine 中的 optimization_feedback 写入流程
+        # 字段:
+        #   id               INTEGER  自增主键
+        #   timestamp        TEXT     创建时间
+        #   analysis_type    TEXT     分析类型（prompt_optimize/analysis_add/knowledge_gap/user_profile_enhance）
+        #   title            TEXT     标题
+        #   description      TEXT     问题描述
+        #   suggestion       TEXT     优化建议
+        #   related_data     JSON     关联数据（对话ID、Prompt模板等）
+        #   priority         TEXT     优先级（high/medium/low）
+        #   status           TEXT     审核状态（pending/approved/rejected）
+        #   reviewer         TEXT     审核人
+        #   review_comment   TEXT     审核意见/拒绝原因
+        #   reviewed_at      TEXT     审核时间
+        #   applied_at       TEXT     应用时间
+        #   source           TEXT     来源（monthly_report/daily_report/manual）
+        #   source_period    TEXT     分析周期（如 "2026-07"）
+        #   conversations_id INTEGER  关联 conversations.id（FK）
+        # ════════════════════════════════════════════════════════════════
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS growth_analysis (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                analysis_type TEXT NOT NULL,
+                title TEXT,
+                description TEXT,
+                suggestion TEXT,
+                related_data JSON DEFAULT '{}',
+                priority TEXT DEFAULT 'medium',
+                status TEXT DEFAULT 'pending',
+                reviewer TEXT,
+                review_comment TEXT,
+                reviewed_at TEXT,
+                applied_at TEXT,
+                source TEXT DEFAULT 'monthly_report',
+                source_period TEXT,
+                conversations_id INTEGER,
+                FOREIGN KEY (conversations_id) REFERENCES conversations(id)
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_growth_analysis_status
+            ON growth_analysis(status)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_growth_analysis_source_period
+            ON growth_analysis(source_period)
+        """)
+
+        # ════════════════════════════════════════════════════════════════
         # 表: conversation_steps — 会话步骤表（v5.0 步骤化异步处理核心表）
         # 用途: 总分总架构的「分」环节，记录对话中每个子任务的执行状态和分析结果
         # 状态机: pending → in_progress → completed/failed/timeout → orphaned（兜底）
@@ -479,10 +535,10 @@ class Database:
         #   knowledge_id          TEXT     全局唯一知识点ID
         #   title                 TEXT     知识点标题
         #   content               TEXT     知识点详细内容
-        #   category              TEXT     分类（step_extracted/knowledge_graph/manual）
+        #   category              TEXT     分类（step_extracted/manual）
         #   domain                TEXT     技术领域（Python/SQL/...）
         #   tags                  JSON     标签列表
-        #   source_type           TEXT     来源类型（step/finalize/manual/knowledge_graph/system）
+        #   source_type           TEXT     来源类型（step/finalize/manual/system）
         #   source_id             TEXT     来源ID（step_id 或 conversation_id）
         #   confidence            REAL     置信度（0~1）
         #   difficulty            TEXT     难度（easy/medium/hard）
@@ -521,10 +577,7 @@ class Database:
                 type TEXT NOT NULL DEFAULT 'skill' CHECK(type IN ('skill','business')),
                 aliases JSON DEFAULT '[]',
                 source_session_id TEXT,
-                source_step_id TEXT,
-                auto_synced_to_md INTEGER DEFAULT 1,
-                md_file_path TEXT DEFAULT '',
-                md_modified_at TEXT DEFAULT ''
+                source_step_id TEXT
             )
         """)
         cursor.execute("""
@@ -624,6 +677,190 @@ class Database:
             ON task_queue(status, next_retry_at)
         """)
 
+        # ════════════════════════════════════════════════════════════════
+        # 表: connected_systems — 对接系统注册表（v8.0 多系统隔离）
+        # 用途: 记录通过 MCP 对接的不同系统（Trae/Cursor/VSCode/CLI等）
+        # 字段:
+        #   system_id          TEXT     系统唯一标识（主键，如 'trae_main'）
+        #   system_type        TEXT     系统类型（trae/cursor/vscode/cli）
+        #   display_name       TEXT     显示名称
+        #   project_path       TEXT     项目根路径
+        #   tech_stack         JSON     技术栈信息
+        #   architecture       JSON     架构信息
+        #   business_domains   JSON     业务领域信息
+        #   maturity           TEXT     成熟度（unknown/early/growing/mature）
+        #   first_connected    TEXT     首次连接时间
+        #   last_active        TEXT     最近活跃时间
+        #   conversation_count INTEGER  对话总数
+        #   metadata           JSON     扩展元数据
+        # ════════════════════════════════════════════════════════════════
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS connected_systems (
+                system_id TEXT PRIMARY KEY,
+                system_type TEXT NOT NULL,
+                display_name TEXT,
+                project_path TEXT,
+                tech_stack JSON DEFAULT '[]',
+                architecture JSON DEFAULT '{}',
+                business_domains JSON DEFAULT '[]',
+                maturity TEXT DEFAULT 'unknown',
+                first_connected TEXT NOT NULL,
+                last_active TEXT NOT NULL,
+                conversation_count INTEGER DEFAULT 0,
+                metadata JSON DEFAULT '{}'
+            )
+        """)
+
+        # ════════════════════════════════════════════════════════════════
+        # 表: user_profile — 全局用户画像表（v8.0 每日画像合并）
+        # 用途: 存储从多轮对话行为信号中提取的用户画像维度数据
+        # 字段:
+        #   id                INTEGER  自增主键
+        #   dimension         TEXT     画像维度（如 skill_level/communication_style/...）
+        #   value             TEXT     维度值
+        #   confidence        REAL     置信度（0~1）
+        #   evidence          TEXT     证据来源描述
+        #   first_observed    TEXT     首次观察时间
+        #   last_observed     TEXT     最近观察时间
+        #   observation_count INTEGER  观察次数
+        #   trend             TEXT     趋势（stable/rising/declining）
+        #   updated_at        TEXT     更新时间
+        # ════════════════════════════════════════════════════════════════
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user_profile (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                dimension TEXT NOT NULL,
+                value TEXT NOT NULL,
+                confidence REAL DEFAULT 0.5,
+                evidence TEXT,
+                first_observed TEXT NOT NULL,
+                last_observed TEXT NOT NULL,
+                observation_count INTEGER DEFAULT 1,
+                trend TEXT DEFAULT 'stable',
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(dimension)
+            )
+        """)
+
+        # ════════════════════════════════════════════════════════════════
+        # 表: system_context_fragments — 系统认知片段表（v8.0 渐进式系统认知）
+        # 用途: 每次对话结束时提取的系统认知片段，每日合并为全局项目画像
+        # 字段:
+        #   id                  INTEGER  自增主键
+        #   conversation_id     TEXT     来源对话ID
+        #   system_id           TEXT     系统标识（默认 'default'）
+        #   tech_signals        JSON     技术栈信号
+        #   architecture_signals JSON    架构信号
+        #   business_signals    JSON     业务领域信号
+        #   new_discoveries     JSON     新发现
+        #   confidence          REAL     置信度（0~1）
+        #   observed_at         TEXT     观察时间
+        #   merged              INTEGER  是否已合并到全局画像（0/1）
+        # ════════════════════════════════════════════════════════════════
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS system_context_fragments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id TEXT NOT NULL,
+                system_id TEXT NOT NULL DEFAULT 'default',
+                tech_signals JSON DEFAULT '[]',
+                architecture_signals JSON DEFAULT '[]',
+                business_signals JSON DEFAULT '[]',
+                new_discoveries JSON DEFAULT '[]',
+                confidence REAL DEFAULT 0.5,
+                observed_at TEXT NOT NULL,
+                merged INTEGER DEFAULT 0
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_scf_system_id
+            ON system_context_fragments(system_id)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_scf_merged
+            ON system_context_fragments(merged)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_scf_observed
+            ON system_context_fragments(observed_at)
+        """)
+
+        # ════════════════════════════════════════════════════════════════
+        # 表: pending_analyses — 待分析数据表（v8.0 LLM 不可用时的数据暂存）
+        # 用途: LLM 不可用时，将原始分析数据暂存于此表，标记缺失的分析维度，
+        #        下次定时任务优先清算历史欠账后再处理当日数据
+        # 字段:
+        #   id                INTEGER  自增主键
+        #   analysis_type     TEXT     分析类型（daily_profile_merge/daily_system_merge）
+        #   source_date       TEXT     原始数据所属日期（YYYY-MM-DD）
+        #   system_id         TEXT     系统标识（system_merge 时使用）
+        #   raw_data          JSON     原始分析输入数据（行为信号/认知片段等）
+        #   missing_dimensions JSON    缺失的分析维度列表
+        #   retry_count       INTEGER  重试次数
+        #   created_at        TEXT     创建时间
+        #   last_attempted_at TEXT     最近一次尝试时间
+        #   status            TEXT     状态（pending/retrying/completed/failed）
+        #   error_message     TEXT     最近一次失败原因
+        # ════════════════════════════════════════════════════════════════
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS pending_analyses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                analysis_type TEXT NOT NULL,
+                source_date TEXT NOT NULL,
+                system_id TEXT DEFAULT 'default',
+                raw_data JSON NOT NULL DEFAULT '{}',
+                missing_dimensions JSON DEFAULT '[]',
+                retry_count INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                last_attempted_at TEXT,
+                status TEXT DEFAULT 'pending',
+                error_message TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_pa_status
+            ON pending_analyses(status)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_pa_type_date
+            ON pending_analyses(analysis_type, source_date)
+        """)
+
+        # ════════════════════════════════════════════════════════════════
+        # 表: archived_conversations — 已归档对话摘要表（v8.0 数据生命周期）
+        # 用途: 对话数据归档后，仅保留摘要信息，原始 steps/detail 被清理
+        #        归档条件：已分析(analyzed=1) + 已总结(summary_generated=1) + 超过保留期
+        #        归档后 MD 文件为唯一完整数据源，SQLite 仅保留统计摘要
+        # 字段:
+        #   id                INTEGER  自增主键
+        #   conversation_id   TEXT     原对话ID（唯一）
+        #   system_id         TEXT     系统标识
+        #   topic             TEXT     对话主题
+        #   task_type         TEXT     任务类型
+        #   step_count        INTEGER  原始步骤数
+        #   knowledge_count   INTEGER  提取的知识点数
+        #   key_summary       TEXT     LLM 生成的对话摘要（200字以内）
+        #   archived_at       TEXT     归档时间
+        #   original_created  TEXT     原始创建时间
+        # ════════════════════════════════════════════════════════════════
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS archived_conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id TEXT UNIQUE NOT NULL,
+                system_id TEXT DEFAULT 'default',
+                topic TEXT,
+                task_type TEXT,
+                step_count INTEGER DEFAULT 0,
+                knowledge_count INTEGER DEFAULT 0,
+                key_summary TEXT,
+                archived_at TEXT NOT NULL,
+                original_created TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_arch_conv_date
+            ON archived_conversations(archived_at)
+        """)
+
         # ── 迁移：为已有 conversations 表补列 ──
         # 注意：SQLite ALTER TABLE ADD COLUMN 不支持 UNIQUE 约束，
         # conversation_id 的唯一性由应用层保证
@@ -642,6 +879,10 @@ class Database:
             ("updated_at", "TEXT DEFAULT CURRENT_TIMESTAMP"),  # v5.0
             ("completed_at", "TEXT"),                   # v5.0
             ("summary_generated", "INTEGER DEFAULT 0"),  # v7.0: 总结是否已生成（清理前置校验）
+            ("system_id", "TEXT DEFAULT 'default'"),       # v8.0: 多系统隔离标识
+            ("behavior_signals", "JSON DEFAULT '{}'"),     # v8.0: 行为信号（规则化提取）
+            ("user_raw_input", "TEXT DEFAULT ''"),         # v8.0: 用户原始输入文本
+            ("archive_tier", "TEXT DEFAULT 'hot'"),        # v8.0: 归档层级 hot/warm/cold/archived，避免重复扫描
         ]:
             try:
                 cursor.execute(f"ALTER TABLE conversations ADD COLUMN {col} {col_def}")
@@ -802,8 +1043,8 @@ class Database:
         except Exception:
             pass
 
-        # 4. 删除其他死表
-        for dead_table in ["rule_executions", "knowledge_graph", "mindmaps"]:
+        # 4. 删除其他死表（v8.0: conversation_archive 不再使用，数据已迁移至 conversations + conversation_steps）
+        for dead_table in ["rule_executions", "knowledge_graph", "mindmaps", "conversation_archive"]:
             try:
                 cursor.execute(
                     "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
@@ -1310,8 +1551,7 @@ class Database:
         2. aliases JSON — 别名列表，导出到 Obsidian Frontmatter
         3. source_session_id TEXT — 产生该知识的会话 ID
         4. source_step_id TEXT — 产生该知识的步骤 ID
-        5. auto_synced_to_md INTEGER — 1=系统自动导出（可覆盖），0=用户手动编辑过（禁止覆盖）
-        6. 新增索引 idx_kp_type / idx_kp_source_session
+        5. 新增索引 idx_kp_type / idx_kp_source_session
         """
         cursor = self._local_conn.cursor()
 
@@ -1320,9 +1560,6 @@ class Database:
             ("aliases", "JSON DEFAULT '[]'"),
             ("source_session_id", "TEXT"),
             ("source_step_id", "TEXT"),
-            ("auto_synced_to_md", "INTEGER DEFAULT 1"),
-            ("md_file_path", "TEXT DEFAULT ''"),
-            ("md_modified_at", "TEXT DEFAULT ''"),
         ]
 
         for col_name, col_type in new_columns:
@@ -1354,6 +1591,95 @@ class Database:
 
         self._local_conn.commit()
         print("[DB] v7.4.0 数据库迁移完成")
+
+    def _migrate_v80(self):
+        """
+        v8.0.0: 多系统隔离 + 用户画像 + 系统认知片段。
+
+        变更内容：
+        1. conversations 表新增 system_id TEXT — 对接系统标识
+        2. conversations 表新增 behavior_signals JSON — 行为信号（规则化提取）
+        3. conversations 表新增 user_raw_input TEXT — 用户原始输入（截断存储）
+        4. 新增 connected_systems 表 — 对接系统注册表
+        5. 新增 user_profile 表 — 全局用户画像
+        6. 新增 system_context_fragments 表 — 系统认知片段
+        7. 新增索引 idx_conv_system_id / idx_scf_*
+        """
+        cursor = self._local_conn.cursor()
+
+        conv_new_columns = [
+            ("system_id", "TEXT DEFAULT 'default'"),
+            ("behavior_signals", "JSON DEFAULT '{}'"),
+            ("user_raw_input", "TEXT DEFAULT ''"),
+        ]
+        for col_name, col_type in conv_new_columns:
+            try:
+                cursor.execute(f"ALTER TABLE conversations ADD COLUMN {col_name} {col_type}")
+                print(f"[DB] conversations.{col_name} 列已添加")
+            except Exception:
+                pass
+
+        try:
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_conv_system_id
+                ON conversations(system_id)
+            """)
+        except Exception:
+            pass
+
+        try:
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_conv_archive_tier
+                ON conversations(archive_tier, timestamp)
+            """)
+        except Exception:
+            pass
+
+        self._local_conn.commit()
+        print("[DB] v8.0.0 数据库迁移完成")
+
+    def _migrate_v81(self):
+        """
+        v8.1.0: 系统成长分析表（growth_analysis）。
+
+        变更内容：
+        1. 新增 growth_analysis 表 — 月报触发的系统优化，需人工审核后执行
+        2. 新增索引 idx_growth_analysis_status / idx_growth_analysis_source_period
+        """
+        cursor = self._local_conn.cursor()
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS growth_analysis (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                analysis_type TEXT NOT NULL,
+                title TEXT,
+                description TEXT,
+                suggestion TEXT,
+                related_data JSON DEFAULT '{}',
+                priority TEXT DEFAULT 'medium',
+                status TEXT DEFAULT 'pending',
+                reviewer TEXT,
+                review_comment TEXT,
+                reviewed_at TEXT,
+                applied_at TEXT,
+                source TEXT DEFAULT 'monthly_report',
+                source_period TEXT,
+                conversations_id INTEGER,
+                FOREIGN KEY (conversations_id) conversations(id)
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_growth_analysis_status
+            ON growth_analysis(status)
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_growth_analysis_source_period
+            ON growth_analysis(source_period)
+        """)
+
+        self._local_conn.commit()
+        print("[DB] v8.1.0 数据库迁移完成（growth_analysis 表）")
 
     def validate_conversation_integrity(self) -> dict:
         """
@@ -1978,87 +2304,129 @@ class Database:
         )
 
     # ══════════════════════════════════════════════════════════
-    # 对话存档
+    # 系统成长分析（v8.1.0 — 月报触发，Dashboard 审核）
     # ══════════════════════════════════════════════════════════
 
-    def archive_conversation(self, data: dict):
+    def insert_growth_analysis(self, data: dict) -> int:
         """
-        存档完整对话（@deprecated v7.0: 表已不再创建，仅兼容旧数据查询）
+        插入系统成长分析记录。
 
-        v7.0: conversation_archive 表不再创建，调用此方法静默返回 None。
-        历史数据仍可查询。新数据全部走 conversation_steps 流程。
+        data 字段:
+          - analysis_type (必填): prompt_optimize / analysis_add / knowledge_gap / user_profile_enhance
+          - title, description, suggestion
+          - related_data (JSON)
+          - priority, source, source_period
+          - conversations_id (可选)
+        """
+        sql = """
+            INSERT INTO growth_analysis
+            (timestamp, analysis_type, title, description, suggestion,
+             related_data, priority, source, source_period, conversations_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        self.query_local(sql, (
+            data.get("timestamp", datetime.now().isoformat()),
+            data.get("analysis_type", ""),
+            data.get("title", ""),
+            data.get("description", ""),
+            data.get("suggestion", ""),
+            json.dumps(data.get("related_data", {}), ensure_ascii=False),
+            data.get("priority", "medium"),
+            data.get("source", "monthly_report"),
+            data.get("source_period", ""),
+            data.get("conversations_id"),
+        ))
+        row = self.query_local("SELECT last_insert_rowid()", ())
+        return row[0][0] if row else 0
+
+    def get_pending_growth_analysis(self, limit: int = 50) -> list[dict]:
+        """获取待审核的增长分析"""
+        return self.query_local(
+            "SELECT * FROM growth_analysis WHERE status = 'pending' "
+            "ORDER BY priority DESC, timestamp ASC LIMIT ?", (limit,)
+        )
+
+    def get_growth_analysis_by_period(self, source_period: str) -> list[dict]:
+        """按分析周期获取增长分析"""
+        return self.query_local(
+            "SELECT * FROM growth_analysis WHERE source_period = ? "
+            "ORDER BY priority DESC, timestamp ASC", (source_period,)
+        )
+
+    def review_growth_analysis(self, analysis_id: int, status: str,
+                                reviewer: str = "", comment: str = "") -> bool:
+        """
+        审核增长分析记录。
 
         Args:
-            data: 必须包含 conversation_id（业务ID，非DB主键）
-                  可选 conversations_id（关联 conversations 表的 id 主键）
-        """
-        try:
-            conv_id = data.get("conversation_id", "")
-            existing = self.query_local(
-                "SELECT id FROM conversation_archive WHERE conversation_id = ?", (conv_id,)
-            )
-            if existing:
-                return existing[0]
-
-            conversations_id = data.get("conversations_id")
-
-            sql = """
-                INSERT INTO conversation_archive
-                (timestamp, source, client, conversation_id, conversations_id,
-                 raw_content, summary, skill_domains, complexity, tool_calls,
-                 user_feedback, analyzed)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """
-            return self.query_local(sql, (
-                data.get("timestamp", datetime.now().isoformat()),
-                data.get("source", "unknown"),
-                data.get("client", "unknown"),
-                conv_id,
-                conversations_id,
-                data.get("raw_content", ""),
-                data.get("summary", ""),
-                data.get("skill_domains", ""),
-                data.get("complexity", "simple"),
-                data.get("tool_calls", ""),
-                data.get("user_feedback", ""),
-                data.get("analyzed", 0),
-            ))
-        except sqlite3.OperationalError:
-            # v7.0: 表不存在时静默跳过
-            return None
-
-    def get_unanalyzed_conversations(self, limit: int = 50) -> list[dict]:
-        """获取未分析的对话（v4.1: 关联 conversations 表获取完整上下文）"""
-        return self.query_local(
-            "SELECT ca.*, c.topic as conv_topic, c.task_type as conv_task_type "
-            "FROM conversation_archive ca "
-            "LEFT JOIN conversations c ON ca.conversations_id = c.id "
-            "WHERE ca.analyzed = 0 "
-            "ORDER BY ca.timestamp ASC LIMIT ?", (limit,)
-        )
-
-    def mark_conversation_analyzed(self, archive_id: int, skill_domains: str = "",
-                                     complexity: str = ""):
-        """
-        标记对话已分析（v4.3: 同时标记 conversations.analyzed=1）
-
-        写入 conversation_archive.analyzed=1 并同时更新 conversations.analyzed=1，
-        保证两张表的 analyzed 状态一致。
+            analysis_id: 记录 ID
+            status: 'approved' 或 'rejected'
+            reviewer: 审核人
+            comment: 审核意见/拒绝原因
         """
         self.query_local(
-            "UPDATE conversation_archive SET analyzed = 1, "
-            "skill_domains = ?, complexity = ? WHERE id = ?",
-            (skill_domains, complexity, archive_id),
+            "UPDATE growth_analysis SET status = ?, reviewer = ?, "
+            "review_comment = ?, reviewed_at = ? WHERE id = ?",
+            (status, reviewer, comment, datetime.now().isoformat(), analysis_id),
         )
-        # 同时更新关联的 conversations 表的 analyzed 和 skill_domains
-        archive_row = self.query_local(
-            "SELECT conversations_id FROM conversation_archive WHERE id = ?", (archive_id,)
+        return True
+
+    def apply_growth_analysis(self, analysis_id: int) -> bool:
+        """标记增长分析为已应用"""
+        self.query_local(
+            "UPDATE growth_analysis SET applied_at = ? WHERE id = ?",
+            (datetime.now().isoformat(), analysis_id),
         )
-        if archive_row and archive_row[0].get("conversations_id"):
-            self.query_local(
-                "UPDATE conversations SET analyzed = 1, skill_domains = ?, complexity = ? WHERE id = ?",
-                (skill_domains, complexity, archive_row[0]["conversations_id"]),
-            )
+        return True
+
+    def cleanup_growth_analysis(self, before_period: str) -> int:
+        """
+        清理已处理的指定周期之前的增长分析数据。
+
+        Args:
+            before_period: 清理此周期之前的数据（如 "2026-06" 清理 6月及之前）
+
+        Returns:
+            删除的记录数
+        """
+        cursor = self._local_conn.cursor()
+        cursor.execute(
+            "DELETE FROM growth_analysis "
+            "WHERE status IN ('approved', 'rejected') "
+            "AND source_period <= ?",
+            (before_period,)
+        )
+        deleted = cursor.rowcount
+        self._local_conn.commit()
+        return deleted
+
+    # ══════════════════════════════════════════════════════════
+    # 知识点写入（v8.0: 从 conversation_engine 解耦，services 层可直接调用）
+    # ══════════════════════════════════════════════════════════
+
+    def insert_knowledge_point(self, title: str, content: str, category: str,
+                               domain: str, tags: list, source_type: str = "system",
+                               source_id: str = "") -> Optional[str]:
+        """创建知识点记录，返回 knowledge_id 或 None"""
+        import uuid
+        try:
+            kp_id = f"kp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+            self.query_local("""
+                INSERT INTO knowledge_points (
+                    knowledge_id, title, content, category, domain,
+                    tags, source_type, source_id, confidence, difficulty,
+                    created_by, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0.8, 'medium', 'system', ?, ?)
+            """, (
+                kp_id, title, content, category, domain,
+                json.dumps(tags, ensure_ascii=False),
+                source_type, source_id,
+                datetime.now().isoformat(), datetime.now().isoformat(),
+            ))
+            return kp_id
+        except Exception as e:
+            logger.error(f"创建知识点失败: {e}", exc_info=True)
+            return None
 
     # ══════════════════════════════════════════════════════════
     # 版本历史（新增）
@@ -2254,12 +2622,9 @@ class Database:
         """
         以 conversations.id 为主键，关联查询全链路数据
 
-        v4.2: 补充 evolution_log 和 improvement_log 关联
-
         Returns:
             {
                 "conversation": {...},
-                "archive": {...},
                 "optimization_feedbacks": [...],
                 "evolution_logs": [...],
                 "improvement_logs": [...],
@@ -2272,32 +2637,21 @@ class Database:
         if not conv:
             return {}
 
-        try:
-            archive = self.query_local(
-                "SELECT * FROM conversation_archive WHERE conversations_id = ?",
-                (conversations_id,)
-            )
-        except sqlite3.OperationalError:
-            archive = []  # v7.0: 表可能不存在
-
         feedbacks = self.query_local(
             "SELECT * FROM optimization_feedback WHERE conversations_id = ?",
             (conversations_id,)
         )
 
-        # v4.2: 关联 evolution_log
         evo_logs = self.query_local(
             "SELECT * FROM evolution_log WHERE conversations_id = ?",
             (conversations_id,)
         )
 
-        # v4.2: 关联 improvement_log
         imp_logs = self.query_local(
             "SELECT * FROM improvement_log WHERE conversations_id = ?",
             (conversations_id,)
         )
 
-        # 通过 conversation_archive.conversation_id 查找关联的 user_skills
         conv_biz_id = conv[0].get("conversation_id", "")
         skills = self.query_local(
             "SELECT * FROM user_skills WHERE conversation_ids LIKE ?",
@@ -2306,19 +2660,11 @@ class Database:
 
         return {
             "conversation": conv[0],
-            "archive": archive[0] if archive else None,
             "optimization_feedbacks": feedbacks,
             "evolution_logs": evo_logs,
             "improvement_logs": imp_logs,
             "related_skills": skills,
         }
-
-    def get_unanalyzed_archives_count(self) -> int:
-        """获取未分析的存档数量"""
-        rows = self.query_local(
-            "SELECT COUNT(*) as cnt FROM conversation_archive WHERE analyzed = 0"
-        )
-        return rows[0]["cnt"] if rows else 0
 
     def get_feedback_stats(self) -> dict:
         """获取优化反馈统计（按状态、类型分组）"""

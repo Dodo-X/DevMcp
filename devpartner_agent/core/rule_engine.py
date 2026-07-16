@@ -125,41 +125,6 @@ class RuleEngine:
 - 记录发现日志"""
         ))
 
-        # 规则6：代码自我进化
-        self.register(Rule(
-            name="code-self-evolution",
-            description="服务代码可以在对话中自我更新和完善",
-            version="1.0",
-            priority=2,
-            auto_trigger=False,
-            trigger_keywords=["升级自己", "自我完善", "更新服务", "进化代码"],
-            content="""代码自我进化规则：
-- 备份当前代码
-- 验证新代码语法
-- 热重载模块
-- 记录进化日志
-- 失败自动回滚"""
-        ))
-
-        # 规则7：安全审计
-        self.register(Rule(
-            name="security-audit",
-            description="每次代码变更后自动执行安全审计——检查硬编码密钥、SQL注入、不安全导入等",
-            version="1.1",
-            priority=2,
-            auto_trigger=True,
-            trigger_keywords=["修改", "创建", "删除", "重构", "升级", "部署", "配置", "安全"],
-            trigger_threshold_calls=10,  # 每10次工具调用自动审计
-            handler=self._run_security_audit,
-            content="""安全审计规则（自动触发）：
-- 检查硬编码密钥/Token/密码
-- 检查 SQL 注入风险（字符串拼接SQL）
-- 检查危险导入（pickle, eval, exec, subprocess shell=True）
-- 检查不安全的文件操作（os.system, os.popen）
-- 检查敏感信息泄露（print/日志中打印密钥）
-- 检查依赖漏洞（已知CVE）"""
-        ))
-
     def register(self, rule: Rule):
         """注册规则"""
         self._rules[rule.name] = rule
@@ -273,7 +238,6 @@ class RuleEngine:
             "部署运维": ["auto-log-conversation", "turbo-effect"],
             "环境配置": ["auto-log-conversation", "turbo-effect"],
             "学习研究": ["auto-log-conversation", "self-reflection"],
-            "自我迭代": ["turbo-effect", "code-self-evolution", "mcp-auto-discovery"],
         }
         names = task_rule_map.get(task_type, ["auto-log-conversation"])
         return [self._rules[n] for n in names if n in self._rules]
@@ -331,153 +295,7 @@ class RuleEngine:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    def _run_security_audit(self, context: dict = None) -> dict:
-        """自动安全审计 handler：扫描代码中的常见安全问题"""
-        import os
-        import re
-        from pathlib import Path
-
-        ctx = context or {}
-        findings = {
-            "rule": "security-audit",
-            "auto_triggered": True,
-            "timestamp": datetime.now().isoformat(),
-            "scan_scope": ctx.get("scan_paths", ["devpartner-agent", "devpartner-tools"]),
-            "findings": [],
-            "severity_summary": {"critical": 0, "high": 0, "medium": 0, "low": 0},
-            "recommendations": [],
-        }
-
-        # 安全检查规则
-        audit_rules = [
-            {
-                "id": "HARDCODED_SECRET",
-                "pattern": r'(?:password|passwd|secret|token|api_key|apikey|auth_key)\s*[:=]\s*["\'][\w\-\.]{8,}["\']',
-                "severity": "critical",
-                "message": "疑似硬编码密钥/密码/Token",
-                "remediation": "使用环境变量或配置文件存储敏感信息，切勿硬编码在代码中",
-            },
-            {
-                "id": "SQL_INJECTION",
-                "pattern": r'(?:execute|cursor\.execute|executemany)\s*\(\s*(?:f["\']|["\'].*%.*["\'].*%)',
-                "severity": "high",
-                "message": "疑似 SQL 注入风险：使用字符串拼接构造 SQL 查询",
-                "remediation": "使用参数化查询：cursor.execute('SELECT * FROM t WHERE id=?', (id,))",
-            },
-            {
-                "id": "DANGEROUS_IMPORT_PICKLE",
-                "pattern": r'import\s+pickle|from\s+pickle\s+import',
-                "severity": "high",
-                "message": "导入了 pickle 模块（反序列化攻击风险）",
-                "remediation": "避免使用 pickle，改用 json 或 yaml 进行序列化。如果必须使用，仅反序列化可信来源的数据",
-            },
-            {
-                "id": "DANGEROUS_EVAL_EXEC",
-                "pattern": r'\b(eval|exec)\s*\(',
-                "severity": "critical",
-                "message": "使用了 eval() 或 exec()（代码注入风险）",
-                "remediation": "99%的情况下可以用 ast.literal_eval() 或显式逻辑替代。仅当确实需要动态执行代码时使用",
-            },
-            {
-                "id": "UNSAFE_SUBPROCESS",
-                "pattern": r'(?:os\.system|os\.popen|subprocess\.call\s*\(\s*["\']\S+\s*["\'].*shell\s*=\s*True)',
-                "severity": "high",
-                "message": "不安全的命令执行：os.system/os.popen 或 subprocess 使用 shell=True",
-                "remediation": "使用 subprocess.run(cmd_list, shell=False) 并传递命令参数列表而非字符串",
-            },
-            {
-                "id": "SENSITIVE_LOG",
-                "pattern": r'(?:print|log|logger)\([^)]*(?:password|secret|token|key)',
-                "severity": "medium",
-                "message": "日志/打印中可能泄露敏感信息",
-                "remediation": "在日志输出前对敏感字段做脱敏处理：password='***'",
-            },
-            {
-                "id": "WEAK_HASH",
-                "pattern": r'\b(?:md5|sha1)\b',
-                "severity": "medium",
-                "message": "使用了弱哈希算法（MD5/SHA1）",
-                "remediation": "改用 SHA-256 或更强的哈希算法",
-            },
-            {
-                "id": "INSECURE_DESERIALIZE",
-                "pattern": r'(?:yaml\.load\s*\((?!.*SafeLoader)|json\.loads\s*\(\s*request\.)',
-                "severity": "medium",
-                "message": "不安全的反序列化（yaml.load 未用 SafeLoader 或直接加载用户输入）",
-                "remediation": "yaml.load 使用 SafeLoader: yaml.load(data, Loader=yaml.SafeLoader)",
-            },
-            {
-                "id": "DEBUG_MODE",
-                "pattern": r'\bdebug\s*=\s*True\b',
-                "severity": "low",
-                "message": "Debug 模式开启（生产环境应关闭）",
-                "remediation": "生产环境中设置 debug=False，或通过环境变量控制",
-            },
-        ]
-
-        project_root = Path(__file__).resolve().parent.parent  # devpartner-agent/
-        workspace_root = project_root.parent  # devPartner/
-
-        for scan_rel in findings["scan_scope"]:
-            scan_path = workspace_root / scan_rel
-            if not scan_path.exists():
-                continue
-
-            for py_file in scan_path.rglob("*.py"):
-                # 跳过 __pycache__
-                if "__pycache__" in str(py_file):
-                    continue
-
-                try:
-                    content = py_file.read_text(encoding="utf-8", errors="ignore")
-                except Exception:
-                    continue
-
-                rel_path = str(py_file.relative_to(workspace_root))
-
-                for rule in audit_rules:
-                    matches = list(re.finditer(rule["pattern"], content, re.IGNORECASE))
-                    for match in matches:
-                        # 获取上下文行号
-                        line_num = content[:match.start()].count('\n') + 1
-                        line_content = content.split('\n')[line_num - 1].strip()[:120]
-
-                        findings["findings"].append({
-                            "rule_id": rule["id"],
-                            "severity": rule["severity"],
-                            "file": rel_path,
-                            "line": line_num,
-                            "line_content": line_content,
-                            "message": rule["message"],
-                            "remediation": rule["remediation"],
-                        })
-                        findings["severity_summary"][rule["severity"]] += 1
-
-        # 生成建议
-        total = sum(findings["severity_summary"].values())
-        if findings["severity_summary"]["critical"] > 0:
-            findings["recommendations"].append(
-                f"🔴 发现 {findings['severity_summary']['critical']} 个严重问题，建议立即修复"
-            )
-        if findings["severity_summary"]["high"] > 0:
-            findings["recommendations"].append(
-                f"🟠 发现 {findings['severity_summary']['high']} 个高危问题，建议尽快修复"
-            )
-        if findings["severity_summary"]["medium"] > 0:
-            findings["recommendations"].append(
-                f"🟡 发现 {findings['severity_summary']['medium']} 个中危问题，建议关注"
-            )
-
-        findings["total_findings"] = total
-        findings["files_scanned"] = len(set(f["file"] for f in findings["findings"])) if findings["findings"] else 0
-
-        if total == 0:
-            findings["recommendations"].append("✅ 未发现已知安全问题，系统安全状态良好")
-
-        return findings
-
-
-# PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入
+    # PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入
 _engine_instance: Optional[RuleEngine] = None
 
 def get_engine() -> RuleEngine:

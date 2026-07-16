@@ -1,16 +1,17 @@
-﻿# DevPartner Agent v7.3.0 配置
+﻿# DevPartner Agent v7.5 配置
 # 智能管家层，有状态管理，配置项较多
 # 引擎：Ollama（本地 HTTP API）
+# 传输：Streamable HTTP
 
 agent:
   name: "devpartner-agent"
-  version: "7.3.0"
+  version: "7.5.0"
   description: "DevPartner 智能管家 - 会话管理 + 异步任务 + 知识图谱 + Web Dashboard"
 
 server:
   host: "0.0.0.0"
-  port: 8082
-  transport: "stdio"
+  port: 7860
+  transport: "streamable-http"
 
 data:
   root_dir: "./data"
@@ -33,9 +34,6 @@ services:
     max_message_history: 500
   evolution_service:
     enabled: true
-    max_changes_per_day: 3
-    require_approval: true
-    backup_before_change: true
   data_lifecycle:
     log_retention_days: 90
     db_cleanup_days: 90

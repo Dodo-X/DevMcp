@@ -90,6 +90,8 @@
 
   <div class="error-banner" id="errorBanner"></div>
 
+  <div id="pendingAnalysesAlert" style="display:none;background:rgba(234,179,8,0.1);border:1px solid var(--yellow);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;color:var(--text);font-size:14px;"></div>
+
   <div class="refresh-bar">
     <span id="lastUpdate">加载中...</span>
     <button onclick="refreshAll()">⟳ 刷新</button>
@@ -125,7 +127,7 @@
         <div><div class="metric-value" style="font-size:24px;" id="completedTasks">-</div><div class="metric-label">已完成</div></div>
       </div>
       <table id="taskTable">
-        <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>状态</th></tr></thead>
+        <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>状态</th><th>操作</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -142,6 +144,42 @@
       </div>
       <div id="memDetails"></div>
     </div>
+  </div>
+
+  <!-- 任务运维监管 (v8.1) -->
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-header"><h2>任务运维指标</h2><span class="badge" id="taskSuccessRate">-</span></div>
+      <div class="grid-4" style="margin-bottom:12px;">
+        <div><div class="metric-value" style="font-size:20px;color:var(--green);" id="opsCompleted">-</div><div class="metric-label">成功</div></div>
+        <div><div class="metric-value" style="font-size:20px;color:var(--red);" id="opsFailed">-</div><div class="metric-label">失败</div></div>
+        <div><div class="metric-value" style="font-size:20px;color:var(--yellow);" id="opsTimeout">-</div><div class="metric-label">超时</div></div>
+        <div><div class="metric-value" style="font-size:20px;color:var(--text-muted);" id="opsCancelled">-</div><div class="metric-label">取消</div></div>
+      </div>
+      <div class="memory-bar">
+        <div class="label"><span>平均耗时</span><span id="opsAvgTime">-</span></div>
+      </div>
+      <div class="memory-bar">
+        <div class="label"><span>并发槽位 (可用/总)</span><span id="opsSlots">-</span></div>
+        <div class="progress-bar"><div class="fill accent" id="opsSlotsBar" style="width:0%"></div></div>
+      </div>
+      <div class="memory-bar">
+        <div class="label"><span>队列内存</span><span id="opsMem">-</span></div>
+        <div class="progress-bar"><div class="fill yellow" id="opsMemBar" style="width:0%"></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h2>并发诊断</h2><span class="badge" id="diagMode">v8.1</span></div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">阶段锁 & 运行中任务</div>
+      <div id="diagContent" class="empty">加载中...</div>
+    </div>
+  </div>
+
+  <!-- Handler 注册清单 (v8.1) -->
+  <div class="card" style="margin-bottom:24px;">
+    <div class="card-header"><h2>已注册任务处理器</h2><span class="badge" id="handlerTotal">-</span></div>
+    <div id="handlerContent" class="empty">加载中...</div>
   </div>
 
   <!-- 回调统计 + 健康检查 -->
@@ -206,9 +244,49 @@ async function refreshSystemStatus() {
     document.getElementById('cbSuccess').textContent = d.callback_triggers ?? '-';
     document.getElementById('cbError').textContent = 0;
     document.getElementById('errorBanner').style.display = 'none';
+
+    const paCount = d.pending_analyses_count ?? 0;
+    const paEl = document.getElementById('pendingAnalysesAlert');
+    if (paEl) {
+      if (paCount > 0) {
+        paEl.style.display = 'block';
+        paEl.innerHTML = '<span class="status-dot warning"></span>' +
+          '<strong>待分析数据: ' + paCount + ' 条</strong> — LLM 不可用时数据暂存，等待下次清算' +
+          '<button onclick="processPendingAnalyses()" style="margin-left:12px;padding:4px 12px;border-radius:6px;border:1px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer;font-size:12px;">手动清算</button>' +
+          '<div id="pendingAnalysesDetails" style="margin-top:8px;font-size:12px;color:var(--text-muted);max-height:120px;overflow-y:auto;"></div>';
+        const details = d.pending_analyses_details ?? [];
+        const detailsEl = document.getElementById('pendingAnalysesDetails');
+        if (detailsEl && details.length) {
+          detailsEl.innerHTML = details.map(pa => {
+            const typeLabel = pa.type === 'daily_profile_merge' ? '用户画像' : '系统认知';
+            const dims = pa.missing_dimensions || '[]';
+            return '<div>' + typeLabel + ' | ' + pa.date + ' | 缺失: ' + dims + '</div>';
+          }).join('');
+        }
+      } else {
+        paEl.style.display = 'none';
+      }
+    }
   } catch(e) {
     document.getElementById('errorBanner').style.display = 'block';
     document.getElementById('errorBanner').textContent = '系统状态获取失败: ' + e.message;
+  }
+}
+
+async function processPendingAnalyses() {
+  try {
+    const res = await fetch('/api/pending-analyses/process', { method: 'POST' });
+    const data = await res.json();
+    if (data.processed > 0) {
+      alert('清算完成: ' + data.processed + ' 条已处理');
+    } else if (data.still_pending > 0) {
+      alert('LLM 仍不可用，' + data.still_pending + ' 条待处理');
+    } else {
+      alert('无待分析数据');
+    }
+    refreshSystemStatus();
+  } catch(e) {
+    alert('清算失败: ' + e.message);
   }
 }
 
@@ -217,18 +295,167 @@ async function refreshTasks() {
     const tasks = await fetchJSON('/api/tasks/list?limit=20');
     const tbody = document.querySelector('#taskTable tbody');
     if (!tasks.length) {
-      tbody.innerHTML = '<tr><td colspan="4" class="empty">暂无任务</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">暂无任务</td></tr>';
       return;
     }
-    tbody.innerHTML = tasks.map(t => `
+    tbody.innerHTML = tasks.map(t => {
+      const canCancel = (t.status === 'pending' || t.status === 'queued');
+      const cancelBtn = canCancel
+        ? `<button onclick="cancelTask('${t.id}')" style="padding:2px 8px;border-radius:4px;border:1px solid var(--red);background:transparent;color:var(--red);cursor:pointer;font-size:11px;">取消</button>`
+        : '<span style="color:var(--text-muted);font-size:11px;">-</span>';
+      return `
       <tr>
         <td style="font-family:monospace;font-size:12px;">${t.id}</td>
         <td>${t.name}</td>
         <td style="font-size:12px;color:var(--text-muted);">${t.type}</td>
         <td>${statusTag(t.status)}</td>
-      </tr>
-    `).join('');
+        <td>${cancelBtn}</td>
+      </tr>`;
+    }).join('');
   } catch(e) { /* 静默 */ }
+}
+
+async function cancelTask(taskId) {
+  if (!confirm('确认取消任务 ' + taskId + ' ?')) return;
+  try {
+    const res = await fetch('/api/tasks/cancel', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({task_id: taskId})
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert('任务已取消: ' + taskId);
+    } else {
+      alert('取消失败（任务可能已在运行）: ' + taskId);
+    }
+    refreshTasks();
+    refreshTaskOps();
+  } catch(e) {
+    alert('取消失败: ' + e.message);
+  }
+}
+
+async function refreshTaskOps() {
+  try {
+    const d = await fetchJSON('/api/tasks/stats');
+    document.getElementById('opsCompleted').textContent = d.completed ?? '-';
+    document.getElementById('opsFailed').textContent = d.failed ?? '-';
+    document.getElementById('opsTimeout').textContent = d.timeout ?? '-';
+    document.getElementById('opsCancelled').textContent = d.cancelled ?? '-';
+    document.getElementById('taskSuccessRate').textContent = (d.success_rate ?? 0) + '%';
+    document.getElementById('opsAvgTime').textContent = (d.avg_execution_time ?? 0) + ' 秒';
+
+    const slotsTotal = d.active_workers ?? 0;
+    const slotsAvail = d.available_slots ?? 0;
+    const slotsUsed = slotsTotal - slotsAvail;
+    document.getElementById('opsSlots').textContent = slotsAvail + ' / ' + slotsTotal + ' (使用 ' + slotsUsed + ')';
+    const slotsPct = slotsTotal > 0 ? Math.round((slotsUsed / slotsTotal) * 100) : 0;
+    document.getElementById('opsSlotsBar').style.width = slotsPct + '%';
+
+    const memUsed = d.memory_usage_mb ?? 0;
+    const memLimit = d.memory_limit_mb ?? 1;
+    document.getElementById('opsMem').textContent = memUsed + ' MB / ' + memLimit + ' MB';
+    document.getElementById('opsMemBar').style.width = Math.min(d.utilization_percent ?? 0, 100) + '%';
+  } catch(e) { /* 静默 */ }
+}
+
+async function refreshDiagnostics() {
+  try {
+    const d = await fetchJSON('/api/tasks/diagnostics');
+    let html = '';
+
+    const running = d.running_tasks || [];
+    if (running.length > 0) {
+      html += '<div style="margin-bottom:12px;"><div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">运行中 (' + running.length + ')</div>';
+      html += '<table><thead><tr><th>ID</th><th>类型</th><th>会话</th><th>开始时间</th></tr></thead><tbody>';
+      running.forEach(t => {
+        html += `<tr>
+          <td style="font-family:monospace;font-size:11px;">${(t.id||'').slice(0,8)}</td>
+          <td style="font-size:11px;">${t.type||'-'}</td>
+          <td style="font-family:monospace;font-size:11px;">${(t.conv||'global').slice(0,12)}</td>
+          <td style="font-size:11px;color:var(--text-muted);">${fmtTime(t.started)}</td>
+        </tr>`;
+      });
+      html += '</tbody></table></div>';
+    }
+
+    const pending = d.pending_preview || [];
+    if (pending.length > 0) {
+      html += '<div style="margin-bottom:12px;"><div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">排队中 (' + d.pending_in_queue + ')</div>';
+      html += '<table><thead><tr><th>ID</th><th>类型</th><th>会话</th></tr></thead><tbody>';
+      pending.forEach(t => {
+        html += `<tr>
+          <td style="font-family:monospace;font-size:11px;">${(t.id||'').slice(0,8)}</td>
+          <td style="font-size:11px;">${t.type||'-'}</td>
+          <td style="font-family:monospace;font-size:11px;">${(t.conv||'global').slice(0,12)}</td>
+        </tr>`;
+      });
+      html += '</tbody></table></div>';
+    }
+
+    const stepCounters = d.conv_step_counters || {};
+    const counterKeys = Object.keys(stepCounters);
+    if (counterKeys.length > 0) {
+      html += '<div style="margin-bottom:12px;"><div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">会话步骤计数器</div>';
+      counterKeys.forEach(k => {
+        html += `<div style="font-size:11px;font-family:monospace;">${k.slice(0,16)}: ${stepCounters[k]} 个 step_analysis 在执行</div>`;
+      });
+      html += '</div>';
+    }
+
+    const statusBreakdown = d.status_breakdown || {};
+    const statusKeys = Object.keys(statusBreakdown);
+    if (statusKeys.length > 0) {
+      html += '<div><div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">状态分布</div>';
+      statusKeys.forEach(k => {
+        html += `<div style="font-size:11px;display:flex;justify-content:space-between;"><span>${k}</span><span>${statusBreakdown[k]}</span></div>`;
+      });
+      html += '</div>';
+    }
+
+    if (!html) {
+      html = '<div class="empty">队列空闲，无运行中任务</div>';
+    }
+
+    document.getElementById('diagContent').innerHTML = html;
+  } catch(e) {
+    document.getElementById('diagContent').innerHTML = '<div class="empty" style="color:var(--red);">诊断信息获取失败</div>';
+  }
+}
+
+async function refreshHandlers() {
+  try {
+    const d = await fetchJSON('/api/tasks/handlers');
+    document.getElementById('handlerTotal').textContent = d.total ?? '-';
+    const handlers = d.handlers || [];
+    if (!handlers.length) {
+      document.getElementById('handlerContent').innerHTML = '<div class="empty">无已注册处理器</div>';
+      return;
+    }
+    const parallel = handlers.filter(h => h.phase === 'PARALLEL');
+    const sequential = handlers.filter(h => h.phase === 'SEQUENTIAL');
+    let html = '';
+    if (parallel.length) {
+      html += '<div style="margin-bottom:12px;"><div style="font-size:12px;color:var(--green);margin-bottom:6px;">PARALLEL (可并行, ' + parallel.length + ' 个)</div>';
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
+      parallel.forEach(h => {
+        html += `<span class="tag" style="background:rgba(34,197,94,0.15);color:var(--green);">${h.name}</span>`;
+      });
+      html += '</div></div>';
+    }
+    if (sequential.length) {
+      html += '<div><div style="font-size:12px;color:var(--yellow);margin-bottom:6px;">SEQUENTIAL (串行, ' + sequential.length + ' 个)</div>';
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
+      sequential.forEach(h => {
+        html += `<span class="tag" style="background:rgba(234,179,8,0.15);color:var(--yellow);">${h.name}</span>`;
+      });
+      html += '</div></div>';
+    }
+    document.getElementById('handlerContent').innerHTML = html;
+  } catch(e) {
+    document.getElementById('handlerContent').innerHTML = '<div class="empty" style="color:var(--red);">处理器清单获取失败</div>';
+  }
 }
 
 async function refreshMemory() {
@@ -291,6 +518,9 @@ async function refreshAll() {
   await Promise.all([
     refreshSystemStatus(),
     refreshTasks(),
+    refreshTaskOps(),
+    refreshDiagnostics(),
+    refreshHandlers(),
     refreshMemory(),
     refreshCallbacks(),
     refreshHealth(),
