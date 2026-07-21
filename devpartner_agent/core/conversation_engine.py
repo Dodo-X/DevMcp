@@ -30,12 +30,7 @@ import threading
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from enum import Enum
-from devpartner_agent.core.llm_prompts import (
-    USER_TRAITS_SCHEMA,
-    PROJECT_STRATEGY,
-    FEW_SHOT_EXAMPLES,
-    ANALYSIS_GUIDELINES,
-)
+
 
 logger = logging.getLogger(__name__)
 
@@ -74,55 +69,20 @@ def _safe_json_parse(val, default):
         return default
 
 
-def _extract_behavior_signals(user_raw_input: str) -> dict:
-    """
-    从用户原始输入中规则化提取行为信号（v8.0）
+def _track_write(operation: str, success: bool):
+    """写入操作追踪（v8.5.6: 接入 WriteTracker）"""
+    try:
+        from devpartner_agent.services.cleanup_service import get_write_tracker
+        tracker = get_write_tracker()
+        if success:
+            tracker.record_success(operation)
+        else:
+            tracker.record_failure(operation)
+    except Exception:
+        pass
 
-    不依赖 LLM，纯规则提取，确保关键信号不丢失。
-    LLM 增强分析在每日画像合并时进行。
-    """
-    if not user_raw_input:
-        return {}
 
-    signals = {
-        "input_length": len(user_raw_input),
-        "has_code_block": "```" in user_raw_input,
-        "has_question_mark": "?" in user_raw_input or "？" in user_raw_input,
-        "has_error_keyword": any(
-            kw in user_raw_input
-            for kw in ["error", "Error", "错误", "异常", "报错", "失败", "failed", "exception", "traceback"]
-        ),
-        "has_debug_keyword": any(
-            kw in user_raw_input
-            for kw in ["debug", "调试", "排查", "定位", "排查问题", "为什么", "why"]
-        ),
-        "has_design_keyword": any(
-            kw in user_raw_input
-            for kw in ["设计", "架构", "方案", "design", "architecture", "如何实现", "怎么实现"]
-        ),
-        "has_optimize_keyword": any(
-            kw in user_raw_input
-            for kw in ["优化", "性能", "optimize", "performance", "加速", "提升"]
-        ),
-        "has_learn_keyword": any(
-            kw in user_raw_input
-            for kw in ["学习", "理解", "learn", "教程", "入门", "怎么用", "如何使用"]
-        ),
-        "language_hints": [],
-    }
 
-    lang_patterns = {
-        "python": ["python", "pip", "django", "flask", "fastapi", "pytorch", "pandas"],
-        "javascript": ["javascript", "js", "typescript", "ts", "react", "vue", "node"],
-        "java": ["java", "spring", "maven", "gradle", "jvm"],
-        "sql": ["sql", "mysql", "postgresql", "sqlite", "query"],
-        "docker": ["docker", "kubernetes", "k8s", "container", "compose"],
-    }
-    for lang, patterns in lang_patterns.items():
-        if any(p in user_raw_input.lower() for p in patterns):
-            signals["language_hints"].append(lang)
-
-    return signals
 
 
 
@@ -158,7 +118,10 @@ class ConversationEngine:
         priority: str = "medium",
         system_id: str = "default",
         user_raw_input: str = "",
-        agent_context: str = "",
+        ai_analysis: str = "",
+        trace_id: str = "",
+        request_id: str = "",
+        external_conv_id: str = "",
     ) -> dict:
         """""
         创建新会话，返回会话状态。
@@ -166,7 +129,14 @@ class ConversationEngine:
         v8.0 增强：
         - system_id: 多系统隔离标识，区分不同对接系统
         - user_raw_input: 用户原始输入，用于行为信号提取
-        - agent_context: agent上下文摘要
+
+        v9.1 增强：
+        - ai_analysis: AI 对用户意图的分析推理过程（纯文本，系统异步分析）
+
+        v9.3 增强：
+        - trace_id: 外部调用链追踪ID（如 CodeBuddy 的 traceId）
+        - request_id: 外部会话请求ID（如 CodeBuddy 的 conversationRequestId）
+        - external_conv_id: 外部系统会话ID（如 CodeBuddy 的 conversationId）
 
         Returns:
             {"conversation_id": "...", "status": "active", ...}
@@ -175,20 +145,32 @@ class ConversationEngine:
         timestamp = datetime.now().isoformat()
         db = self._get_db()
 
-        behavior_signals = _extract_behavior_signals(user_raw_input)
+        behavior_signals = {}
 
-        db.query_local("""""
+        db.query_local("""
             INSERT INTO conversations (
                 conversation_id, timestamp, client, topic, task_type,
                 user_intent, status, priority, created_at, updated_at,
-                system_id, behavior_signals, user_raw_input
-            ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)
+                system_id, behavior_signals, user_raw_input, ai_analysis,
+                trace_id, request_id, external_conv_id,
+                total_steps, completed_steps
+            ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
         """, (
             conv_id, timestamp, client, topic, task_type,
             user_intent, priority, timestamp, timestamp,
             system_id, json.dumps(behavior_signals, ensure_ascii=False),
             user_raw_input[:10000] if user_raw_input else "",
+            ai_analysis[:50000] if ai_analysis else "",
+            trace_id[:100] if trace_id else "",
+            request_id[:100] if request_id else "",
+            external_conv_id[:100] if external_conv_id else "",
         ))
+
+        # v9.1.1: 异步 LLM 分析 ai_analysis → 填充 behavior_signals（替代硬编码关键词匹配）
+        if ai_analysis:
+            self._schedule_behavior_signals_extraction(
+                conv_id, ai_analysis, user_raw_input or "", topic, task_type
+            )
 
         if system_id != "default":
             self._ensure_system_registered(db, system_id, client, timestamp)
@@ -214,11 +196,19 @@ class ConversationEngine:
         knowledge_points: str = "",
         user_question: str = "",
         client_request_id: str = "",
+        ai_reasoning: str = "",
+        user_requirement: str = "",
+        commands_executed: str = "",
     ) -> dict:
         """""
         记录对话中的单个子任务步骤。
 
         包含：并发检测 → FK 自保护 → 步骤写入 → 异步任务提交
+
+        v8.4 提纯字段:
+        - ai_reasoning: AI 对用户需求的推测过程
+        - user_requirement: 用户原始需求
+        - commands_executed: 执行的命令及说明
 
         Returns:
             {"success": true, "step_id": "...", "task_id": "...", ...}
@@ -236,7 +226,7 @@ class ConversationEngine:
         # 并发检测
         if client_request_id:
             existing = db.query_local(
-                "SELECT step_id FROM conversation_steps WHERE conversation_id =  AND input_data LIKE  LIMIT 1",
+                "SELECT step_id FROM conversation_steps WHERE conversation_id = ? AND input_data LIKE ? LIMIT 1",
                 (conversation_id, f"%{client_request_id}%"),
             )
             if existing:
@@ -266,11 +256,15 @@ class ConversationEngine:
             "knowledge_points": kp_list,
             "user_question": user_question[:10000] if user_question else "",
             "client_request_id": client_request_id or "",
+            "ai_reasoning": ai_reasoning[:50000] if ai_reasoning else "",
+            "user_requirement": user_requirement[:10000] if user_requirement else "",
+            "commands_executed": commands_executed[:50000] if commands_executed else "",
             "recorded_at": datetime.now().isoformat(),
         }
 
         try:
             self._insert_step(db, step_id, conversation_id, step_name, step_input)
+            _track_write("insert_step", success=True)
         except Exception as e:
             error_msg = str(e)
             if "FOREIGN KEY" in error_msg.upper():
@@ -278,19 +272,23 @@ class ConversationEngine:
                     db, conversation_id, step_name, step_id,
                     step_type, content, files_list, symptom,
                     root_cause, solution, kp_list, user_question,
+                    client_request_id, ai_reasoning,
+                    user_requirement, commands_executed,
                 )
                 if result is not None:
+                    _track_write("insert_step", success=True)
                     return result
+            _track_write("insert_step", success=False)
             raise
 
         # 更新会话总步骤数
         total = db.query_local(
-            "SELECT COUNT(*) as cnt FROM conversation_steps WHERE conversation_id = ",
+            "SELECT COUNT(*) as cnt FROM conversation_steps WHERE conversation_id = ?",
             (conversation_id,),
         )[0]["cnt"]
-        db.query_local("""""
-            UPDATE conversations SET total_steps = , updated_at = 
-            WHERE conversation_id = 
+        db.query_local("""
+            UPDATE conversations SET total_steps = ?, updated_at = ?
+            WHERE conversation_id = ?
         """, (total, datetime.now().isoformat(), conversation_id))
 
         # 提交异步分析任务
@@ -305,6 +303,9 @@ class ConversationEngine:
             "symptom": symptom[:50000] if symptom else "",
             "root_cause": root_cause[:50000] if root_cause else "",
             "solution": solution[:50000] if solution else "",
+            "ai_reasoning": ai_reasoning[:50000] if ai_reasoning else "",
+            "user_requirement": user_requirement[:10000] if user_requirement else "",
+            "commands_executed": commands_executed[:50000] if commands_executed else "",
         }
 
         task_id = queue.submit_task(
@@ -313,6 +314,23 @@ class ConversationEngine:
             priority=8,
             estimated_memory_mb=100,
         )
+
+        if task_id:
+            _track_write("submit_task", success=True)
+        else:
+            _track_write("submit_task", success=False)
+            logger.warning(f"⚠️ 任务提交返回空 task_id: {conversation_id}/{step_name}")
+            # 标记 step 状态为 pending_retry，由 TaskTimeoutScheduler 后续扫描处理
+            try:
+                db.query_local("""
+                    UPDATE conversation_steps SET
+                        status = 'pending_retry',
+                        error_message = 'Task queue submit returned empty task_id',
+                        retry_count = 0
+                    WHERE step_id = ?
+                """, (step_id,))
+            except Exception:
+                pass
 
         return {
             "success": True,
@@ -324,30 +342,36 @@ class ConversationEngine:
         }
 
     def _insert_step(self, db, step_id, conversation_id, step_name, step_input):
-        """写入 conversation_steps 表"""
-        db.query_local("""""
+        """写入 conversation_steps 表（v9.2: depends_on 字段已删除）"""
+        # 从 input_data 中提取 step_type（AI 传的值），而非硬编码 'analysis'
+        actual_step_type = step_input.get("step_type", "general") if isinstance(step_input, dict) else "general"
+        db.query_local("""
             INSERT INTO conversation_steps (
-                step_id, conversation_id, step_order, step_type,
+                step_id, conversation_id, conversations_id, step_order, step_type,
                 step_name, status, input_data, max_retries,
-                timeout_seconds, priority, depends_on, created_at
-            ) VALUES (, ,
-                (SELECT COALESCE(MAX(step_order), 0) + 1 FROM conversation_steps WHERE conversation_id = ),
-                'analysis', , 'pending', , 3, 300, 5, '', 
+                timeout_seconds, priority, created_at
+            ) VALUES (?, ?,
+                (SELECT id FROM conversations WHERE conversation_id = ?),
+                (SELECT COALESCE(MAX(step_order), 0) + 1 FROM conversation_steps WHERE conversation_id = ?),
+                ?, ?, 'pending', ?, 3, 300, 5, ?
             )
         """, (
-            step_id, conversation_id, conversation_id,
+            step_id, conversation_id, conversation_id, conversation_id,
+            actual_step_type,
             step_name, json.dumps(step_input, ensure_ascii=False),
             datetime.now().isoformat(),
         ))
 
-        db.query_local("""""
-            UPDATE conversation_steps SET started_at =  WHERE step_id = 
+        db.query_local("""
+            UPDATE conversation_steps SET started_at = ? WHERE step_id = ?
         """, (datetime.now().isoformat(), step_id))
 
     def _fk_self_repair(
         self, db, conversation_id, step_name, step_id,
         step_type, content, files_list, symptom,
         root_cause, solution, kp_list, user_question,
+        client_request_id="", ai_reasoning="",
+        user_requirement="", commands_executed="",
     ) -> Optional[dict]:
         """FK 约束自修复 — 如果 FOREIGN KEY 失败，自动尝试修复并重试"""
         try:
@@ -359,15 +383,15 @@ class ConversationEngine:
             """)
 
             exists = cursor.execute(
-                "SELECT id FROM conversations WHERE conversation_id = ",
+                "SELECT id FROM conversations WHERE conversation_id = ?",
                 (conversation_id,),
             ).fetchone()
 
             if not exists:
                 ts = datetime.now().isoformat()
-                cursor.execute("""""
+                cursor.execute("""
                     INSERT INTO conversations (conversation_id, timestamp, client, topic, task_type, status, priority, created_at, updated_at)
-                    VALUES (, , 'codebuddy', , 'general', 'active', 'medium', , )
+                    VALUES (?, ?, 'codebuddy', ?, 'general', 'active', 'medium', ?, ?)
                 """, (
                     conversation_id, ts,
                     step_name[:200] if step_name else "自动创建",
@@ -387,6 +411,10 @@ class ConversationEngine:
                 "solution": solution[:50000] if solution else "",
                 "knowledge_points": kp_list,
                 "user_question": user_question[:10000] if user_question else "",
+                "client_request_id": client_request_id or "",
+                "ai_reasoning": ai_reasoning[:50000] if ai_reasoning else "",
+                "user_requirement": user_requirement[:10000] if user_requirement else "",
+                "commands_executed": commands_executed[:50000] if commands_executed else "",
                 "recorded_at": datetime.now().isoformat(),
             }
             self._insert_step(db, step_id, conversation_id, step_name, step_input)
@@ -409,66 +437,61 @@ class ConversationEngine:
     def finalize_conversation(
         self,
         conversation_id: str,
-        summary: str = "",
-        user_traits: str = "",
-        key_decisions: str = "",
-        self_reflection: str = "",
+        ai_summary: str = "",
     ) -> dict:
-        """""
-        对话结束时调用，提交全局总结并触发全面分析。
+        """
+        对话结束时调用（v9.1 重构: AI 传 ai_summary 文本分析 + 系统从 DB 读结构化数据）。
+
+        职责（薄层，立即返回）:
+          1. 更新 conversations 状态为 completed
+          2. 将 ai_summary 写入 self_reflection 字段
+          3. 提交 conversation_finalize 异步任务（payload: conversation_id + ai_summary）
+          4. 异步软删除关联任务
+
+        Worker 会合并:
+          - AI 传递的文本分析（ai_summary）
+          - SQLite 结构化数据（conversations + conversation_steps 表）
+        双向互补，做完整全局分析。
 
         Returns:
             {"success": true, "conversation_id": "...", "analysis_queued": true, ...}
-        """""
+        """
         db = self._get_db()
         queue = self._get_task_queue()
+        now = datetime.now().isoformat()
 
-        decisions_list = _safe_json_parse(key_decisions, [])
-        traits_data = _safe_json_parse(user_traits, {})
-
-        # 更新 conversations 表
-        db.query_local("""""
+        # 标记会话为已完成
+        db.query_local("""
             UPDATE conversations SET
-                self_reflection = ,
-                updated_at = 
-            WHERE conversation_id = 
-        """, (self_reflection[:50000] if self_reflection else "", datetime.now().isoformat(), conversation_id))
+                status = 'completed', completed_at = ?, updated_at = ?
+            WHERE conversation_id = ? AND status != 'completed'
+        """, (now, now, conversation_id))
 
-        if decisions_list:
-            db.query_local("""""
-                UPDATE conversations SET decisions = 
-                WHERE conversation_id = 
-            """, (json.dumps(decisions_list, ensure_ascii=False)[:50000], conversation_id))
+        # 标记总结已生成
+        db.query_local("""
+            UPDATE conversations SET summary_generated = 1, updated_at = ?
+            WHERE conversation_id = ?
+        """, (now, conversation_id))
 
-        # 提交全局分析任务
-        final_payload = {
-            "conversation_id": conversation_id,
-            "summary": summary[:50000] if summary else "",
-            "user_traits": traits_data,
-            "key_decisions": decisions_list,
-            "self_reflection": self_reflection[:50000] if self_reflection else "",
-            "finalized_at": datetime.now().isoformat(),
-        }
+        # v9.1: 将 AI 的最终分析总结写入 self_reflection 字段
+        if ai_summary:
+            db.query_local("""
+                UPDATE conversations SET self_reflection = ?, updated_at = ?
+                WHERE conversation_id = ?
+            """, (ai_summary[:100000], now, conversation_id))
 
+        # 提交全局分析任务 — payload 传 conversation_id + ai_summary
+        # Worker 从 SQLite 读取结构化数据，与 AI 文本分析合并
         task_id = queue.submit_task(
             task_type="conversation_finalize",
-            payload=final_payload,
+            payload={
+                "conversation_id": conversation_id,
+                "finalized_at": now,
+                "ai_summary": ai_summary[:100000] if ai_summary else "",
+            },
             priority=10,
             estimated_memory_mb=200,
         )
-
-        # 标记会话为已完成
-        db.query_local("""""
-            UPDATE conversations SET
-                status = 'completed', completed_at = , updated_at = 
-            WHERE conversation_id =  AND status != 'completed'
-        """, (datetime.now().isoformat(), datetime.now().isoformat(), conversation_id))
-
-        # 标记总结已生成
-        db.query_local("""""
-            UPDATE conversations SET summary_generated = 1, updated_at = 
-            WHERE conversation_id = 
-        """, (datetime.now().isoformat(), conversation_id))
 
         # 异步软删除
         def _soft_delete():
@@ -614,22 +637,30 @@ class ConversationEngine:
         }
 
     def _expand_question_with_llm(self, question: str) -> List[str]:
-        """用 LLM 改写问题为多个同义扩展查询"""
+        """用 LLM 改写问题为多个同义扩展查询（v8.5: 使用 prompts/ 外部 Prompt）"""
         try:
-            llm = self._get_llm()
-            if not llm or not llm.is_available():
-                return []
+            from prompts import run_analysis, AnalysisTask
+            from prompts._common import parse_json
 
-            expand_prompt = (
-                f"请将以下技术问题改写为3个同义扩展查询词（每条3-5个词，只输出关键词，不要编号和解释）：\n{question}"
+            task = AnalysisTask(
+                name="question_expand",
+                description="技术问题同义扩展查询",
+                prompt_template="""将以下技术问题改写为3个同义扩展查询词。
+
+问题：{question}
+
+请输出 JSON 格式：
+```json
+{{"queries": ["扩展词1", "扩展词2", "扩展词3"]}}
+```
+只输出 JSON。""",
+                parser=parse_json,
+                max_tokens=256,
+                input_truncate=1000,
             )
-            raw = llm.infer(expand_prompt, max_tokens=256)
-            if raw and len(raw.strip()) > 5:
-                return [
-                    line.strip().lstrip("0123456789.-) ")
-                    for line in raw.strip().split("\n")
-                    if line.strip() and len(line.strip()) > 1
-                ][:3]
+            result = run_analysis(task, question=question)
+            if result and isinstance(result, dict):
+                return result.get("queries", [])[:3]
         except Exception:
             pass
         return []
@@ -643,24 +674,27 @@ class ConversationEngine:
         db = self._get_db()
 
         conv = db.query_local(
-            "SELECT * FROM conversations WHERE conversation_id = ",
+            "SELECT * FROM conversations WHERE conversation_id = ?",
             (conversation_id,),
         )
         if not conv:
             return None
 
-        steps = db.query_local("""""
-            SELECT * FROM conversation_steps WHERE conversation_id =  ORDER BY step_order ASC
+        steps = db.query_local("""
+            SELECT * FROM conversation_steps WHERE conversation_id = ? ORDER BY step_order ASC
         """, (conversation_id,))
 
+        # v9.5.1 修复: total_steps/completed_steps 可能为 None（旧数据/迁移不完整）
+        total = conv[0].get("total_steps") or 0
+        completed = conv[0].get("completed_steps") or 0
         return {
             "conversation": dict(conv[0]),
             "steps": [dict(s) for s in steps],
             "progress": {
-                "total": conv[0]["total_steps"],
-                "completed": conv[0]["completed_steps"],
+                "total": total,
+                "completed": completed,
                 "percentage": round(
-                    conv[0]["completed_steps"] / max(1, conv[0]["total_steps"]) * 100, 1
+                    completed / max(1, total) * 100, 1
                 ),
             },
         }
@@ -672,18 +706,18 @@ class ConversationEngine:
         db = self._get_db()
         try:
             existing = db.query_local(
-                "SELECT id FROM conversations WHERE conversation_id = ",
+                "SELECT id FROM conversations WHERE conversation_id = ?",
                 (conversation_id,),
             )
             if existing:
                 return True
 
             ts = datetime.now().isoformat()
-            db.query_local("""""
+            db.query_local("""
                 INSERT INTO conversations (
                     conversation_id, timestamp, client, topic, task_type,
                     status, priority, created_at, updated_at
-                ) VALUES (, , , , , 'active', 'medium', , )
+                ) VALUES (?, ?, ?, ?, ?, 'active', 'medium', ?, ?)
             """, (conversation_id, ts, client, topic, "general", ts, ts))
             logger.info(f"ensure_conversation_exists: 创建会话 {conversation_id}")
             return True
@@ -733,9 +767,9 @@ class ConversationEngine:
             return {"status": "already_running", "step_id": step_id}
 
         start_time = datetime.now()
-        db.query_local("""""
-            UPDATE conversation_steps SET status = 'running', started_at = 
-            WHERE step_id = 
+        db.query_local("""
+            UPDATE conversation_steps SET status = 'running', started_at = ?
+            WHERE step_id = ?
         """, (start_time.isoformat(), step_id))
 
         try:
@@ -746,11 +780,11 @@ class ConversationEngine:
 
             knowledge_ids = result.get("knowledge_point_ids", [])
 
-            db.query_local("""""
+            db.query_local("""
                 UPDATE conversation_steps SET
-                    status = 'completed', output_data = , error_message = NULL,
-                    knowledge_point_ids = , completed_at = , duration_ms = , retry_count = 0
-                WHERE step_id = 
+                    status = 'completed', output_data = ?, error_message = NULL,
+                    knowledge_point_ids = ?, completed_at = ?, duration_ms = ?, retry_count = 0
+                WHERE step_id = ?
             """, (
                 json.dumps(result.get("output", {}), ensure_ascii=False),
                 ",".join(knowledge_ids) if knowledge_ids else None,
@@ -776,10 +810,10 @@ class ConversationEngine:
             max_retries = step["max_retries"]
 
             if new_retry_count < max_retries:
-                db.query_local("""""
+                db.query_local("""
                     UPDATE conversation_steps SET
-                        status = 'pending', error_message = , retry_count = 
-                    WHERE step_id = 
+                        status = 'pending', error_message = ?, retry_count = ?
+                    WHERE step_id = ?
                 """, (str(e), new_retry_count, step_id))
 
                 return {
@@ -790,10 +824,10 @@ class ConversationEngine:
                     "error": str(e),
                 }
             else:
-                db.query_local("""""
+                db.query_local("""
                     UPDATE conversation_steps SET
-                        status = 'failed', error_message = , completed_at = 
-                    WHERE step_id = 
+                        status = 'failed', error_message = ?, completed_at = ?
+                    WHERE step_id = ?
                 """, (str(e), datetime.now().isoformat(), step_id))
 
                 return {
@@ -866,23 +900,12 @@ class ConversationEngine:
         analysis_output = input_data.get("analysis_output", {})
         user_traits = analysis_output.get("user_traits", {})
 
-        db = self._get_db()
-        skills_observed = user_traits.get("skills_observed", [])
-        for skill in skills_observed:
-            db.query_local("""""
-                INSERT OR IGNORE INTO user_skills (
-                    timestamp, skill_domain, skill_level, sub_skills,
-                    evidence, last_updated
-                ) VALUES (, 'intermediate', , , )
-            """, (
-                datetime.now().isoformat(),
-                skill,
-                json.dumps([skill], ensure_ascii=False),
-                f"自动检测自会话 {step['conversation_id']}",
-                datetime.now().isoformat(),
-            ))
+        # v9.3.6: 统一走 llm_engine.apply_user_traits()，不再旁路 INSERT
+        from devpartner_agent.core.llm_engine import get_llm_engine
+        llm = get_llm_engine()
+        result = llm.apply_user_traits(user_traits, source="profile_step")
 
-        return {"output": {"traits_extracted": len(skills_observed)}, "knowledge_point_ids": []}
+        return {"output": {"traits_extracted": result.get("skills", 0)}, "knowledge_point_ids": []}
 
     def _execute_system_optimize_step(self, step: dict, input_data: dict) -> Dict[str, Any]:
         """执行系统优化建议步骤"""
@@ -893,7 +916,7 @@ class ConversationEngine:
         if suggestions:
             db = self._get_db()
             for suggestion in suggestions:
-                db.query_local("""""
+                db.query_local("""
                     INSERT INTO improvement_log (
                         timestamp, category, suggestion, priority,
                         status, conversations_id
@@ -937,29 +960,30 @@ class ConversationEngine:
         """更新会话的已完成步骤数"""
         db = self._get_db()
 
-        completed = db.query_local("""""
+        completed = db.query_local("""
             SELECT COUNT(*) as cnt FROM conversation_steps
-            WHERE conversation_id =  AND status = 'completed'
+            WHERE conversation_id = ? AND status = 'completed'
         """, (conversation_id,))[0]["cnt"]
 
-        total = db.query_local("""""
+        total = db.query_local("""
             SELECT COUNT(*) as cnt FROM conversation_steps
-            WHERE conversation_id = 
+            WHERE conversation_id = ?
         """, (conversation_id,))[0]["cnt"]
 
-        db.query_local("""""
+        db.query_local("""
             UPDATE conversations SET
-                completed_steps = , total_steps = , updated_at = 
-            WHERE conversation_id = 
+                completed_steps = ?, total_steps = ?, updated_at = ?
+            WHERE conversation_id = ?
         """, (completed, total, datetime.now().isoformat(), conversation_id))
 
-        if completed >= total and total > 0:
+        # v9.5.1: 加 None 防护（COUNT(*) 理论上不会返回 None，但防御性编程）
+        if (completed or 0) >= (total or 0) and (total or 0) > 0:
             self.complete_conversation(conversation_id)
 
     def complete_conversation(self, conversation_id: str):
         """标记会话为已完成"""
         db = self._get_db()
-        db.query_local("""""
+        db.query_local("""
             UPDATE conversations SET
                 status = 'completed', completed_at = , updated_at = 
             WHERE conversation_id =  AND status != 'completed'
@@ -969,7 +993,7 @@ class ConversationEngine:
     def fail_conversation(self, conversation_id: str, error: str = "Unknown error"):
         """标记会话为失败"""
         db = self._get_db()
-        db.query_local("""""
+        db.query_local("""
             UPDATE conversations SET
                 status = 'failed', updated_at = , self_reflection = 
             WHERE conversation_id =  AND status NOT IN ('completed', 'failed')
@@ -992,7 +1016,7 @@ class ConversationEngine:
     # ══════════════════════════════════════════════════════════
 
     def handle_step_analysis(self, payload: dict) -> dict:
-        """步骤分析任务处理器"""
+        """步骤分析任务处理器（v9.5.1: 支持进度报告）"""
         step_start = datetime.now()
         conversation_id = payload.get("conversation_id", "")
         step_id = payload.get("step_id", "")
@@ -1004,6 +1028,13 @@ class ConversationEngine:
         symptom = payload.get("symptom", "")
         root_cause = payload.get("root_cause", "")
         solution = payload.get("solution", "")
+        ai_reasoning = payload.get("ai_reasoning", "")
+        user_requirement = payload.get("user_requirement", "")
+        commands_executed = payload.get("commands_executed", "")
+
+        # v9.5.1: 任务队列注入的进度回调
+        task_id = payload.get("_task_id", "")
+        on_progress = payload.get("_progress_callback")
 
         db = self._get_db()
 
@@ -1018,20 +1049,32 @@ class ConversationEngine:
         try:
             llm = self._get_llm()
             if llm and llm.is_available():
+                if on_progress:
+                    on_progress(0.05, "", f"正在分析步骤: {step_name[:50]}")
                 llm_result = llm.analyze_step_content(
                     step_name=step_name, step_type=step_type,
                     content=content, symptom=symptom,
                     root_cause=root_cause, solution=solution,
+                    ai_reasoning=ai_reasoning,
+                    user_requirement=user_requirement,
+                    commands_executed=commands_executed,
                 )
+                if on_progress:
+                    on_progress(0.9, "", f"步骤分析完成: {step_name[:50]}")
                 if llm_result:
                     results["llm_analyzed"] = True
+                    results["step_summary"] = llm_result.get("step_summary", "")
+                    results["skill_domains"] = llm_result.get("skill_domains", [])
+                    results["difficulty"] = llm_result.get("difficulty", "medium")
+                    results["problem_solving_pattern"] = llm_result.get("problem_solving_pattern", {})
                     results["thinking_patterns"] = llm_result.get("thinking_patterns", [])
                     results["commands_used"] = llm_result.get("commands_used", [])
-                    results["syntax_points"] = llm_result.get("syntax_points", [])
                     results["complexity_level"] = llm_result.get("complexity_level", "simple")
-                    results["key_decision"] = llm_result.get("key_decision", "")
+                    results["key_insights"] = llm_result.get("key_insights", [])
+                    results["improvement_suggestions"] = llm_result.get("improvement_suggestions", [])
+                    results["related_tools"] = llm_result.get("related_tools", [])
 
-                    extracted_kp = llm_result.get("extracted_knowledge", [])
+                    extracted_kp = llm_result.get("knowledge_points", [])
                     if extracted_kp:
                         for kp in extracted_kp:
                             db.insert_knowledge_point(
@@ -1097,16 +1140,18 @@ class ConversationEngine:
         return results
 
     def handle_conversation_finalize(self, payload: dict) -> dict:
-        """对话全局分析任务处理器"""
+        """对话全局分析任务处理器（v9.5.1: 支持进度报告）。
+
+        数据源:
+          - payload.ai_summary: AI 传递的最终分析总结（文本）
+          - SQLite conversations 表: 会话元数据（topic, system_id, ai_analysis 等）
+          - SQLite conversation_steps 表: 各步骤的 input_data/ai_reasoning
+        """
         from devpartner_agent.services.knowledge_extractor import get_knowledge_extractor
-        from devpartner_agent.services.vault_exporter import get_vault_exporter
 
         conversation_id = payload.get("conversation_id", "")
-        summary = payload.get("summary", "")
-        user_traits = payload.get("user_traits", {})
-        key_decisions = payload.get("key_decisions", [])
-        self_reflection = payload.get("self_reflection", "")
-
+        ai_summary = payload.get("ai_summary", "")  # v9.1: AI 传递的文本分析
+        on_progress = payload.get("_progress_callback")  # v9.5.1: 进度回调
         db = self._get_db()
 
         results = {
@@ -1117,9 +1162,83 @@ class ConversationEngine:
             "llm_deep_analyzed": False,
         }
 
+        # ── v9.0: 从 SQLite 读取 conversation 全量元数据 ──
+        # v9.2: 废弃字段 (decisions/problems/solutions/files_touched) 已从表删除
+        conv_full = {}
+        try:
+            conv_row = db.query_local(
+                "SELECT topic, system_id, client, user_raw_input, self_reflection, "
+                "task_type, actions, skill_domains, complexity, ai_analysis "
+                "FROM conversations WHERE conversation_id = ?",
+                (conversation_id,)
+            )
+            if conv_row:
+                conv_full = conv_row[0]
+        except Exception:
+            pass
+
+        # 从 DB 解析各字段
+        # v9.2: decisions 字段已删除，key_decisions 改为空列表（可从 steps 聚合重建）
+        topic = conv_full.get("topic", "") or ""
+        system_id = conv_full.get("system_id", "default") or "default"
+        client = conv_full.get("client", "unknown") or "unknown"
+        user_raw_input = conv_full.get("user_raw_input", "") or ""
+        # v9.1: self_reflection 已由 finalize_conversation 写入 ai_summary；若 payload 也有则以 payload 为准
+        self_reflection = ai_summary or conv_full.get("self_reflection", "") or ""
+        ai_analysis_from_db = conv_full.get("ai_analysis", "") or ""
+        key_decisions = []
+
+        # ── v9.0: 从 conversation_steps 聚合 summary ──
+        summary_parts = []
+        try:
+            all_steps = db.query_local(
+                "SELECT step_name, step_type, status, input_data, output_data, created_at "
+                "FROM conversation_steps WHERE conversation_id = ? ORDER BY step_order",
+                (conversation_id,)
+            )
+            for s in (all_steps or []):
+                input_raw = s.get("input_data", "")
+                if input_raw:
+                    try:
+                        input_dict = json.loads(input_raw) if isinstance(input_raw, str) else input_raw
+                        content = input_dict.get("content", "")
+                        if content:
+                            summary_parts.append(f"[{s.get('step_name','')}]: {content[:500]}")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        summary = "\n".join(summary_parts)
+
+        # ── v9.0: 从 conversation_steps 聚合 user_traits（AI已通过record_step写入）──
+        user_traits = {}
+        try:
+            trait_rows = db.query_local(
+                "SELECT input_data FROM conversation_steps "
+                "WHERE conversation_id = ? AND input_data LIKE '%user_traits%' "
+                "ORDER BY step_order",
+                (conversation_id,)
+            )
+            for tr in (trait_rows or []):
+                input_raw = tr.get("input_data", "")
+                if input_raw:
+                    try:
+                        input_dict = json.loads(input_raw) if isinstance(input_raw, str) else input_raw
+                        ut = input_dict.get("user_traits", {})
+                        if ut and isinstance(ut, dict):
+                            for k, v in ut.items():
+                                if k not in user_traits:
+                                    user_traits[k] = v
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
         try:
             llm = self._get_llm()
             if llm and llm.is_available():
+                if on_progress:
+                    on_progress(0.1, "", "正在加载步骤数据...")
                 steps_rows = db.query_local(
                     "SELECT step_name, step_type, status, output_data, created_at "
                     "FROM conversation_steps WHERE conversation_id = ? ORDER BY step_order",
@@ -1141,65 +1260,80 @@ class ConversationEngine:
                             pass
                     steps_summary.append(step_info)
 
+                if on_progress:
+                    on_progress(0.2, "", "正在进行四维深度分析...")
+
                 deep_result = llm.analyze_conversation_deep(
                     summary=summary, self_reflection=self_reflection,
                     user_traits=user_traits, key_decisions=key_decisions,
                     steps_summary=steps_summary,
+                    topic=topic,
+                    system_id=system_id,
+                    ai_analysis=ai_analysis_from_db,  # v9.1: AI 的意图分析推理
+                    ai_summary=ai_summary,  # v9.1: AI 的最终分析总结
+                    client=client,
+                    user_raw_input=user_raw_input,
                 )
 
-                if deep_result:
+                if on_progress:
+                    on_progress(0.7, "", "深度分析完成，正在入库...")
                     results["llm_deep_analyzed"] = True
-                    results["system_issues"] = deep_result.get("system_issues", [])
-                    results["system_deficiencies"] = deep_result.get("system_deficiencies", [])
-                    results["user_insights"] = deep_result.get("user_insights", [])
-                    results["recurring_patterns"] = deep_result.get("recurring_patterns", [])
+                    results["business_knowledge"] = deep_result.get("business_knowledge", {})
+                    results["user_profile"] = deep_result.get("user_profile", {})
+                    results["technical_decisions"] = deep_result.get("technical_decisions", {})
+                    results["knowledge_graph"] = deep_result.get("knowledge_graph", {})
                     results["overall_assessment"] = deep_result.get("overall_assessment", "")
-                    results["risk_areas"] = deep_result.get("risk_areas", [])
-                    results["positive_patterns"] = deep_result.get("positive_patterns", [])
 
-                    for issue in (results.get("system_issues") or [])[:5]:
+                    # v9.0: 业务知识入库
+                    biz_kps = (deep_result.get("business_knowledge", {}) or {}).get("knowledge_points", [])
+                    for kp in biz_kps[:10]:
                         db.query_local("""
                             INSERT INTO improvement_log (
                                 timestamp, category, suggestion, priority, status, conversations_id
-                            ) VALUES (?, 'system_issue', ?, ?, 'pending',
+                            ) VALUES (?, 'business_knowledge', ?, 'medium', 'pending',
                                 (SELECT id FROM conversations WHERE conversation_id = ?)
                             )
                         """, (datetime.now().isoformat(),
-                              f"系统问题: {issue.get('issue', '')} | 根因: {issue.get('root_cause', '')}",
-                              issue.get("severity", "medium"), conversation_id))
+                              f"业务知识: {kp.get('title', '')} | {kp.get('desc', '')}",
+                              conversation_id))
 
-                    for insight in (results.get("user_insights") or [])[:5]:
+                    # v9.0: 用户画像核心发现入库
+                    up_core = (deep_result.get("user_profile", {}) or {}).get("core_findings", {})
+                    if up_core:
                         db.query_local("""
                             INSERT INTO improvement_log (
                                 timestamp, category, suggestion, priority, status, conversations_id
-                            ) VALUES (?, 'user_insight', ?, 'low', 'pending',
+                            ) VALUES (?, 'user_profile', ?, 'low', 'pending',
                                 (SELECT id FROM conversations WHERE conversation_id = ?)
                             )
                         """, (datetime.now().isoformat(),
-                              f"用户观察: {insight.get('observation', '')} | 模式: {insight.get('pattern', '')}",
+                              json.dumps(up_core, ensure_ascii=False)[:500],
                               conversation_id))
         except Exception as e:
             logger.warning(f"LLM 深层对话分析失败（非致命）: {e}")
 
         results["system_context_extracted"] = False
         try:
-            system_id = "default"
-            conv_row = db.query_local(
-                "SELECT system_id FROM conversations WHERE conversation_id = ?", (conversation_id,)
-            )
-            if conv_row:
-                system_id = conv_row[0].get("system_id", "default") or "default"
-
+            # v9.2: files_touched 字段已从 conversations 表删除，改为从 conversation_steps 聚合
             tech_signals, architecture_signals, business_signals, new_discoveries = [], [], [], []
             try:
-                ft_rows = db.query_local(
-                    "SELECT files_touched FROM conversations WHERE conversation_id = ?", (conversation_id,)
+                steps_files = db.query_local(
+                    "SELECT input_data FROM conversation_steps WHERE conversation_id = ? ORDER BY step_order",
+                    (conversation_id,)
                 )
-                if ft_rows:
-                    ft_raw = ft_rows[0].get("files_touched", "[]")
-                    files_touched = json.loads(ft_raw) if isinstance(ft_raw, str) else (ft_raw or [])
-                    for f in files_touched[:10]:
-                        tech_signals.append({"file": f, "type": "file_touched"})
+                seen_files = set()
+                for s in (steps_files or []):
+                    try:
+                        sd = json.loads(s.get("input_data", "{}"))
+                        fc = sd.get("files_changed", "")
+                        if fc:
+                            fc_list = json.loads(fc) if isinstance(fc, str) else (fc if isinstance(fc, list) else [fc])
+                            for f in fc_list:
+                                if f and f not in seen_files:
+                                    seen_files.add(f)
+                                    tech_signals.append({"file": f, "type": "file_touched"})
+                    except (json.JSONDecodeError, TypeError):
+                        pass
             except Exception:
                 pass
 
@@ -1235,15 +1369,17 @@ class ConversationEngine:
 
         if self_reflection or results.get("llm_deep_analyzed"):
             try:
+                if on_progress:
+                    on_progress(0.8, "", "正在生成系统优化建议...")
                 llm = self._get_llm()
                 suggestions = llm.generate_self_improvement_suggestions({
                     "reflection": self_reflection, "summary": summary,
                     "conversation_id": conversation_id,
                     "llm_deep_analysis": {
-                        "system_issues": results.get("system_issues", []),
-                        "system_deficiencies": results.get("system_deficiencies", []),
-                        "recurring_patterns": results.get("recurring_patterns", []),
-                        "risk_areas": results.get("risk_areas", []),
+                        "business_knowledge": results.get("business_knowledge", {}),
+                        "user_profile": results.get("user_profile", {}),
+                        "technical_decisions": results.get("technical_decisions", {}),
+                        "knowledge_graph": results.get("knowledge_graph", {}),
                         "overall_assessment": results.get("overall_assessment", ""),
                     },
                 })
@@ -1263,8 +1399,9 @@ class ConversationEngine:
 
         results["skill_extracted"] = 0
         results["business_extracted"] = 0
-        results["vault_exported"] = 0
         try:
+            if on_progress:
+                on_progress(0.9, "", "正在提取知识...")
             extractor = get_knowledge_extractor()
             extract_result = extractor.extract_all(
                 conversation_id=conversation_id,
@@ -1276,24 +1413,16 @@ class ConversationEngine:
             results["business_extracted"] = extract_result.get("business_extracted", 0)
             results["knowledge_ids"] = extract_result.get("knowledge_ids", [])
 
-            exporter = get_vault_exporter()
-            vault_result = exporter.export_batch(
-                conversation_id=conversation_id, summary=summary,
-                key_decisions=key_decisions, steps_summary=[],
-                knowledge_ids=extract_result.get("knowledge_ids", []),
-            )
-            results["vault_exported"] = (
-                vault_result.get("skills_exported", 0) +
-                vault_result.get("business_exported", 0)
-            )
+            # v8.5.0: MD 文件生成移至定时总结（日/周/月/年），finalize 阶段仅提取知识入库
         except Exception as e:
-            logger.warning(f"知识提取/Vault导出失败（非致命）: {e}")
+            logger.warning(f"知识提取失败（非致命）: {e}")
 
         overall = results.get('overall_assessment', '')
+        biz_count = len((results.get('business_knowledge', {}) or {}).get('knowledge_points', []))
+        kg_count = len((results.get('knowledge_graph', {}) or {}).get('knowledge_points', []))
         summary_stats = (
-            f"系统问题={len(results.get('system_issues', []))}个, "
-            f"不足={len(results.get('system_deficiencies', []))}个, "
-            f"风险={len(results.get('risk_areas', []))}个"
+            f"业务知识={biz_count}条, "
+            f"知识图谱={kg_count}条"
         )
 
         if overall:
@@ -1391,22 +1520,11 @@ class ConversationEngine:
     def handle_profile_update(self, payload: dict) -> dict:
         """用户画像更新任务处理器"""
         user_traits = payload.get("user_traits", {})
-        conversation_id = payload.get("conversation_id", "unknown")
-        db = self._get_db()
-
-        skills_observed = user_traits.get("skills_observed", [])
-        for skill in skills_observed:
-            db.query_local("""
-                INSERT OR IGNORE INTO user_skills (
-                    timestamp, skill_domain, skill_level, sub_skills,
-                    evidence, last_updated
-                ) VALUES (?, 'intermediate', ?, ?, ?)
-            """, (
-                datetime.now().isoformat(), skill,
-                json.dumps([skill], ensure_ascii=False),
-                f"自动检测自会话 {conversation_id}", datetime.now().isoformat(),
-            ))
-        return {"output": {"traits_extracted": len(skills_observed)}}
+        # v9.3.6: 统一走 llm_engine.apply_user_traits()，不再旁路 INSERT
+        from devpartner_agent.core.llm_engine import get_llm_engine
+        llm = get_llm_engine()
+        result = llm.apply_user_traits(user_traits, source="profile_update")
+        return {"output": {"traits_extracted": result.get("skills", 0)}}
 
     def handle_knowledge_extraction(self, payload: dict) -> dict:
         """知识提取任务处理器"""
@@ -1466,16 +1584,11 @@ class ConversationEngine:
 
                 if domain:
                     db.upsert_user_skills(domain, {
-                        "skill_level": self._estimate_skill_level(
-                            domain, result.get("complexity", "simple"),
-                            result.get("confidence", 0.5)
-                        ),
+                        "skill_level": result.get("user_traits", {}).get("skill_level", "intermediate"),
                         "sub_skills": ", ".join(sub_skills) if sub_skills else "",
                         "evidence": result.get("summary", ""),
                         "conversation_ids": conv_id,
-                        "hours_spent": self._estimate_time_spent(
-                            result.get("complexity", "simple"), len(content)
-                        ),
+                        "hours_spent": 0.0,
                         "growth_trend": "stable",
                     })
 
@@ -1511,82 +1624,82 @@ class ConversationEngine:
         except Exception as e:
             logger.error(f"LLM 分析失败: {e}")
 
-        return self._fallback_analysis(content, source, client)
+        return {"summary": "pending", "skill_domains": [], "complexity": "simple",
+                "confidence": 0.0, "analysis_method": "pending_llm", "user_traits": {}}
 
-    def _fallback_analysis(self, content: str, source: str, client: str) -> dict:
-        """极简降级方案（LLM 不可用时的保底逻辑）"""
-        content_lower = content.lower()
 
-        simple_domains = {
-            "Python": ["python", "django", "flask", "fastapi"],
-            "前端": ["react", "vue", "javascript", "typescript"],
-                "数据库": ["sql", "mysql", "redis", "mongodb"],
-            "DevOps": ["docker", "git", "linux", "nginx"],
-        }
-
-        domains = []
-        for domain, keywords in simple_domains.items():
-            matched = [kw for kw in keywords if kw in content_lower]
-            if matched:
-                domains.append({
-                    "domain": domain,
-                    "sub_skills": matched[:3],
-                    "match_score": 0.5,
-                    "evidence": "基础关键词匹配",
-                })
-
-        complexity = "complex" if len(content) > 2000 else ("multi_step" if len(content) > 500 else "simple")
-
-        return {
-            "summary": content[:100] + ("..." if len(content) > 100 else ""),
-            "skill_domains": sorted(domains, key=lambda x: x["match_score"], reverse=True)[:3],
-            "complexity": complexity,
-                    "complexity_reason": "基于内容长度的简单估算",
-            "user_feedback": {"has_feedback": False, "types": [], "severity": "none"},
-            "tool_gaps": [],
-            "user_traits": {},
-            "confidence": 0.3,
-            "analysis_method": "fallback_simple_rules",
-            "analysis_version": "v7.5_fallback",
-        }
-
-    def _estimate_skill_level(self, domain: str, complexity: str, confidence: float) -> str:
-        base_level = "beginner"
-        if confidence > 0.8:
-            if complexity == "complex":
-                base_level = "advanced"
-            elif complexity == "multi_step":
-                base_level = "intermediate"
-        elif confidence > 0.6:
-            if complexity in ("multi_step", "complex"):
-                base_level = "intermediate"
-        return base_level
-
-    def _estimate_time_spent(self, complexity: str, content_length: int) -> float:
-        if complexity == "complex":
-            return min(content_length / 1000, 2.0)
-        elif complexity == "multi_step":
-            return min(content_length / 2000, 1.0)
-        else:
-            return 0.2
 
     def get_known_domains(self) -> dict:
-        """获取已知的技能领域映射"""
-        return {
-            "Python": ["python", "django", "flask", "fastapi"],
-            "前端": ["react", "vue", "javascript", "typescript"],
-            "数据库": ["sql", "mysql", "redis", "mongodb"],
-            "DevOps": ["docker", "git", "linux", "nginx"],
-        }
+        """获取已知的技能领域映射（v8.5: 从 DB 动态查询，不再硬编码）"""
+        try:
+            db = self._get_db()
+            rows = db.query_local(
+                "SELECT DISTINCT domain, tags FROM knowledge_points WHERE domain != '' AND type = 'skill'"
+            )
+            if rows:
+                domains = {}
+                for row in rows:
+                    domain = row.get("domain", "")
+                    tags = row.get("tags", "[]")
+                    if isinstance(tags, str):
+                        try:
+                            tags = json.loads(tags)
+                        except Exception:
+                            tags = [tags]
+                    if domain and domain not in domains:
+                        domains[domain] = tags if isinstance(tags, list) else []
+                if domains:
+                    return domains
+        except Exception:
+            pass
+        # 降级：从 user_skills 表推断
+        try:
+            db = self._get_db()
+            rows = db.query_local("SELECT DISTINCT skill_name FROM user_skills LIMIT 20")
+            if rows:
+                domains = {}
+                for row in rows:
+                    name = row.get("skill_name", "")
+                    if name:
+                        domains[name] = [name.lower()]
+                if domains:
+                    return domains
+        except Exception:
+            pass
+        return {}
+
+    def _schedule_behavior_signals_extraction(self, conv_id: str, ai_analysis: str,
+                                                user_raw_input: str, topic: str,
+                                                task_type: str):
+        """v9.1.1: 异步提交 LLM 任务分析 ai_analysis → behavior_signals"""
+        try:
+            from prompts.user_profile import TASK_BEHAVIOR_SIGNALS
+            tq = self._get_task_queue()
+            if tq:
+                tq.enqueue(
+                    "behavior_signals_extraction",
+                    {
+                        "conversation_id": conv_id,
+                        "ai_analysis": ai_analysis[:4000],
+                        "user_raw_input": user_raw_input[:2000],
+                        "topic": topic,
+                        "task_type": task_type,
+                        "prompt_name": TASK_BEHAVIOR_SIGNALS.name,
+                    },
+                    priority=5,  # 低优先级，不阻塞主流程
+                )
+                logger.debug(f"已调度 behavior_signals 提取任务: {conv_id}")
+        except Exception as e:
+            logger.debug(f"调度 behavior_signals 提取失败（非致命）: {e}")
 
 # ────────────────────────────────────────────────
     # 来自 auto_analyzer.py 的方法
 # ────────────────────────────────────────────────
 
     def analyze_pending_conversations(self, db, limit: int = 10) -> dict:
-        """批量分析未处理的对话（v8.0: 从 conversations 表直接查询 analyzed=0 的记录）"""
+        """批量分析未处理的对话（v9.2: raw_json 字段已删除，改用 ai_analysis）"""
         conversations = db.query_local(
-            "SELECT id, conversation_id, topic, task_type, raw_json "
+            "SELECT id, conversation_id, topic, task_type, ai_analysis, self_reflection "
             "FROM conversations WHERE analyzed = 0 "
             "ORDER BY timestamp ASC LIMIT ?",
             (limit,)
@@ -1597,7 +1710,7 @@ class ConversationEngine:
         for conv in conversations:
             conv_id = conv.get("id")
             conv_biz_id = conv.get("conversation_id", "")
-            raw_content = conv.get("raw_json", "")
+            raw_content = conv.get("ai_analysis", "") or conv.get("self_reflection", "")
             conv_topic = conv.get("topic", "")
 
             if not raw_content:
@@ -1694,18 +1807,7 @@ class ConversationEngine:
             "timestamp": datetime.now().isoformat(),
         }
 
-    def analyze_single_conversation(self, db, conversations_id: int) -> dict:
-        """分析单条对话"""
-        conv_data = db.get_conversation_with_relations(conversations_id)
-        if not conv_data:
-            return {"error": f"conversations#{conversations_id} 不存在"}
 
-        conversation = conv_data.get("conversation", {})
-        raw_content = conversation.get("raw_json", "")
-        if not raw_content:
-            return {"error": f"conversations#{conversations_id} 没有原始对话数据"}
-
-        return self.analyze_pending_conversations(db, limit=1)
 
 # ────────────────────────────────────────────────
     # 来自 user_profile_service.py 的方法
@@ -1727,73 +1829,150 @@ class ConversationEngine:
             logger.error(f"用户画像融合失败: {e}", exc_info=True)
             return {"error": str(e), "skills": 0, "improvements": 0}
 
-    def request_user_profile_analysis(
-        self,
-        analysis_scope: str = "recent",
-        client_context: Optional[dict] = None,
-    ) -> dict:
-        """请求客户端进行用户画像分析"""
-        db = self._get_db()
+    def handle_behavior_signals_extraction(self, payload: dict) -> dict:
+        """v9.1.1: LLM 分析 ai_analysis → 更新 behavior_signals 字段"""
+        conv_id = payload.get("conversation_id", "")
+        ai_analysis = payload.get("ai_analysis", "")
+        user_raw_input = payload.get("user_raw_input", "")
+        topic = payload.get("topic", "")
+        task_type = payload.get("task_type", "")
 
-        recent_conversations = db.get_recent_conversations(limit=5)
+        if not conv_id or not ai_analysis:
+            return {"error": "缺少必要字段", "conversation_id": conv_id}
 
-        return {
-            "analysis_request": {
-                "scope": analysis_scope,
-                "timestamp": datetime.now().isoformat(),
-                "client_context": client_context or {},
-            },
-            "recent_data": recent_conversations[:3] if recent_conversations else [],
-            "user_traits_schema": USER_TRAITS_SCHEMA,
-            "project_strategy": PROJECT_STRATEGY,
-            "few_shot_examples": FEW_SHOT_EXAMPLES,
-            "analysis_guidelines": ANALYSIS_GUIDELINES,
-        }
+        try:
+            llm = self._get_llm()
+            if not llm or not llm.is_available():
+                logger.debug(f"LLM 不可用，跳过 behavior_signals 提取: {conv_id}")
+                return {"conversation_id": conv_id, "skipped": True, "reason": "llm_unavailable"}
 
-    def query_user_profile(
-        self,
-        dimensions: Optional[list[str]] = None,
-        time_range: Optional[str] = None,
-    ) -> dict:
-        """查询用户画像数据"""
-        db = self._get_db()
+            from prompts.user_profile import TASK_BEHAVIOR_SIGNALS
+            raw = llm.execute_task(
+                TASK_BEHAVIOR_SIGNALS,
+                ai_analysis=ai_analysis,
+                user_raw_input=user_raw_input,
+                topic=topic,
+                task_type=task_type,
+                input_length=len(user_raw_input),
+                has_code_block="```" in user_raw_input,
+                has_question_mark=("?" in user_raw_input or "？" in user_raw_input),
+            )
+            parsed = TASK_BEHAVIOR_SIGNALS.parser(raw) if TASK_BEHAVIOR_SIGNALS.parser else {}
 
-        skills_data = db.query_all_user_skills() or []
-
-        behavior_data = []
-        mistakes_data = []
-        strengths_data = []
-        learning_data = []
-
-        for skill in skills_data:
-            skill_name = skill.get("skill_name", "")
-            if any(kw in skill_name.lower() for kw in ["习惯", "沟通", "决策", "情绪"]):
-                behavior_data.append(skill)
-            elif any(kw in skill_name.lower() for kw in ["错误", "问题", "不足"]):
-                mistakes_data.append(skill)
-            elif any(kw in skill_name.lower() for kw in ["优势", "强项", "擅长"]):
-                strengths_data.append(skill)
+            if parsed and not parsed.get("parse_error"):
+                db = self._get_db()
+                db.query_local(
+                    "UPDATE conversations SET behavior_signals = ? WHERE conversation_id = ?",
+                    (json.dumps(parsed, ensure_ascii=False), conv_id),
+                )
+                logger.debug(f"behavior_signals 已更新: {conv_id}")
+                return {"conversation_id": conv_id, "updated": True}
             else:
-                learning_data.append(skill)
+                logger.warning(f"behavior_signals 解析失败: {conv_id}")
+                return {"conversation_id": conv_id, "updated": False, "reason": "parse_error"}
+        except Exception as e:
+            logger.error(f"behavior_signals 提取失败: {conv_id}: {e}")
+            return {"conversation_id": conv_id, "error": str(e)}
 
-        result = {
-            "query_timestamp": datetime.now().isoformat(),
-            "total_records": len(skills_data),
-            "dimensions_available": {
-                "skills": learning_data,
-                "behavior": behavior_data,
-                "mistakes": mistakes_data,
-                "strengths": strengths_data,
-                "learning_progress": learning_data[-5:] if learning_data else [],
-            },
-        }
+    def handle_daily_summary(self, payload: dict) -> dict:
+        """v9.5.1: 日报生成 handler（替代 Scheduler 同步调用）"""
+        from devpartner_agent.skills.daily_summary import (
+            generate_daily_summary, get_daily_work_data,
+            _check_llm_available, _write_pending_analysis,
+        )
 
-        if dimensions:
-            filtered = {k: v for k, v in result["dimensions_available"].items()
-                        if k in (dimensions or [])}
-            result["dimensions_available"] = filtered
+        target_date = payload.get("target_date", datetime.now().strftime("%Y-%m-%d"))
+        on_progress = payload.get("_progress_callback")
+        trigger_time_str = payload.get("trigger_time", datetime.now().isoformat())
+        trigger_time = datetime.fromisoformat(trigger_time_str) if trigger_time_str else datetime.now()
 
-        return result
+        db = self._get_db()
+
+        if on_progress:
+            on_progress(0.05, "", f"日报生成: 检查 LLM 可用性...")
+
+        # v8.1: 先检查 LLM 是否可用
+        llm_ok, llm_reason = _check_llm_available()
+        if not llm_ok:
+            raw_data = get_daily_work_data(date_str=target_date, fallback_to_log=True)
+            if raw_data.get("conversations") or raw_data.get("stats"):
+                _write_pending_analysis(
+                    db=db,
+                    analysis_type="daily_summary",
+                    source_date=target_date,
+                    raw_data=raw_data,
+                    missing_dimensions=["summary", "experience", "skills", "knowledge", "self_analysis"],
+                    error_message=llm_reason,
+                )
+                logger.warning(f"⏸️ LLM 不可用 ({llm_reason})，每日总结数据已暂存 pending_analyses")
+            else:
+                logger.info("ℹ️ 今日无对话数据，跳过每日总结")
+            return {"success": True, "method": "pending", "reason": llm_reason}
+
+        if on_progress:
+            on_progress(0.15, "", f"日报生成: 正在获取 {target_date} 数据...")
+
+        result = generate_daily_summary(date_str=target_date, use_llm=True)
+
+        if not result.get("success"):
+            logger.warning(f"⚠️ 每日总结生成失败: {result.get('error', 'unknown')}")
+            return {"success": False, "error": result.get("error", "unknown")}
+
+        if result.get("analysis_method") == "none":
+            logger.info("ℹ️ 今日无对话数据，跳过每日总结")
+            return {"success": True, "method": "none"}
+
+        summary_data = result.get("summary", {})
+        method = result.get("analysis_method", "unknown")
+
+        # v8.1: 仅 LLM 分析成功时才写入 improvement_log
+        if method == "llm" and result.get("llm_available"):
+            if on_progress:
+                on_progress(0.8, "", "日报生成: 正在写入 improvement_log...")
+            db.insert_improvement_with_dimensions(
+                category="daily_profile_summary",
+                dimensions={
+                    "summary_type": "daily",
+                    "date": target_date,
+                    "total_conversations": summary_data.get("total_conversations", 0),
+                    "analysis_method": method,
+                    "llm_available": True,
+                    "generated_by": "scheduler_daily",
+                },
+                priority="low",
+            )
+
+            conv_count = summary_data.get("total_conversations", 0)
+            logger.info(f"✅ 每日工作总结完成: {conv_count} 条对话, 方式={method}")
+
+            if on_progress:
+                on_progress(0.9, "", "日报生成: 正在导出 MD...")
+            try:
+                from devpartner_agent.services.vault_exporter import get_vault_exporter
+                exporter = get_vault_exporter()
+                report_path = exporter.export_daily_report(target_date, result)
+                if report_path:
+                    logger.info(f"📅 日报已导出到 Calendar: {report_path}")
+            except Exception as export_err:
+                logger.warning(f"⚠️ 日报 MD 导出失败: {export_err}")
+        else:
+            # LLM 返回了结果但不是 LLM 模式（rules_fallback），暂存
+            raw_data = get_daily_work_data(date_str=target_date, fallback_to_log=True)
+            if raw_data.get("conversations") or raw_data.get("stats"):
+                _write_pending_analysis(
+                    db=db,
+                    analysis_type="daily_summary",
+                    source_date=target_date,
+                    raw_data=raw_data,
+                    missing_dimensions=["summary", "experience", "skills", "knowledge", "self_analysis"],
+                    error_message=f"LLM 分析返回非预期模式: {method}",
+                )
+                logger.warning(f"⚠️ LLM 分析异常 (method={method})，数据已暂存 pending_analyses")
+
+        if on_progress:
+            on_progress(1.0, "", "日报生成完成")
+
+        return {"success": True, "method": method, "conversation_count": summary_data.get("total_conversations", 0)}
 
 
 _engine_instance: Optional[ConversationEngine] = None
@@ -1809,11 +1988,6 @@ def get_conversation_engine() -> ConversationEngine:
                 _engine_instance = ConversationEngine()
     return _engine_instance
 
-def register_conversation_tools(mcp):
-    """注册对话域的 MCP 工具（4 个核心工具已在 server.py 直接注册，此处为空壳保持一致性）"""
-    pass
-
-
 def register_task_handlers():
     """向 task_queue 注册对话域的所有任务处理器（v8.0 handler 注册机制）"""
     from devpartner_agent.services.task_queue import get_task_queue
@@ -1826,5 +2000,7 @@ def register_task_handlers():
     queue.register_handler("profile_update", engine.handle_profile_update)
     queue.register_handler("knowledge_extraction", engine.handle_knowledge_extraction)
     queue.register_handler("system_optimization", engine.handle_system_optimization)
+    queue.register_handler("behavior_signals_extraction", engine.handle_behavior_signals_extraction)
+    queue.register_handler("daily_summary", engine.handle_daily_summary)
 
-    logger.info("📝 对话域任务处理器已注册 (6 个)")
+    logger.info("📝 对话域任务处理器已注册 (8 个)")

@@ -14,6 +14,7 @@
 - 异常隔离：单次失败不影响后续执行
 """
 
+import json
 import logging
 import threading
 import time
@@ -70,6 +71,7 @@ class TaskTimeoutScheduler:
                 self._scan_orphaned_steps()
                 self._scan_stuck_steps()
                 self._scan_exceeded_retries()
+                self._scan_pending_retry_steps()
                 self._stats["scan_count"] += 1
             except Exception as e:
                 logger.error(f"❌ TaskTimeoutScheduler 扫描异常: {e}", exc_info=True)
@@ -130,6 +132,75 @@ class TaskTimeoutScheduler:
         except Exception as e:
             logger.error(f"❌ exceeded retries 扫描失败: {e}")
 
+    def _scan_pending_retry_steps(self):
+        """扫描 pending_retry 步骤 → 尝试重新提交任务到队列（v8.5.6 新增）"""
+        try:
+            from devpartner_agent.core.database import get_db
+            db = get_db()
+            rows = db.query_local("""
+                SELECT step_id, conversation_id, input_data
+                FROM conversation_steps
+                WHERE status = 'pending_retry'
+                  AND retry_count < max_retries
+                ORDER BY created_at ASC
+                LIMIT 10
+            """)
+            if not rows:
+                return
+
+            from devpartner_agent.services.task_queue import get_task_queue
+            queue = get_task_queue()
+            retried = 0
+
+            for row in rows:
+                step_id = row["step_id"]
+                conv_id = row["conversation_id"]
+                try:
+                    input_data = json.loads(row["input_data"]) if isinstance(row["input_data"], str) else (row["input_data"] or {})
+                except Exception:
+                    input_data = {}
+
+                task_payload = {
+                    "conversation_id": conv_id,
+                    "step_id": step_id,
+                    "step_name": input_data.get("step_name", "pending_retry"),
+                    "step_type": input_data.get("step_type", "general"),
+                    "content": input_data.get("content", ""),
+                    "knowledge_points": input_data.get("knowledge_points", []),
+                    "files_changed": input_data.get("files_changed", []),
+                }
+
+                task_id = queue.submit_task(
+                    task_type="step_analysis",
+                    payload=task_payload,
+                    priority=5,
+                    estimated_memory_mb=100,
+                )
+
+                if task_id:
+                    db.query_local("""
+                        UPDATE conversation_steps SET
+                            status = 'pending',
+                            retry_count = retry_count + 1,
+                            error_message = 'Re-submitted by pending_retry scanner'
+                        WHERE step_id = ?
+                    """, (step_id,))
+                    retried += 1
+                else:
+                    db.query_local("""
+                        UPDATE conversation_steps SET
+                            retry_count = retry_count + 1,
+                            error_message = 'pending_retry re-submit still failed'
+                        WHERE step_id = ?
+                    """, (step_id,))
+
+            if retried > 0:
+                self._stats["pending_retry_resent"] = self._stats.get("pending_retry_resent", 0) + retried
+                logger.info(f"📤 TaskTimeoutScheduler: {retried} 个 pending_retry 步骤重新入队")
+
+        except Exception as e:
+            logger.error(f"❌ pending_retry 扫描失败: {e}")
+
     @property
     def status(self) -> dict:
         return {
@@ -146,6 +217,7 @@ class ProfileScheduler:
     调度策略：
     - 每天 17:30 触发每日画像摘要（daily_summary）
     - 每周一 09:00 触发每周成长路线图（weekly_roadmap）
+    - 每30分钟扫描 pending_analyses，LLM 可用时自动清算
     - 使用 threading.Event 精确等待，无需轮询
     - 支持手动调用 trigger_manual_analysis(scope)
     """
@@ -165,6 +237,7 @@ class ProfileScheduler:
     ANNUAL_DAY = 31          # 12月31日
     ANNUAL_HOUR = 20         # 晚上8点
     ANNUAL_MINUTE = 0
+    PENDING_SCAN_INTERVAL_MINUTES = 30  # pending 扫描间隔
 
     def __init__(self):
         self._running = False
@@ -175,6 +248,7 @@ class ProfileScheduler:
         self._last_archive_run: Optional[str] = None
         self._last_monthly_run: Optional[str] = None
         self._last_annual_run: Optional[str] = None
+        self._last_pending_scan: Optional[datetime] = None
 
     def start(self):
         """启动定时调度器（守护线程模式）"""
@@ -195,127 +269,97 @@ class ProfileScheduler:
             self._thread.join(timeout=5)
         logger.info("⏹️ 定时调度器已停止")
 
-    def _seconds_until_next_daily(self) -> float:
-        """计算距离下次每日触发（17:30）的秒数"""
-        now = datetime.now()
-        target = now.replace(hour=self.DAILY_HOUR, minute=self.DAILY_MINUTE, second=0, microsecond=0)
-        if now >= target:
-            target += timedelta(days=1)
-        return (target - now).total_seconds()
-
-    def _seconds_until_next_weekly(self) -> float:
-        """计算距离下次每周触发（周一 09:00）的秒数"""
-        now = datetime.now()
-        target = now + timedelta(days=(self.WEEKLY_DAY - now.weekday()) % 7)
-        target = target.replace(hour=self.WEEKLY_HOUR, minute=self.WEEKLY_MINUTE, second=0, microsecond=0)
-        if target <= datetime.now():
-            target += timedelta(days=7)
-        return (target - now).total_seconds()
-
     def _run_loop(self):
         """主循环：精确等待触发时间，无需轮询"""
         logger.debug("🔄 定时调度器主循环启动（精确触发模式）")
 
+        # ponytail: 每 60s 检查一次，简单可靠，上限: 60s 精度足够
         while self._running:
+            wait_seconds = 60
             try:
                 now = datetime.now()
 
-                if now.hour == self.DAILY_HOUR and now.minute == self.DAILY_MINUTE:
-                    today_str = now.strftime("%Y-%m-%d")
-                    if self._last_daily_run != today_str:
+                # 每日触发：使用日期去重，不依赖精确分钟匹配
+                today_str = now.strftime("%Y-%m-%d")
+                if self._last_daily_run != today_str:
+                    daily_target = now.replace(hour=self.DAILY_HOUR, minute=self.DAILY_MINUTE, second=0, microsecond=0)
+                    if now >= daily_target:
                         self._execute_daily_summary(now)
                         self._execute_daily_profile_merge(now)
                         self._execute_daily_system_merge(now)
                         self._last_daily_run = today_str
 
-                if now.weekday() == self.WEEKLY_DAY and now.hour == self.WEEKLY_HOUR and now.minute == self.WEEKLY_MINUTE:
+                # 每周触发：使用周号去重
+                if now.weekday() == self.WEEKLY_DAY:
                     week_str = now.strftime("%Y-W%W")
                     if self._last_weekly_run != week_str:
-                        self._execute_weekly_roadmap(now)
-                        self._last_weekly_run = week_str
+                        weekly_target = now.replace(hour=self.WEEKLY_HOUR, minute=self.WEEKLY_MINUTE, second=0, microsecond=0)
+                        if now >= weekly_target:
+                            self._execute_weekly_roadmap(now)
+                            self._last_weekly_run = week_str
 
-                if now.weekday() == self.ARCHIVE_DAY and now.hour == self.ARCHIVE_HOUR and now.minute == self.ARCHIVE_MINUTE:
+                # 每周归档：使用周号去重
+                if now.weekday() == self.ARCHIVE_DAY:
                     archive_str = now.strftime("%Y-W%W")
                     if self._last_archive_run != archive_str:
-                        self._execute_weekly_archive(now)
-                        self._last_archive_run = archive_str
+                        archive_target = now.replace(hour=self.ARCHIVE_HOUR, minute=self.ARCHIVE_MINUTE, second=0, microsecond=0)
+                        if now >= archive_target:
+                            self._execute_weekly_archive(now)
+                            self._last_archive_run = archive_str
 
-                if now.day == self.MONTHLY_DAY and now.hour == self.MONTHLY_HOUR and now.minute == self.MONTHLY_MINUTE:
-                    month_str = now.strftime("%Y-%m")
-                    if self._last_monthly_run != month_str:
+                # 月报：使用月份去重
+                month_str = now.strftime("%Y-%m")
+                if self._last_monthly_run != month_str:
+                    monthly_target = now.replace(day=self.MONTHLY_DAY, hour=self.MONTHLY_HOUR, minute=self.MONTHLY_MINUTE, second=0, microsecond=0)
+                    if now >= monthly_target:
                         self._execute_monthly_report(now)
                         self._last_monthly_run = month_str
 
-                if now.month == self.ANNUAL_MONTH and now.day == self.ANNUAL_DAY and now.hour == self.ANNUAL_HOUR and now.minute == self.ANNUAL_MINUTE:
-                    year_str = str(now.year)
-                    if self._last_annual_run != year_str:
+                # 年报：使用年份去重
+                year_str = str(now.year)
+                if self._last_annual_run != year_str:
+                    annual_target = now.replace(month=self.ANNUAL_MONTH, day=self.ANNUAL_DAY, hour=self.ANNUAL_HOUR, minute=self.ANNUAL_MINUTE, second=0, microsecond=0)
+                    if now >= annual_target:
                         self._execute_annual_report(now)
                         self._last_annual_run = year_str
 
-                next_daily = self._seconds_until_next_daily()
-                next_weekly = self._seconds_until_next_weekly()
-                wait_seconds = min(next_daily, next_weekly, 3600)
+                # v8.1: 定期扫描 pending_analyses，LLM 可用时自动清算
+                if (self._last_pending_scan is None or
+                        (now - self._last_pending_scan).total_seconds() >= self.PENDING_SCAN_INTERVAL_MINUTES * 60):
+                    self._execute_pending_scan(now)
+                    self._last_pending_scan = now
 
             except Exception as e:
                 logger.error(f"❌ 定时调度器循环异常: {e}", exc_info=True)
-                wait_seconds = 60
 
             self._stop_event.wait(timeout=wait_seconds)
     def _execute_daily_summary(self, trigger_time: datetime):
         """
-        执行每日工作总结生成
+        执行每日工作总结生成（v9.5.1: 异步提交到 task_queue，不再同步等待 LLM）
 
-        收集今日所有对话，通过 skills/daily_summary 生成摘要，存入 improvement_log 表
+        通过 task_queue 异步提交 daily_summary 任务，立即返回。
+        进度通过 /api/tasks/progress 可查询。
         """
-        logger.info(f"📊 开始执行每日工作总结 [{trigger_time.strftime('%Y-%m-%d %H:%M')}]")
+        target_date = trigger_time.strftime("%Y-%m-%d")
+        logger.info(f"📊 提交每日工作总结任务 [{target_date}]")
 
         try:
-            from devpartner_agent.skills.daily_summary import generate_daily_summary
+            from devpartner_agent.services.task_queue import get_task_queue
+            queue = get_task_queue()
 
-            target_date = trigger_time.strftime("%Y-%m-%d")
-            result = generate_daily_summary(date_str=target_date, use_llm=True)
-
-            if not result.get("success"):
-                logger.warning(f"⚠️ 每日总结生成失败: {result.get('error', 'unknown')}")
-                return
-
-            if result.get("analysis_method") == "none":
-                logger.info("ℹ️ 今日无对话数据，跳过每日总结")
-                return
-
-            from devpartner_agent.core.database import get_db
-            db = get_db()
-
-            summary_data = result.get("summary", {})
-            db.insert_improvement_with_dimensions(
-                category="daily_profile_summary",
-                dimensions={
-                    "summary_type": "daily",
-                    "date": target_date,
-                    "total_conversations": summary_data.get("total_conversations", 0),
-                    "analysis_method": result.get("analysis_method", "unknown"),
-                    "llm_available": result.get("llm_available", False),
-                    "generated_by": "scheduler_daily",
+            task_id = queue.submit_task(
+                task_type="daily_summary",
+                payload={
+                    "target_date": target_date,
+                    "trigger_time": trigger_time.isoformat(),
                 },
-                priority="low",
+                priority=5,
+                estimated_memory_mb=200,
             )
-
-            conv_count = summary_data.get("total_conversations", 0)
-            method = result.get("analysis_method", "unknown")
-            logger.info(f"✅ 每日工作总结完成: {conv_count} 条对话, 方式={method}")
-
-            if method == "llm" and result.get("llm_available"):
-                try:
-                    from devpartner_agent.services.vault_exporter import get_vault_exporter
-                    exporter = get_vault_exporter()
-                    report_path = exporter.export_daily_report(target_date, result)
-                    if report_path:
-                        logger.info(f"📅 日报已导出到 Calendar: {report_path}")
-                except Exception as export_err:
-                    logger.warning(f"⚠️ 日报 MD 导出失败: {export_err}")
+            logger.info(f"📥 日报任务已入队: {task_id}")
 
         except Exception as e:
-            logger.error(f"❌ 每日工作总结执行失败: {e}", exc_info=True)
+            logger.error(f"❌ 每日总结任务提交失败: {e}", exc_info=True)
 
     def _execute_daily_profile_merge(self, trigger_time: datetime):
         """
@@ -391,39 +435,20 @@ class ProfileScheduler:
 
     def _execute_weekly_roadmap(self, trigger_time: datetime):
         """
-        执行每周成长路线图生成
-
-        汇总一周内所有对话，使用 skills/daily_summary 获取数据
+        执行每周成长路线图生成（v8.5.4: 使用 LLM 驱动的 generate_weekly_report）
         """
         logger.info(f"🗺️ 开始执行每周成长路线图 [{trigger_time.strftime('%Y-%m-%d %H:%M')}]")
 
         try:
-            from devpartner_agent.skills.daily_summary import get_weekly_work_data
-            from devpartner_agent.core.database import get_db
+            from devpartner_agent.skills.daily_summary import generate_weekly_report
 
-            week_data = get_weekly_work_data()
-
-            if not week_data or not week_data.get("daily_summaries"):
-                logger.info("ℹ️ 本周无工作数据，跳过周报生成")
-                return
-
-            db = get_db()
-            db.insert_improvement_with_dimensions(
-                category="weekly_growth_roadmap",
-                dimensions={
-                    "summary_type": "weekly",
-                    "period_start": week_data.get("period_start", ""),
-                    "period_end": week_data.get("period_end", ""),
-                    "total_days": week_data.get("total_days", 0),
-                    "total_conversations": week_data.get("total_conversations", 0),
-                    "daily_summaries": week_data.get("daily_summaries", []),
-                    "generated_by": "scheduler_weekly",
-                },
-                priority="medium",
-            )
-
-            conv_count = week_data.get("total_conversations", 0)
-            logger.info(f"✅ 每周成长路线图已存储: {conv_count} 条对话")
+            result = generate_weekly_report(trigger_time)
+            if result.get("success") and result.get("method") != "none":
+                logger.info(f"✅ 每周成长路线图完成: 方法={result.get('method', 'unknown')}")
+            elif result.get("method") == "pending":
+                logger.warning("⏸️ 周报数据已暂存 pending_analyses，等待 LLM 可用时清算")
+            else:
+                logger.info("ℹ️ 本周无数据，跳过周报生成")
 
         except Exception as e:
             logger.error(f"❌ 每周成长路线图执行失败: {e}", exc_info=True)
@@ -485,13 +510,13 @@ class ProfileScheduler:
 
     def _execute_weekly_archive(self, trigger_time: datetime):
         """
-        执行每周数据归档与清理（v8.0）
+        执行每周数据归档与清理（v9.2: 不再使用 archived_conversations 表）
 
         每周日凌晨3点执行，按数据生命周期策略分层归档：
         1. 清理 pending_analyses 超时记录
         2. 温数据归档（30-180天，压缩 steps 详情）
-        3. 冷数据归档（>180天，移入 archived_conversations）
-        4. 深度清理（>365天，删除 archived_conversations）
+        3. 冷数据归档（>180天，标记 archive_tier='archived'）
+        4. 深度清理（>365天，直接删除）
         5. 清理过期日志
         """
         logger.info(f"🗄️ 开始执行每周数据归档与清理 [{trigger_time.strftime('%Y-%m-%d %H:%M')}]")
@@ -582,6 +607,26 @@ class ProfileScheduler:
 
         except Exception as e:
             logger.error(f"❌ 年报生成执行失败: {e}", exc_info=True)
+
+    def _execute_pending_scan(self, trigger_time: datetime):
+        """
+        定期扫描 pending_analyses（v8.1 新增）
+
+        每 PENDING_SCAN_INTERVAL_MINUTES 分钟执行一次。
+        LLM 可用时，自动清算 pending_analyses 中暂存的日报/画像/系统认知数据。
+        同时处理 daily_summary 类型的暂存数据（LLM 不可用时暂存的日报）。
+        """
+        try:
+            from devpartner_agent.skills.daily_summary import process_pending_analyses
+            result = process_pending_analyses()
+
+            if result.get("processed", 0) > 0:
+                logger.info(f"📋 pending 扫描完成: {result['processed']} 条已处理, "
+                           f"{result.get('still_pending', 0)} 条仍待处理")
+            elif result.get("still_pending", 0) > 0:
+                logger.debug(f"⏸️ pending 扫描: LLM 仍不可用, {result['still_pending']} 条待处理")
+        except Exception as e:
+            logger.error(f"❌ pending 扫描执行失败: {e}", exc_info=True)
 
 
 # PONYTATIL: 模块级单例, 当需要多实例时改为依赖注入

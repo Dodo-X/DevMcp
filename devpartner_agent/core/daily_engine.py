@@ -186,7 +186,7 @@ def register_task_handlers():
 
 
 def register_daily_tools(mcp):
-    """注册日报域的所有 MCP 工具"""
+    """注册日报域的用户端 MCP 工具（内部运维工具通过 REST API 暴露）"""
 
     @mcp.tool()
     def get_daily_summary(date: str = "") -> str:
@@ -222,17 +222,6 @@ def register_daily_tools(mcp):
         return _inner()
 
     @mcp.tool()
-    def check_log_gaps(date: str = "") -> str:
-        """检查指定日期对话的时间间隙。"""
-        from devpartner_agent.core.decorators import mcp_tool_handler
-
-        @mcp_tool_handler
-        def _inner():
-            engine = get_daily_engine()
-            return engine.check_log_gaps(date)
-        return _inner()
-
-    @mcp.tool()
     def get_daily_work_data(date: str = "", fallback_to_log: bool = True) -> str:
         """获取指定日期的工作原始数据（供 AI 客户端分析用）。"""
         from devpartner_agent.core.decorators import mcp_tool_handler
@@ -265,24 +254,7 @@ def register_daily_tools(mcp):
             return engine.get_weekly_work_data()
         return _inner()
 
-    @mcp.tool()
-    def get_work_schema_guide() -> str:
-        """获取 save_daily_analysis 所需的数据结构说明。"""
-        from devpartner_agent.core.decorators import mcp_tool_handler
-
-        @mcp_tool_handler
-        def _inner():
-            engine = get_daily_engine()
-            return engine.get_work_schema_guide()
-        return _inner()
-
-    @mcp.tool()
-    def get_auto_log_stats() -> str:
-        """获取系统工具调用统计与优化状态。"""
-        from devpartner_agent.core.decorators import mcp_tool_handler
-
-        @mcp_tool_handler
-        def _inner():
-            engine = get_daily_engine()
-            return engine.get_auto_log_stats()
-        return _inner()
+    # 以下内部工具仅通过 REST API 暴露，不注册为 MCP 工具：
+    #   check_log_gaps       → /api/daily/check-gaps
+    #   get_work_schema_guide → /api/daily/schema-guide
+    #   get_auto_log_stats   → /api/daily/auto-stats

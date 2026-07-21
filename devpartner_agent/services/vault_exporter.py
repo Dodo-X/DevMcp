@@ -21,7 +21,7 @@ import json
 import logging
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -408,6 +408,127 @@ class VaultExporter:
                     lines.append(f"- **{label}**: {val}/10")
             lines.append("")
 
+        # v8.1: 项目维度归纳（简洁版 + 指向 Efforts 的 wiki-link + 文档间关联）
+        project_analysis = report_data.get("project_analysis", {})
+        projects = project_analysis.get("projects", [])
+        related_projects = []
+        knowledge_links = []
+
+        if projects:
+            lines.append("## 🏗️ 项目维度")
+            lines.append("")
+            lines.append("> 以下为今日各项目的简要归纳，完整分析见项目仪表盘。")
+            lines.append("")
+
+            for p in projects:
+                pname = p.get("project_name", "未命名项目")
+                safe_pname = re.sub(r'[\\/:*?"<>|]', '_', pname)
+                related_projects.append(safe_pname)
+                lines.append(f"### 📁 {pname}")
+                lines.append("")
+
+                work_summary = p.get("work_summary", "")
+                if work_summary:
+                    lines.append(f"**今日工作**: {work_summary}")
+                    lines.append("")
+
+                # Bug 归纳（简洁表格）
+                bugs_found = p.get("bugs_found", [])
+                bugs_fixed = p.get("bugs_fixed", [])
+                if bugs_found or bugs_fixed:
+                    lines.append("**Bug 情况**:")
+                    lines.append("")
+                    if bugs_found:
+                        lines.append("| 分类 | 描述 | 状态 |")
+                        lines.append("|------|------|------|")
+                        for bug in bugs_found:
+                            lines.append(f"| {bug.get('category', '')} | {bug.get('description', '')} | 发现 |")
+                    if bugs_fixed:
+                        if not bugs_found:
+                            lines.append("| 分类 | 描述 | 状态 |")
+                            lines.append("|------|------|------|")
+                        for bf in bugs_fixed:
+                            lines.append(f"| — | {bf.get('description', '')} | ✅ 已修复 |")
+                    lines.append("")
+
+                # 关键文件
+                key_files = p.get("key_files", [])
+                if key_files:
+                    files_str = "、".join(f"`{f}`" for f in key_files[:6])
+                    suffix = f" 等{len(key_files)}个文件" if len(key_files) > 6 else ""
+                    lines.append(f"**文件变更**: {files_str}{suffix}")
+                    lines.append("")
+
+                # 知识库落地（带 wiki-link）
+                knowledge_for_base = p.get("knowledge_for_base", [])
+                if knowledge_for_base:
+                    lines.append("**知识落地**:")
+                    lines.append("")
+                    for kb_item in knowledge_for_base:
+                        title = kb_item.get("title", "")
+                        tags = kb_item.get("tags", [])
+                        tag_str = " ".join(f"`#{t}`" for t in tags)
+                        # 生成知识卡片 wiki-link
+                        domain = tags[0] if tags else "通用"
+                        kb_link = f"[[Cards/{domain}/{title}]]"
+                        knowledge_links.append(kb_link)
+                        lines.append(f"- {kb_link} {tag_str}")
+                        content = kb_item.get("content", "")
+                        if content:
+                            lines.append(f"  > {content[:120]}{'...' if len(content) > 120 else ''}")
+                    lines.append("")
+
+                # 决策
+                decisions = p.get("decisions", [])
+                if decisions:
+                    lines.append("**技术决策**:")
+                    lines.append("")
+                    for d in decisions:
+                        lines.append(f"- {d}")
+                    lines.append("")
+
+                # 指向 Efforts 项目仪表盘
+                lines.append(f"→ 详见 [[Efforts/{safe_pname}/项目仪表盘]]")
+                lines.append("")
+
+        # v8.1: 关联文档（文档间交叉引用，Obsidian 双向链接）
+        lines.append("## 🔗 关联文档")
+        lines.append("")
+
+        # 项目仪表盘
+        if related_projects:
+            proj_links = "、".join(f"[[Efforts/{p}/项目仪表盘]]" for p in related_projects)
+            lines.append(f"- **项目分析**: {proj_links}")
+
+        # 知识卡片
+        if knowledge_links:
+            kb_links = "、".join(knowledge_links[:8])
+            if len(knowledge_links) > 8:
+                kb_links += f" 等{len(knowledge_links)}张卡片"
+            lines.append(f"- **知识卡片**: {kb_links}")
+
+        # 昨天/明天的日报
+        try:
+            today = datetime.strptime(date_str, "%Y-%m-%d")
+            yesterday = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+            lines.append(f"- **昨日**: [[Calendar/{yesterday}]]")
+        except ValueError:
+            pass
+
+        # 本周周报
+        try:
+            today = datetime.strptime(date_str, "%Y-%m-%d")
+            week_num = today.strftime("%Y-W%W")
+            lines.append(f"- **本周**: [[Reports/Weekly/{week_num}]]")
+        except ValueError:
+            pass
+
+        lines.append("")
+
+        # 构建 frontmatter（v8.1: MD 完全自包含，不引用 SQLite）
+        project_list = ", ".join(f'"{p}"' for p in related_projects) if related_projects else ""
+        kb_list = ", ".join(knowledge_links[:5]) if knowledge_links else ""
+
         frontmatter = (
             "---\n"
             "type: daily_report\n"
@@ -415,11 +536,20 @@ class VaultExporter:
             f"generated: \"{datetime.now().isoformat()}\"\n"
             f"productivity: {metrics.get('productivity_score', 0)}\n"
             f"learning: {metrics.get('learning_score', 0)}\n"
-            f"source: \"SQLite/conversations/{date_str}\"\n"
-            "---"
+            + (f"projects: [{project_list}]\n" if project_list else "")
+            + (f"kb_links: [{kb_list}]\n" if kb_list else "")
+            + "---"
         )
         self._write_markdown(file_path, frontmatter, "\n".join(lines))
         logger.info(f"📅 日报已导出: {file_path}")
+
+        # v8.1: 日报告出后，自动更新关联项目的仪表盘
+        for pname in related_projects:
+            try:
+                self._write_project_dashboard(pname)
+            except Exception as e:
+                logger.warning(f"⚠️ 项目仪表盘更新失败 [{pname}]: {e}")
+
         return str(file_path)
 
     def export_weekly_report(self, period_start: str, period_end: str,
@@ -490,6 +620,24 @@ class VaultExporter:
                 if val is not None:
                     lines.append(f"- **{label}**: {val}")
             lines.append("")
+
+        # v8.1: 关联文档（周报 ↔ 日报 双向链接）
+        lines.append("## 🔗 关联文档")
+        lines.append("")
+        try:
+            start = datetime.strptime(period_start, "%Y-%m-%d")
+            end = datetime.strptime(period_end, "%Y-%m-%d")
+            day_links = []
+            current = start
+            while current <= end:
+                day_links.append(f"[[Calendar/{current.strftime('%Y-%m-%d')}]]")
+                current += timedelta(days=1)
+            lines.append(f"- **日报**: {', '.join(day_links)}")
+            month_str = start.strftime("%Y-%m")
+            lines.append(f"- **月报**: [[Reports/Monthly/{month_str}]]")
+        except ValueError:
+            pass
+        lines.append("")
 
         frontmatter = (
             "---\n"
@@ -800,97 +948,126 @@ class VaultExporter:
         return f"[[{filename}|{title}]]"
 
     def _write_project_dashboard(self, project: str):
-        """生成 SQLite DB 插件驱动的项目仪表盘 MD（每次导出时更新）"""
+        """
+        生成/更新项目仪表盘 MD（v8.1: 自包含版，不依赖 SQLite）
+
+        设计原则：
+        - MD 完全自包含，不引用 SQLite（SQLite 数据会被定时清理）
+        - 日报通过 Calendar/*.md 持久化，仪表盘通过扫描 frontmatter 索引日报
+        - 知识卡片通过 Cards/ 和 Efforts/ 目录持久化
+        """
         safe_project = self._sanitize_path(project)
         file_path = self._vault_root / "Efforts" / safe_project / "项目仪表盘.md"
         file_path.parent.mkdir(parents=True, exist_ok=True)
 
-        db_path = str(Path(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))) / "data" / "devpartner.db")
-        db_path = db_path.replace("\\", "/")
+        # 扫描 Calendar 目录，找到包含该项目的日报
+        daily_reports = []
+        if self._calendar_dir.exists():
+            import re as _re
+            for md_file in sorted(self._calendar_dir.glob("*.md"), reverse=True):
+                try:
+                    content = md_file.read_text(encoding="utf-8")
+                    match = _re.search(r'projects:\s*\[(.*?)\]', content[:500])
+                    if match and safe_project in match.group(1):
+                        daily_reports.append(md_file.stem)
+                except Exception:
+                    continue
 
-        content = f"""# {project} 知识看板
+        # 统计知识卡片
+        business_dir = self._vault_root / "Efforts" / safe_project / "业务知识"
+        business_count = len(list(business_dir.glob("*.md"))) if business_dir.exists() else 0
 
-> 💡 本页面使用 **SQLite DB 插件** 直连数据库查询，数据实时同步，无需手动刷新。
+        skill_count = 0
+        skill_links = []
+        if (self._vault_root / "Cards").exists():
+            for card_file in (self._vault_root / "Cards").rglob("*.md"):
+                try:
+                    content = card_file.read_text(encoding="utf-8")
+                    if safe_project in content[:1000]:
+                        skill_count += 1
+                        rel_path = card_file.relative_to(self._vault_root)
+                        skill_links.append(str(rel_path.with_suffix("")))
+                except Exception:
+                    continue
 
----
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        lines = [
+            f"# {project} 项目仪表盘",
+            "",
+            f"> 最后更新: {now}",
+            f"> 本页面为自包含 MD，数据来源于 Calendar/ 日报和 Cards/ 知识卡片，不依赖 SQLite。",
+            "",
+            "---",
+            "",
+            "## 📊 概览",
+            "",
+            f"- 📅 日报: {len(daily_reports)} 篇",
+            f"- 📚 业务知识卡片: {business_count} 张",
+            f"- 🛠️ 技能卡片: {skill_count} 张",
+            "",
+            "---",
+            "",
+            "## 📅 日报索引",
+            "",
+        ]
 
-## 📅 最近对话
+        if daily_reports:
+            lines.append("> 以下日报包含该项目的变更记录：")
+            lines.append("")
+            for date_str in daily_reports[:30]:
+                lines.append(f"- [[Calendar/{date_str}]]")
+            if len(daily_reports) > 30:
+                lines.append(f"- ... 还有 {len(daily_reports) - 30} 篇日报")
+        else:
+            lines.append("（暂无日报记录）")
 
-```sqlite
-SELECT
-    date(created_at) as 日期,
-    time(created_at) as 时间,
-    topic as 主题,
-    summary as 摘要
-FROM conversations
-WHERE project_name = '{safe_project}'
-ORDER BY created_at DESC
-LIMIT 20
-```
+        lines.extend([
+            "",
+            "---",
+            "",
+            "## 📚 知识卡片",
+            "",
+            "### 业务知识",
+            f"→ [[Efforts/{safe_project}/业务知识/|业务知识目录]] ({business_count} 张)",
+            "",
+            "### 技能卡片",
+        ])
 
----
+        if skill_links:
+            for link in sorted(skill_links)[:20]:
+                lines.append(f"- [[{link}]]")
+            if len(skill_links) > 20:
+                lines.append(f"- ... 还有 {len(skill_links) - 20} 张")
+        else:
+            lines.append("（暂无关联技能卡片）")
 
-## ⏳ 待复习知识
-
-```sqlite
-SELECT
-    title as 知识点,
-    domain as 领域,
-    type as 类型,
-    next_review_at as 下次复习
-FROM knowledge_points
-WHERE next_review_at IS NOT NULL
-  AND next_review_at <= datetime('now', '+7 days')
-ORDER BY next_review_at ASC
-LIMIT 30
-```
-
----
-
-## 📊 知识分布（按领域）
-
-```sqlite
-SELECT
-    domain as 领域,
-    SUM(CASE WHEN type='skill' THEN 1 ELSE 0 END) as 技能数,
-    SUM(CASE WHEN type='business' THEN 1 ELSE 0 END) as 业务数,
-    COUNT(*) as 合计
-FROM knowledge_points
-GROUP BY domain
-ORDER BY 合计 DESC
-```
-
----
-
-## 🔗 知识图谱
-
-> 知识卡片之间的关联通过 `[[wikilink]]` 在 Obsidian 原生图谱中展示。
-> 本页面的卡片文件位于：
-> - 技能: `Cards/`
-> - 业务: `Efforts/{safe_project}/业务知识/`
-
----
-
-## 📈 总体统计
-
-```sqlite
-SELECT
-    (SELECT COUNT(*) FROM conversations WHERE project_name = '{safe_project}') as 总对话数,
-    (SELECT COUNT(*) FROM knowledge_points WHERE type='skill') as 技能卡片,
-    (SELECT COUNT(*) FROM knowledge_points WHERE type='business') as 业务卡片,
-    (SELECT COUNT(*) FROM knowledge_points WHERE next_review_at <= datetime('now')) as 待复习
-```
-"""
+        lines.extend([
+            "",
+            "---",
+            "",
+            "## 🏗️ 项目画像",
+            f"→ [[Efforts/{safe_project}/项目画像]]",
+            "",
+            "---",
+            "",
+            "## 🔗 关联",
+            f"- 日报目录: [[Calendar/]]",
+            f"- 知识卡片目录: [[Cards/]]",
+            "",
+        ])
 
         frontmatter = (
             "---\n"
-            f"type: dashboard\n"
+            "type: dashboard\n"
             f"project: \"{safe_project}\"\n"
             f"updated: \"{datetime.now().isoformat()}\"\n"
-            f"db_path: \"{db_path}\"\n"
+            f"daily_reports: {len(daily_reports)}\n"
+            f"business_cards: {business_count}\n"
+            f"skill_cards: {skill_count}\n"
             "---"
         )
-        self._write_markdown(file_path, frontmatter, content)
+        self._write_markdown(file_path, frontmatter, "\n".join(lines))
+        logger.info(f"📊 项目仪表盘已更新: {project} ({len(daily_reports)} 日报, {business_count + skill_count} 知识卡片)")
 
     def _get_knowledge_by_id(self, knowledge_id: str) -> Optional[dict]:
         """根据 knowledge_id 查询知识行"""

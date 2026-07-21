@@ -98,35 +98,6 @@ class DataConfig:
 
 
 @dataclass
-class LogServiceConfig:
-    """日志服务配置"""
-    enabled: bool = True
-    log_retention_days: int = 90
-    auto_cleanup: bool = True
-
-
-@dataclass
-class DialogueServiceConfig:
-    """跨AI对话服务配置"""
-    enabled: bool = True
-    max_message_history: int = 500
-
-
-@dataclass
-class EvolutionServiceConfig:
-    """进化引擎配置（v8.2: 保留兼容，仅 known_mcp_servers 仍在使用）"""
-    enabled: bool = True
-    known_mcp_servers: list[str] = field(default_factory=lambda: [
-        "@modelcontextprotocol/server-filesystem",
-        "@modelcontextprotocol/server-github",
-        "@modelcontextprotocol/server-sequential-thinking",
-        "@modelcontextprotocol/server-fetch",
-        "@modelcontextprotocol/server-memory",
-        "@modelcontextprotocol/server-git",
-    ])
-
-
-@dataclass
 class DataLifecycleConfig:
     """数据生命周期管理（v8.0 增强：分层归档策略）"""
     log_retention_days: int = 90
@@ -136,17 +107,10 @@ class DataLifecycleConfig:
     backup_before_cleanup: bool = True
     conversation_hot_days: int = 30        # 热数据：最近30天，完整保留
     conversation_warm_days: int = 180      # 温数据：30-180天，保留摘要+信号，清理steps详情
-    conversation_cold_days: int = 365      # 冷数据：180-365天，仅保留archived_conversations摘要
-    archive_before_cleanup: bool = True    # 清理前先归档到archived_conversations
+    conversation_cold_days: int = 365      # 冷数据：180-365天，标记 archive_tier='archived'
+    archive_before_cleanup: bool = True    # 清理前先标记 archive_tier='archived'
     ensure_md_exported_before_archive: bool = True  # 归档前确保MD已导出
     pending_analyses_max_retry: int = 10   # pending_analyses 最大重试次数，超过则标记failed
-
-
-@dataclass
-class RulesConfig:
-    """规则引擎配置"""
-    auto_load_builtin: bool = True
-    trigger_on_startup: bool = True
 
 
 @dataclass
@@ -174,8 +138,8 @@ class LLMConfig:
     enabled: bool = True                                # LLM 总开关
 
     # ── Ollama 连接 ──
-    ollama_model: str = "qwen3"                        # Ollama 模型名称（ollama list 查看）
-    ollama_timeout: int = 120                          # 推理超时（秒）
+    ollama_model: str = "Qwen3.5-9B-Q4_1:latest"                        # Ollama 模型名称（ollama list 查看）
+    ollama_timeout: int = 0                            # 推理超时（秒），0=不设超时让 Ollama 自然完成。9B 模型 ~5 tok/s，复杂 prompt 可能 20+ 分钟
     ollama_num_parallel: int = 2                       # Ollama 并行请求数（OLLAMA_NUM_PARALLEL）
     
     # ── 生成参数 ──
@@ -189,9 +153,6 @@ class LLMConfig:
     # ── 启动行为 ──
     preload: bool = True                               # 启动时验证 Ollama 连接
     
-    # ── 容错机制 ──
-    fallback_to_rules: bool = True                     # 模型不可用时降级到规则引擎
-    
     # ── 功能开关 ──
     enhance_analysis: bool = True                      # 对话分析增强 ⭐ 推荐
     enhance_file_parsing: bool = True                  # 文件解析增强
@@ -199,6 +160,9 @@ class LLMConfig:
     enhance_self_improvement: bool = True              # LLM 自我改进建议 ⭐ 推荐
     enhance_profile_merge: bool = True                 # 每日用户画像合并 ⭐ v8.0
     enhance_system_merge: bool = True                  # 每日系统认知合并 ⭐ v8.0
+    enhance_weekly_report: bool = True                 # 周报 LLM 生成 ⭐ v8.5.4
+    enhance_monthly_report: bool = True                # 月报 LLM 生成 ⭐ v8.5.4
+    enhance_annual_report: bool = True                 # 年报 LLM 生成 ⭐ v8.5.4
 
 
 @dataclass
@@ -206,14 +170,10 @@ class AgentConfig:
     """Agent 总配置"""
     name: str = "devpartner-agent"
     version: str = field(default_factory=get_project_version)
-    description: str = "DevPartner 智能管家 - 会话管理 + 异步任务 + 知识图谱 + Web Dashboard"
+    description: str = "DevPartner 智能管家 - 会话管理 + 异步任务 + 知识图谱"
     server: ServerConfig = field(default_factory=ServerConfig)
     data: DataConfig = field(default_factory=DataConfig)
-    log_service: LogServiceConfig = field(default_factory=LogServiceConfig)
-    dialogue_service: DialogueServiceConfig = field(default_factory=DialogueServiceConfig)
-    evolution: EvolutionServiceConfig = field(default_factory=EvolutionServiceConfig)
     data_lifecycle: DataLifecycleConfig = field(default_factory=DataLifecycleConfig)
-    rules: RulesConfig = field(default_factory=RulesConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
 
@@ -281,22 +241,12 @@ class ConfigManager:
                 if k in d:
                     setattr(config.data, k, d[k])
 
-        # services
-        if "services" in data:
-            svc = data["services"]
-            for svc_name, svc_data in svc.items():
-                if hasattr(config, svc_name):
-                    target = getattr(config, svc_name)
-                    for k, v in svc_data.items():
-                        if hasattr(target, k):
-                            setattr(target, k, v)
-
-        # rules
-        if "rules" in data:
-            r = data["rules"]
-            for k in ["auto_load_builtin", "trigger_on_startup"]:
-                if k in r:
-                    setattr(config.rules, k, r[k])
+        # data_lifecycle
+        if "data_lifecycle" in data:
+            dl = data["data_lifecycle"]
+            for k, v in dl.items():
+                if hasattr(config.data_lifecycle, k):
+                    setattr(config.data_lifecycle, k, v)
 
         # logging
         if "logging" in data:
@@ -371,13 +321,9 @@ class ConfigManager:
 
 _config_manager_instance: Optional[ConfigManager] = None
 
-def get_config_manager() -> ConfigManager:
-    """获取全局配置管理器实例"""
+def get_config() -> AgentConfig:
+    """获取全局配置单例"""
     global _config_manager_instance
     if _config_manager_instance is None:
         _config_manager_instance = ConfigManager()
-    return _config_manager_instance
-
-def get_config() -> AgentConfig:
-    """获取全局配置单例"""
-    return get_config_manager().config
+    return _config_manager_instance.config

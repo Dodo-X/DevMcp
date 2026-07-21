@@ -1,4 +1,4 @@
-from devpartner_agent.core.llm_prompts._common import AnalysisTask, parse_json
+from prompts._common import AnalysisTask, parse_json
 
 def _parse_schema_analysis(raw: str) -> dict:
     """Schema 分析专用解析器"""

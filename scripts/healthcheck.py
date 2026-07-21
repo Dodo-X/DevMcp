@@ -16,7 +16,6 @@ def check_health():
     endpoints = [
         "http://localhost:7860/health",       # 快速健康检查（首选）
         "http://localhost:7860/",             # 根路径
-        "http://localhost:7860/dashboard",     # 完整页面（备用）
     ]
 
     for i, url in enumerate(endpoints):

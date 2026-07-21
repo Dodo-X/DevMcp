@@ -1,4 +1,4 @@
-from devpartner_agent.core.llm_prompts._common import AnalysisTask, parse_json
+from prompts._common import AnalysisTask, parse_json
 
 def _parse_daily_summary(raw: str) -> dict:
     """日报专用解析器"""
@@ -11,7 +11,7 @@ def _parse_daily_summary(raw: str) -> dict:
 
 TASK_DAILY_SUMMARY = AnalysisTask(
     name="daily_summary",
-    description="每日工作总结生成（v8.0 自包含版 — MD 独立于 SQLite）",
+    description="每日工作总结生成（v9.5 — 项目维度增强版，按项目/模块归纳对话，MD 独立于 SQLite）",
     prompt_template="""你是一个专业的开发者工作总结 AI 助手。基于以下今日工作数据，生成结构化的日报分析。
 
 ## 今日日期
@@ -21,6 +21,9 @@ TASK_DAILY_SUMMARY = AnalysisTask(
 - 对话总数: {total_conversations}
 - 涉及文件数: {files_count}
 - 主要任务类型: {task_types}
+
+## 项目分组提示（基于文件路径推断）
+{project_grouping_hint}
 
 ## 详细对话记录
 {conversations}
@@ -38,6 +41,11 @@ TASK_DAILY_SUMMARY = AnalysisTask(
 **重要**：SQLite 数据会在30天后逐步清理（steps详情→摘要→归档→删除），
 因此日报必须包含足够完整的信息，使得未来仅凭此 MD 文件就能还原当日工作全貌。
 特别是：对话中的关键技术决策、代码变更原因、问题解决思路必须完整记录。
+
+**v9.5**：`project_analysis` 是按项目/模块维度的归纳章节。
+你需要根据文件路径和对话内容，将今日工作按项目/模块分组，
+每组归纳出该项目的Bug总结、关键文件变更和可落地知识库的知识点。
+这是日报中最重要的部分之一，因为它直接服务于知识库的长期积累。
 
 ```json
 {{
@@ -57,6 +65,40 @@ TASK_DAILY_SUMMARY = AnalysisTask(
     "insights": ["重要洞察和发现（含推理过程和依据）"],
     "decisions": ["今日做出的关键技术决策（含决策理由和替代方案）"],
     "solutions": ["今日解决的问题（含问题现象、根因分析和解决步骤）"]
+  }},
+  "project_analysis": {{
+    "projects": [
+      {{
+        "project_name": "项目名（从文件路径推断，如 devPartner/toptown-settlement）",
+        "work_summary": "该项目今天的主要工作内容（100字以内）",
+        "bugs_found": [
+          {{
+            "category": "Bug分类（编码错误/逻辑缺陷/配置问题/性能问题/兼容性问题/安全问题）",
+            "description": "Bug现象描述",
+            "root_cause": "根因分析",
+            "solution": "解决方案",
+            "files": ["涉及的文件路径"]
+          }}
+        ],
+        "bugs_fixed": [
+          {{
+            "description": "已修复的Bug描述",
+            "solution": "修复方案",
+            "files": ["修复涉及的文件"]
+          }}
+        ],
+        "key_files": ["本次修改的关键文件路径"],
+        "knowledge_for_base": [
+          {{
+            "title": "适合落地知识库的知识标题",
+            "content": "知识点的完整描述（含具体参数、配置、命令等）",
+            "tags": ["标签1", "标签2"]
+          }}
+        ],
+        "decisions": ["该项目相关的技术决策及理由"],
+        "conversation_ids": ["关联的对话ID"]
+      }}
+    ]
   }},
   "danger_signals": {{
     "repeated_mistakes": ["重复出现的错误（含具体错误信息和频率）"],
@@ -94,10 +136,12 @@ TASK_DAILY_SUMMARY = AnalysisTask(
 3. 所有描述必须具体完整，因为这份日报可能成为数据库清理后的唯一记录
 4. user_profile_update 和 project_profile_update 需要与快照对比，标注变化
 5. knowledge.decisions 和 knowledge.solutions 是最容易被遗漏的关键信息，务必完整记录
-6. 只输出 JSON""",
+6. project_analysis 必须充分利用文件路径信息，按项目分组归纳，不要把所有对话混在一起
+7. project_analysis.projects 中的 knowledge_for_base 是知识库落地的关键，每个知识点必须有完整描述和标签
+8. 只输出 JSON""",
     parser=_parse_daily_summary,
-    max_tokens=3000,
-    input_truncate=8000,
+    max_tokens=4000,
+    input_truncate=10000,
     feature_flag="enhance_daily_summary",
 )
 
@@ -289,8 +333,8 @@ def _parse_growth_analysis(raw: str) -> dict:
 
 TASK_GROWTH_ANALYSIS = AnalysisTask(
     name="growth_analysis",
-    description="系统成长分析（v8.1.0 — 月报触发，识别优化机会）",
-    prompt_template="""你是一个 AI 辅助成长系统优化分析师。基于以下月度工作总结数据，分析系统可以如何更好地辅助用户成长。
+    description="系统+用户双维度成长分析（v8.5.0 — 月报触发，系统优化+用户技能规划+技术趋势）",
+    prompt_template="""你是一个 AI 辅助成长系统优化分析师。基于以下月度工作总结数据，从系统和用户两个维度进行全面分析。
 
 ## 分析周期
 {period_start} ~ {period_end}
@@ -305,53 +349,85 @@ TASK_GROWTH_ANALYSIS = AnalysisTask(
 {project_profile_snapshot}
 
 ## 输出要求
-请分析系统在以下四个维度的优化机会，生成 JSON 格式的建议列表：
+请生成 JSON 格式的完整分析报告，包含系统优化建议和用户成长建议：
 
 ```json
 {{
-  "analyses": [
+  "system_analyses": [
     {{
-      "analysis_type": "prompt_optimize",
+      "analysis_type": "prompt_optimize|analysis_add|knowledge_gap|user_profile_enhance|data_quality",
       "title": "优化建议标题（简洁明确）",
       "description": "发现的问题描述（基于数据支撑）",
       "suggestion": "具体的优化建议（可操作、可验证）",
       "priority": "high/medium/low",
-      "related_data": {{
-        "prompt_name": "关联的 Prompt 模板名称",
-        "current_behavior": "当前表现",
-        "expected_behavior": "期望表现"
-      }}
+      "expected_effect": "优化后期望达到的效果",
+      "related_data": {{}}
     }}
-  ]
+  ],
+  "user_analyses": [
+    {{
+      "analysis_type": "skill_planning|tech_trend|growth_path|learning_advice",
+      "title": "建议标题",
+      "description": "基于用户当前技能和行业趋势的分析",
+      "suggestion": "具体的建设性建议",
+      "priority": "high/medium/low",
+      "related_skills": ["相关技能名称"],
+      "trend_keywords": ["相关技术趋势关键词"]
+    }}
+  ],
+  "summary": {{
+    "system_health": "系统整体健康度评估（一句话）",
+    "user_growth_stage": "用户当前成长阶段（入门/进阶/熟练/专家）",
+    "key_opportunities": ["最重要的3个优化机会"],
+    "next_month_focus": "下月重点关注方向"
+  }}
 }}
 ```
 
 分析维度说明：
+
+### 系统维度（system_analyses）：
 1. **prompt_optimize**: 分析 Prompt 模板的改进空间
    - 提取质量：是否遗漏了重要信息
    - 用户画像：是否准确捕捉用户特征变化
    - 知识提取：是否识别了新的知识领域
-
 2. **analysis_add**: 建议新增分析维度
-   - 缺少哪些维度的分析
+   - 缺少哪些维度的分析能让结果更有用
    - 新增维度能带来什么价值
-
 3. **knowledge_gap**: 用户知识库欠缺模块
    - 基于对话内容识别用户未掌握但需要的知识
    - 建议新增的知识模块
-
 4. **user_profile_enhance**: 用户画像优化建议
    - 画像数据是否完整
    - 哪些维度需要补充数据
+5. **data_quality**: 数据质量问题
+   - 缺失数据、不一致数据、噪音数据
+   - 如何改进数据采集
+
+### 用户维度（user_analyses）：
+1. **skill_planning**: 技能规划建议
+   - 用户当前掌握的技能中，哪些值得深化
+   - 当前技术领域有哪些热门方向值得关注
+   - 基于项目需求，应该补充什么技能
+2. **tech_trend**: 技术趋势分析
+   - 用户所在领域（如Python后端、前端开发）当前有哪些技术趋势
+   - 哪些工具/框架正在成为行业标准
+   - 哪些技术正在被淘汰
+3. **growth_path**: 成长路径建议
+   - 从当前水平到下一个阶段的路径
+   - 推荐的学习资源和实践项目
+4. **learning_advice**: 学习方法建议
+   - 基于用户行为模式（沟通风格、决策模式）给出个性化学习建议
+   - 如何更高效地利用 DevPartner 系统
 
 注意：
-1. 每条建议必须基于实际数据，不能凭空猜测
-2. 建议必须具体可操作，不能是泛泛而谈
-3. 优先级要合理：high=影响核心功能，medium=明显改善，low=锦上添花
+1. 所有建议必须基于实际数据，不能凭空猜测
+2. 建议必须具体可操作，有明确的优先级
+3. 技术趋势分析要结合实际行业动态
 4. 只输出 JSON""",
     parser=_parse_growth_analysis,
-    max_tokens=2000,
-    input_truncate=10000,
+    max_tokens=3000,
+    input_truncate=12000,
     feature_flag="enhance_daily_summary",
 )
 

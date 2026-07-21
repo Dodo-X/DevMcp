@@ -14,30 +14,39 @@
 ### 🚀 快速启动？
 → 5分钟上手：[README.md#快速开始](./README.md#🚀-快速开始)  
 → 配置说明：[README.md#高级配置](./README.md#🔧-高级配置)  
-→ 部署生产：[deploy/README.md](./deploy/README.md)
 
 ### 🔧 开发/修改代码？
+
+#### 修改 Prompt 模板（推荐，无需改代码）
+```
+prompts/                    # ⭐ v8.5: Prompt 独立于代码
+├── _common.py              # AnalysisTask 框架
+├── daily_summary.py        # 日/周/月/年报 + growth_analysis
+├── conversation.py         # 对话分析 Prompt
+├── step.py                 # 步骤分析 Prompt
+├── deep_analysis.py        # 深度分析 Prompt
+├── user_profile.py         # 用户画像分析 Prompt
+└── ...                     # 更多 Prompt 模板
+```
 
 #### 修改核心业务逻辑
 ```
 devpartner_agent/
-├── core/llm_unified_analyzer.py   # ⭐ LLM 统一引擎（最核心）
-├── services/conversation_analyzer.py  # 对话分析
-└── services/daily_summary.py          # 日报生成
+├── core/conversation_engine.py    # ⭐ 对话生命周期管理
+├── core/llm_engine.py             # LLM 推理引擎
+├── core/scheduler.py              # 定时调度器
+├── skills/daily_summary.py        # 日报/周报/月报/年报生成
+└── services/                      # 无状态服务
 ```
 
 #### 新增 MCP 工具
 ```
 devpartner_tools/tools/
-├── filesystem.py        # 文件操作示例
-├── git_operations.py    # Git 操作示例
+├── filesystem.py        # 文件操作
+├── web_requests.py      # 网络请求
+├── system_utils.py      # 系统工具
 └── [你的新工具].py      # 在此添加
 ```
-
-#### 调整分析规则（无需改代码！）
-```yaml
-# 编辑 devpartner_agent/config.yaml 的 llm 部分
-# 或修改 core/llm_unified_analyzer.py 中的 Prompt 模板
 ```
 
 ### 🧪 运行测试？
@@ -120,10 +129,8 @@ devpartner_tools/tools/
 - **LLM 生成**: `core/llm_unified_analyzer.py` → `generate_daily_summary()`
 - **数据收集**: `skills/daily_summary.py` → `get_daily_work_data()`
 
-#### 自我优化
-- **触发迭代**: `skills/self_iterate.py`
-- **建议生成**: `core/llm_unified_analyzer.py` → `generate_self_improvements()`
-- **应用改进**: `services/optimization_loop.py`
+#### 自我优化（v8.3 已移除自迭代子系统）
+- **系统改进建议**: `core/llm_engine.py` → `generate_self_improvement_suggestions()` (LLM 分析，结果写入 improvement_log)
 
 #### 用户画像
 - **画像构建**: `services/user_profile_service.py`

@@ -16,7 +16,6 @@ server:
 data:
   root_dir: "./data"
   databases_dir: "./data/databases"
-  daily_logs_dir: "./data/daily_logs"
   logs_dir: "./data/logs"
   logs_archive_dir: "./data/logs_archive"
   memories_dir: "./data/memories"
@@ -24,25 +23,11 @@ data:
   reports_dir: "./data/reports"
   temp_dir: "./data/temp"
 
-services:
-  log_service:
-    enabled: true
-    log_retention_days: 90
-    auto_cleanup: true
-  dialogue_service:
-    enabled: true
-    max_message_history: 500
-  evolution_service:
-    enabled: true
-  data_lifecycle:
-    log_retention_days: 90
-    db_cleanup_days: 90
-    auto_cleanup: true
-    backup_before_cleanup: true
-
-rules:
-  auto_load_builtin: true
-  trigger_on_startup: true
+data_lifecycle:
+  log_retention_days: 90
+  db_cleanup_days: 90
+  auto_cleanup: true
+  backup_before_cleanup: true
 
 logging:
   level: DEBUG
@@ -60,8 +45,8 @@ llm:
   enabled: true                              # 是否启用 LLM 增强
   
   # ── Ollama 连接 ──
-  ollama_model: "qwen3"                      # Ollama 模型名称（ollama list 查看可用模型）
-  ollama_timeout: 120                        # 推理超时（秒）
+  ollama_model: "Qwen3.5-9B-Q4_1:latest"     # Ollama 模型名称（ollama list 查看可用模型）
+  ollama_timeout: 0                          # 推理超时（秒），0=不设超时让 Ollama 自然完成。9B 模型 ~5 tok/s，复杂 prompt 可能 20+ 分钟
   
   # ── 生成参数 ──
   max_tokens: 2048                           # 最大生成 token 数
@@ -74,11 +59,13 @@ llm:
   # ── 启动行为 ──
   preload: true                              # 启动时验证 Ollama 连接并测试推理
   
-  # ── 容错机制 ──
-  fallback_to_rules: true                    # 模型不可用时降级到规则引擎
-  
   # ── 功能开关 ──
   enhance_analysis: true                     # 对话分析增强（LLM 语义理解）⭐ 推荐
   enhance_file_parsing: true                 # 文件解析增强（LLM 智能拆分）
   enhance_daily_summary: true                # LLM 智能日报生成 ⭐ 强烈推荐
   enhance_self_improvement: true             # LLM 自我改进建议 ⭐ 推荐
+  enhance_profile_merge: true                # 每日用户画像合并 ⭐ v8.0
+  enhance_system_merge: true                 # 每日系统认知合并 ⭐ v8.0
+  enhance_weekly_report: true                # 周报 LLM 生成 ⭐ v8.5.4
+  enhance_monthly_report: true               # 月报 LLM 生成 ⭐ v8.5.4
+  enhance_annual_report: true                # 年报 LLM 生成 ⭐ v8.5.4

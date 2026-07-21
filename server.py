@@ -1,39 +1,33 @@
 """
-DevPartner MCP 服务器 v8.3
+DevPartner MCP 服务器 v9.5
 ==========================
 
 🎯 项目定位:
   以 MCP (Model Context Protocol) 形式对外提供服务的智能助手系统。
+  专注于对话全程记录与分析，不重复提供 CodeBuddy 已具备的通用工具。
 
-📦 系统架构 (v8.3 清理自迭代子系统后):
-  server.py (薄壳 MCP 入口, ~200行)
-  ├── devpartner_tools/     工具层 (13个纯工具, 无状态)
+📦 系统架构 (v9.5 MCP 工具精简):
+  server.py (薄壳 MCP 入口)
+  ├── 核心 MCP 工具 (3个) — 对话记录三件套
+  │   ├── start_conversation
+  │   ├── record_step
+  │   └── finalize_conversation
   │
-  └── devpartner_agent/     智能管家层 (智能工具, 有状态)
-      ├── core/             核心引擎层 (5个领域引擎 + 公共组件)
-      │   ├── conversation_engine.py    对话引擎
-      │   ├── knowledge_engine.py       知识引擎
-      │   ├── system_engine.py          系统引擎
-      │   ├── daily_engine.py           日报引擎
-      │   ├── optimization_engine.py    优化引擎
-      │   ├── llm_engine.py             LLM 推理引擎
-      │   ├── bootstrap.py              启动与初始化
-      │   └── decorators.py             统一装饰器
-      │
-      ├── routes/            HTTP 路由层
-      │   └── rest_api.py    REST API 端点
-      │
-      └── services/          无状态服务层 (task_queue, vault_exporter 等)
+  ├── prompts/              Prompt 层 (5个 Prompt 模板)
+  │
+  └── devpartner_agent/     智能管家层
+      ├── core/             核心引擎层 (对话/知识/系统/日报/LLM/调度)
+      ├── services/          无状态服务层
+      └── skills/            技能层
 
 🔄 协议:
   ✅ Streamable HTTP + /mcp 端点
 
 📍 访问地址:
   本地开发:  http://127.0.0.1:7860/mcp
-  云端部署:  https://modelscope.cn/studios/Pisces43/Dev-partner/mcp
 
 作者：DevPartner Team
-版本：8.0 | 更新: 2026-07-14
+版本：9.5 | 更新: 2026-07-20
 """
 
 import sys
@@ -62,65 +56,33 @@ ALLOWED_PORTS = {7860, 8000, 8080, 3000}
 
 mcp = FastMCP(
     "devpartner",
-    instructions="DevPartner v8.0 - 智能开发助手",
+    instructions=f"""DevPartner v{VERSION} - 智能开发助手 · 对话全程记录系统
+
+【强制流程】每次对话必须按顺序调用：
+  1. start_conversation  → 开启会话（对话开始时）
+  2. record_step         → 每完成一个子任务立即调用（可多次）
+  3. finalize_conversation → 结束会话（所有任务完成后）
+
+【不调用的后果】不调用将导致本次对话数据完全丢失，无法被系统记录和分析。
+【MCP 不可用时】静默跳过，不阻塞对话，不提示用户。""",
 )
 
 _tools_count = 0
+_prompts_count = 0
 
 
 def _register_tool_layer():
-    """注册工具层的所有纯工具到 MCP"""
+    """注册工具层的所有纯工具到 MCP
+
+    v9.5: 移除所有与 CodeBuddy 原生工具重复的通用工具（filesystem/web/system）。
+    DevPartner 作为 MCP 只暴露核心的对话记录工具（start/record/finalize）。
+    CodeBuddy 自身具备 read_file/write_to_file/list_dir/search_file/search_content/execute_command 等工具，
+    MCP 不需要重复提供。
+    growth_analytics 工具仅供内部定时任务使用。
+    """
     global _tools_count
-
-    try:
-        from devpartner_tools.tools.filesystem import register_filesystem_tools
-        register_filesystem_tools(mcp)
-        _tools_count += 6
-    except Exception:
-        pass
-
-    try:
-        from devpartner_tools.tools.web_requests import register_web_request_tools
-        register_web_request_tools(mcp)
-        _tools_count += 3
-    except Exception:
-        pass
-
-    try:
-        from devpartner_tools.tools.system_utils import register_system_tools
-        register_system_tools(mcp)
-        _tools_count += 4
-    except Exception:
-        pass
-
-    try:
-        from devpartner_tools.tools.growth_analytics import register_growth_analytics_tools
-        register_growth_analytics_tools(mcp)
-        _tools_count += 10
-    except Exception:
-        pass
-
-
-def _register_agent_engines():
-    """注册智能管家层的所有领域引擎到 MCP"""
-    global _tools_count
-
-    engines = [
-        ("conversation", "devpartner_agent.core.conversation_engine"),
-        ("knowledge", "devpartner_agent.core.knowledge_engine"),
-        ("system", "devpartner_agent.core.system_engine"),
-        ("daily", "devpartner_agent.core.daily_engine"),
-        ("optimization", "devpartner_agent.core.optimization_engine"),
-    ]
-
-    for name, module in engines:
-        try:
-            mod = __import__(module, fromlist=[f"register_{name}_tools"])
-            func = getattr(mod, f"register_{name}_tools")
-            func(mcp)
-            _tools_count += 10
-        except Exception as e:
-            print(f"[WARN] 注册 {name} 引擎失败: {e}")
+    # 无通用工具需要注册，_tools_count 保持 0
+    # 核心的 3 个工具（start_conversation/record_step/finalize_conversation）在 server.py 直接注册
 
 
 def _register_rest_routes():
@@ -130,6 +92,64 @@ def _register_rest_routes():
         register_rest_routes(mcp)
     except Exception as e:
         print(f"[WARN] 注册 REST 路由失败: {e}")
+
+
+def _register_prompts():
+    """注册 MCP Prompts 到系统"""
+    global _prompts_count
+
+    @mcp.prompt(title="代码审查", description="对指定代码文件进行审查，分析代码质量、潜在问题和改进建议")
+    def code_review(file_path: str) -> list:
+        return [
+            {
+                "role": "user",
+                "content": f"请对以下代码文件进行审查，分析代码质量、潜在问题、安全性、性能和改进建议：\n\n文件路径: {file_path}\n\n请使用 read_file 工具读取文件内容，然后进行审查。"
+            }
+        ]
+    _prompts_count += 1
+
+    @mcp.prompt(title="每日总结", description="生成今日工作内容总结，包含关键技术点和待办事项")
+    def daily_summary() -> list:
+        return [
+            {
+                "role": "user",
+                "content": "请根据今日的对话记录，生成一份工作总结，包含：\n1. 今日完成的主要工作\n2. 涉及的关键技术点\n3. 遇到的问题及解决方案\n4. 明日待办事项\n\n请使用 get_recent_conversations 工具获取今日对话数据。"
+            }
+        ]
+    _prompts_count += 1
+
+    @mcp.prompt(title="技术方案", description="根据需求描述生成技术方案，包含架构设计、技术选型和实施计划")
+    def tech_solution(requirement: str) -> list:
+        return [
+            {
+                "role": "user",
+                "content": f"请根据以下需求，生成一份完整的技术方案：\n\n{requirement}\n\n请包含：\n1. 需求分析\n2. 架构设计\n3. 技术选型及理由\n4. 数据库/接口设计\n5. 实施计划\n6. 风险与应对措施"
+            }
+        ]
+    _prompts_count += 1
+
+    @mcp.prompt(title="知识提取", description="从对话内容中提取关键知识点，生成结构化知识卡片")
+    def knowledge_extraction(topic: str = "") -> list:
+        topic_hint = f"关于 {topic} " if topic else ""
+        return [
+            {
+                "role": "user",
+                "content": f"请从对话记录中提取{topic_hint}的关键知识点，以结构化知识卡片的形式输出。\n\n请使用 get_recent_conversations 工具获取对话数据，然后提取知识点。"
+            }
+        ]
+    _prompts_count += 1
+
+    @mcp.prompt(title="项目分析", description="分析项目代码结构，生成项目概览报告")
+    def project_analysis(project_path: str = ".") -> list:
+        return [
+            {
+                "role": "user",
+                "content": f"请分析项目 {project_path} 的代码结构，生成项目概览报告：\n\n1. 使用 list_dir 工具浏览项目目录结构\n2. 识别主要模块和依赖关系\n3. 分析技术栈和架构模式\n4. 评估代码质量和组织方式\n5. 提出改进建议"
+            }
+        ]
+    _prompts_count += 1
+
+    print(f"  [OK] prompts: {_prompts_count} 个 Prompt 已注册")
 
 
 def _register_task_handlers():
@@ -153,12 +173,6 @@ def _register_task_handlers():
         print(f"[WARN] 注册清理任务处理器失败: {e}")
 
     try:
-        from devpartner_agent.services.optimization_loop import register_task_handlers as register_optimization
-        register_optimization()
-    except Exception as e:
-        print(f"[WARN] 注册优化任务处理器失败: {e}")
-
-    try:
         from devpartner_agent.core.daily_engine import register_task_handlers as register_daily
         register_daily()
     except Exception as e:
@@ -170,8 +184,16 @@ def start_conversation(client: str = "unknown", topic: str = "",
                        task_type: str = "general", user_intent: str = "",
                        priority: str = "medium",
                        system_id: str = "default",
-                       user_raw_input: str = "") -> str:
-    """【总分总·总】开始一次新对话，创建会话并获取唯一 conversation_id。v8.0: 支持 system_id 多系统隔离"""
+                       user_raw_input: str = "",
+                       ai_analysis: str = "",
+                       trace_id: str = "",
+                       request_id: str = "",
+                       external_conv_id: str = "") -> str:
+    """【必须调用·总分总·总】每次对话开始时必须调用，创建会话记录并获取 conversation_id。
+
+    不调用将导致本次对话的所有步骤无法被系统记录。
+    v9.1: 新增 ai_analysis — AI 对用户意图的分析推理过程，系统异步分析。
+    v9.3: 新增 trace_id/request_id/external_conv_id — 外部调用链追踪三件套。"""
     from devpartner_agent.core.bootstrap import ensure_ready
     ensure_ready()
 
@@ -182,6 +204,10 @@ def start_conversation(client: str = "unknown", topic: str = "",
             client=client, topic=topic, task_type=task_type,
             user_intent=user_intent, priority=priority,
             system_id=system_id, user_raw_input=user_raw_input,
+            ai_analysis=ai_analysis,
+            trace_id=trace_id,
+            request_id=request_id,
+            external_conv_id=external_conv_id,
         )
         return json.dumps(result, ensure_ascii=False, indent=2, default=str)
     except Exception as e:
@@ -190,9 +216,20 @@ def start_conversation(client: str = "unknown", topic: str = "",
 
 @mcp.tool()
 def record_step(conversation_id: str = "", step_number: int = 0,
-                step_name: str = "", step_type: str = "",
-                step_input: str = "{}") -> str:
-    """【总分总·分】记录对话步骤，支持幂等性检查和 LLM 语义扩展"""
+                step_name: str = "", step_type: str = "general",
+                step_input: str = "{}",
+                content: str = "", files_changed: str = "",
+                symptom: str = "", root_cause: str = "",
+                solution: str = "", knowledge_points: str = "",
+                user_question: str = "", ai_reasoning: str = "",
+                user_requirement: str = "", commands_executed: str = "",
+                client_request_id: str = "") -> str:
+    """【必须调用·总分总·分】每完成一个子任务立即调用，记录步骤详情。
+
+    不可合并多个步骤为一次调用，不可等所有任务做完才补录。
+    不调用将导致该步骤数据丢失，无法被系统分析。
+    v9.1: 同时支持 step_input JSON 和独立参数，独立参数优先。
+    v9.1.1: 新增 client_request_id — AI 端幂等键。"""
     from devpartner_agent.core.bootstrap import ensure_ready
     ensure_ready()
 
@@ -200,23 +237,46 @@ def record_step(conversation_id: str = "", step_number: int = 0,
         from devpartner_agent.core.conversation_engine import get_conversation_engine
         engine = get_conversation_engine()
 
-        if not conversation_id or not step_number or not step_name:
+        if not conversation_id or step_number is None or not step_name:
             return json.dumps({
                 "error": "缺少必要参数: conversation_id, step_number, step_name",
                 "success": False
             }, ensure_ascii=False)
 
-        input_data = json.loads(step_input) if isinstance(step_input, str) else step_input
+        # v9.1: 合并 step_input JSON 和独立参数，独立参数优先
+        input_data = json.loads(step_input) if isinstance(step_input, str) else (step_input or {})
         if isinstance(input_data, dict):
+            # 独立参数优先于 step_input JSON
+            for key, val in [
+                ("content", content), ("files_changed", files_changed),
+                ("symptom", symptom), ("root_cause", root_cause),
+                ("solution", solution), ("knowledge_points", knowledge_points),
+                ("user_question", user_question), ("ai_reasoning", ai_reasoning),
+                ("user_requirement", user_requirement), ("commands_executed", commands_executed),
+            ]:
+                if val:  # 独立参数非空时覆盖
+                    input_data[key] = val
             input_data.setdefault("client_request_id", f"{conversation_id}-{step_number}")
+            # v9.1.1: 独立参数 client_request_id 优先
+            if client_request_id:
+                input_data["client_request_id"] = client_request_id
             step_input = json.dumps(input_data, ensure_ascii=False, default=str)
 
         result = engine.record_step(
             conversation_id=conversation_id,
-            step_number=step_number,
             step_name=step_name,
             step_type=step_type,
-            step_input=step_input,
+            content=input_data.get("content", ""),
+            files_changed=input_data.get("files_changed", ""),
+            symptom=input_data.get("symptom", ""),
+            root_cause=input_data.get("root_cause", ""),
+            solution=input_data.get("solution", ""),
+            knowledge_points=input_data.get("knowledge_points", ""),
+            user_question=input_data.get("user_question", ""),
+            client_request_id=input_data.get("client_request_id", f"{conversation_id}-{step_number}"),
+            ai_reasoning=input_data.get("ai_reasoning", ""),
+            user_requirement=input_data.get("user_requirement", ""),
+            commands_executed=input_data.get("commands_executed", ""),
         )
         return json.dumps(result, ensure_ascii=False, indent=2, default=str)
     except Exception as e:
@@ -224,8 +284,13 @@ def record_step(conversation_id: str = "", step_number: int = 0,
 
 
 @mcp.tool()
-def finalize_conversation(conversation_id: str = "") -> str:
-    """【总分总·总】结束一次对话，生成最终总结并归档"""
+def finalize_conversation(conversation_id: str = "", ai_summary: str = "") -> str:
+    """【必须调用·总分总·总】所有任务完成后必须调用，结束对话并触发全局分析。
+
+    不调用将导致本次对话标记为未完成，无法触发后续分析和知识提取。
+    AI 传入 conversation_id + ai_summary（AI的最终分析总结），
+    服务端合并 DB 结构化数据 + AI 文本分析触发全局分析。
+    v9.1 重构: AI 传分析文本，系统从 DB 读结构化数据，双向互补。"""
     from devpartner_agent.core.bootstrap import ensure_ready
     ensure_ready()
 
@@ -236,42 +301,13 @@ def finalize_conversation(conversation_id: str = "") -> str:
         if not conversation_id:
             return json.dumps({"error": "需要 conversation_id 参数", "success": False}, ensure_ascii=False)
 
-        result = engine.finalize_conversation(conversation_id=conversation_id)
-        return json.dumps(result, ensure_ascii=False, indent=2, default=str)
-    except Exception as e:
-        return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
-
-
-@mcp.tool()
-def question_with_context(question: str = "", context: str = "") -> str:
-    """【总分总·分】基于上下文提问，自动检索知识库并使用 LLM 回答"""
-    from devpartner_agent.core.bootstrap import ensure_ready
-    ensure_ready()
-
-    try:
-        from devpartner_agent.core.conversation_engine import get_conversation_engine
-        engine = get_conversation_engine()
-
-        if not question:
-            return json.dumps({
-                "error": "请输入问题内容",
-                "success": False,
-                "answer": None,
-                "sources": []
-            }, ensure_ascii=False)
-
-        result = engine.question_with_context(
-            question=question,
-            context=context,
+        result = engine.finalize_conversation(
+            conversation_id=conversation_id,
+            ai_summary=ai_summary,
         )
         return json.dumps(result, ensure_ascii=False, indent=2, default=str)
     except Exception as e:
-        return json.dumps({
-            "error": str(e),
-            "success": False,
-            "answer": f"处理问题时发生错误: {str(e)}",
-            "sources": []
-        }, ensure_ascii=False)
+        return json.dumps({"error": str(e), "success": False}, ensure_ascii=False)
 
 
 if __name__ == "__main__":
@@ -291,14 +327,15 @@ if __name__ == "__main__":
     _os.environ.setdefault("OLLAMA_NUM_PARALLEL", str(_cfg.llm.ollama_num_parallel))
 
     _register_tool_layer()
-    _register_agent_engines()
     _register_rest_routes()
+    _register_prompts()
 
     _register_task_handlers()
 
     agent_ok = ensure_ready()
     print("")
-    print(f"  工具层: {_tools_count} 个工具已注册")
+    print(f"  MCP工具: {_tools_count + 3} 个 (3核心 + 0通用)")
+    print(f"  Prompts: {_prompts_count} 个 Prompt 已注册")
     print(f"  管家层: {'已加载' if agent_ok else '降级模式'}")
     print(f"  LLM并行: OLLAMA_NUM_PARALLEL={_os.environ.get('OLLAMA_NUM_PARALLEL', '1')}")
     print("")
@@ -321,12 +358,11 @@ if __name__ == "__main__":
         print(f"  MCP端点: {access_url}")
         print("")
         print("  [系统架构]")
-        print("     [工具层] devpartner_tools: 21个纯工具 (无状态)")
-        print("     [智能层] devpartner_agent/core/: 6个领域引擎 (有状态)")
+        print("     [MCP层] 3个核心工具: start/record/finalize (对话记录三件套)")
+        print("     [智能层] devpartner_agent/core/: 领域引擎 + LLM + 调度器")
         print("")
         print("  [可用功能]")
         print(f"     [MCP] POST {access_url}")
-        print(f"     [仪表盘] http://localhost:{port}/dashboard")
         print(f"     [健康检查] http://localhost:{port}/health")
         print("")
         print("  待命状态: 等待 MCP 客户端连接...")

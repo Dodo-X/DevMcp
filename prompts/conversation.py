@@ -1,4 +1,4 @@
-from devpartner_agent.core.llm_prompts._common import AnalysisTask, parse_json
+from prompts._common import AnalysisTask, parse_json
 
 def _parse_conversation_analysis(raw: str) -> dict:
     """对话分析专用解析器：解析 + 标准化"""

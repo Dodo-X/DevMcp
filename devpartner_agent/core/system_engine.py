@@ -24,30 +24,39 @@ class SystemEngine:
     """系统域业务逻辑"""
 
     def get_system_health(self) -> dict:
-        from devpartner_agent.core.conversation_engine import get_conversation_engine
-        from devpartner_agent.services.task_queue import get_task_queue
+        result = {"timestamp": datetime.now().isoformat()}
 
-        engine = get_conversation_engine()
-        queue = get_task_queue()
+        # 会话引擎健康
+        try:
+            from devpartner_agent.core.conversation_engine import get_conversation_engine
+            engine = get_conversation_engine()
+            result["conversation_engine"] = engine.get_system_health()
+        except Exception as e:
+            result["conversation_engine"] = {"status": "error", "error": str(e)}
 
-        conv_health = engine.get_system_health()
-        queue_stats = queue.get_queue_stats()
+        # 任务队列健康
+        try:
+            from devpartner_agent.services.task_queue import get_task_queue
+            queue = get_task_queue()
+            result["task_queue"] = queue.get_queue_stats()
+        except Exception as e:
+            result["task_queue"] = {"status": "error", "error": str(e)}
 
-        db = self._get_db()
-        kp_total = db.query_local("SELECT COUNT(*) as cnt FROM knowledge_points")[0]["cnt"]
-        kp_by_domain = db.query_local(
-            "SELECT domain, COUNT(*) as cnt FROM knowledge_points GROUP BY domain ORDER BY cnt DESC LIMIT 10"
-        )
-
-        return {
-            "conversation_engine": conv_health,
-            "task_queue": queue_stats,
-            "knowledge_base": {
+        # 知识库统计
+        try:
+            db = self._get_db()
+            kp_total = db.query_local("SELECT COUNT(*) as cnt FROM knowledge_points")[0]["cnt"]
+            kp_by_domain = db.query_local(
+                "SELECT domain, COUNT(*) as cnt FROM knowledge_points GROUP BY domain ORDER BY cnt DESC LIMIT 10"
+            )
+            result["knowledge_base"] = {
                 "total_points": kp_total,
                 "by_domain": {r["domain"]: r["cnt"] for r in kp_by_domain},
-            },
-            "timestamp": datetime.now().isoformat(),
-        }
+            }
+        except Exception as e:
+            result["knowledge_base"] = {"error": str(e)}
+
+        return result
 
     def get_v5_status(self) -> dict:
         db = self._get_db()
@@ -86,6 +95,7 @@ class SystemEngine:
         issues = []
         checks = {}
 
+        # 数据库连接检查
         try:
             db = get_db()
             checks["database"] = "healthy"
@@ -93,10 +103,11 @@ class SystemEngine:
             checks["database"] = f"unhealthy: {e}"
             issues.append(f"数据库异常: {e}")
 
+        # 日志目录检查
         try:
             from devpartner_agent.core.config import get_config
             cfg = get_config()
-            log_dir = Path(cfg.data.logs_dir)
+            log_dir = Path(cfg.data.logs_dir) if hasattr(cfg, 'data') and hasattr(cfg.data, 'logs_dir') else Path("data/logs")
             if log_dir.exists():
                 log_count = len(list(log_dir.glob("*.md")))
                 checks["logs"] = f"healthy ({log_count} 个日志文件)"
@@ -106,13 +117,19 @@ class SystemEngine:
         except Exception as e:
             checks["logs"] = f"error: {e}"
 
+        # 数据库表统计
         try:
-            from devpartner_agent.core.rule_engine import get_engine
-            engine = get_engine()
-            rules = engine.get_all()
-            checks["rules"] = f"healthy ({len(rules)} 条规则)"
+            tables = ["conversations", "conversation_steps", "knowledge_points", "user_skills", "task_queue", "growth_analysis"]
+            table_counts = {}
+            for t in tables:
+                try:
+                    row = db.query_local(f"SELECT COUNT(*) as cnt FROM {t}")
+                    table_counts[t] = row[0]["cnt"] if row else 0
+                except Exception:
+                    table_counts[t] = "N/A"
+            checks["tables"] = table_counts
         except Exception as e:
-            checks["rules"] = f"error: {e}"
+            checks["tables"] = f"error: {e}"
 
         return {
             "success": True,
@@ -137,7 +154,10 @@ class SystemEngine:
 
         if scope in ("all", "conversations"):
             scheduler = get_cleanup_scheduler()
-            conv_result = scheduler.cleanup(scope, dry_run)
+            if dry_run:
+                conv_result = {"dry_run": True, "message": "将执行归档清理（温/冷/深度三阶段）"}
+            else:
+                conv_result = scheduler.run_now()
             result["conversations"] = conv_result
 
         if scope in ("all", "tasks", "tasks_force", "stats"):
@@ -189,7 +209,7 @@ def get_system_engine() -> SystemEngine:
 
 
 def register_system_tools(mcp):
-    """注册系统域的所有 MCP 工具"""
+    """注册系统域的用户端 MCP 工具（内部运维工具通过 REST API 暴露）"""
 
     @mcp.tool()
     def get_system_health() -> str:
@@ -225,28 +245,6 @@ def register_system_tools(mcp):
         return _inner()
 
     @mcp.tool()
-    def check_data_integrity(include_write_stats: bool = True) -> str:
-        """检查数据库数据完整性：关键字段非空 + FK 关联有效性 + 写入成功率。"""
-        from devpartner_agent.core.decorators import mcp_tool_handler
-
-        @mcp_tool_handler
-        def _inner():
-            engine = get_system_engine()
-            return engine.check_data_integrity(include_write_stats)
-        return _inner()
-
-    @mcp.tool()
-    def cleanup_data(scope: str = "all", dry_run: bool = False) -> str:
-        """数据清理（支持对话旧记录 + 软删除任务）。"""
-        from devpartner_agent.core.decorators import mcp_tool_handler
-
-        @mcp_tool_handler
-        def _inner():
-            engine = get_system_engine()
-            return engine.cleanup_data(scope, dry_run)
-        return _inner()
-
-    @mcp.tool()
     def llm_status(action: str = "status") -> str:
         """查看或控制本地 LLM 服务（Ollama）。"""
         from devpartner_agent.core.decorators import mcp_tool_handler
@@ -256,3 +254,7 @@ def register_system_tools(mcp):
             engine = get_system_engine()
             return engine.llm_status(action)
         return _inner()
+
+    # 以下内部工具仅通过 REST API 暴露，不注册为 MCP 工具：
+    #   check_data_integrity → /api/system/check-integrity
+    #   cleanup_data         → /api/system/cleanup

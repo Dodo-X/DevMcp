@@ -80,7 +80,7 @@ class KnowledgeExtractor:
 
                 existing_titles = self._get_all_titles()
 
-                from devpartner_agent.core.llm_prompts import run_analysis, TASK_KNOWLEDGE_EXTRACTION
+                from prompts import run_analysis, TASK_KNOWLEDGE_EXTRACTION
                 parsed = run_analysis(
                     TASK_KNOWLEDGE_EXTRACTION,
                     project_name=project_name,
@@ -183,6 +183,13 @@ class KnowledgeExtractor:
 
         kp_type = item.get("type", "skill")
         domain = item.get("domain", project_name or "General")
+
+        # v9.3.1: 技能类知识点 domain 强制标准化（LLM 可能不遵守 Prompt 归类规则）
+        if kp_type == "skill":
+            from devpartner_agent.core.skill_domain_standard import normalize_domain, is_standard_domain
+            if not is_standard_domain(domain):
+                domain = normalize_domain(domain)
+
         category = item.get("category", "concept")
         tags = item.get("tags", [])
         difficulty = item.get("difficulty", "medium")
@@ -252,26 +259,27 @@ class KnowledgeExtractor:
                 tags=tags,
                 source_type="finalize",
                 source_id=conversation_id,
+                kp_type=kp_type,
+                aliases=aliases,
+                source_session_id=source_session_id or conversation_id,
+                source_step_id=source_step_id,
             )
 
             if kp_id:
-                # 更新新增字段
-                self.db.query_local(
-                    """UPDATE knowledge_points SET
-                           type = ?, aliases = ?, source_session_id = ?,
-                           source_step_id = ?, difficulty = ?,
-                           related_knowledge_ids = ?
-                       WHERE knowledge_id = ?""",
-                    (
-                        kp_type,
-                        json.dumps(aliases, ensure_ascii=False),
-                        source_session_id or conversation_id,
-                        source_step_id or "",
-                        difficulty,
-                        json.dumps(related_ids, ensure_ascii=False) if related_ids else "",
-                        kp_id,
+                # 更新 difficulty 和 related_knowledge_ids（INSERT 中不包含的字段）
+                try:
+                    self.db.query_local(
+                        """UPDATE knowledge_points SET
+                               difficulty = ?, related_knowledge_ids = ?
+                           WHERE knowledge_id = ?""",
+                        (
+                            difficulty,
+                            json.dumps(related_ids, ensure_ascii=False) if related_ids else "",
+                            kp_id,
+                        )
                     )
-                )
+                except Exception:
+                    pass
                 logger.info(f"💡 创建知识: {title} ({kp_type}) → {kp_id}")
 
             return kp_id
@@ -323,9 +331,6 @@ class KnowledgeExtractor:
                 logger.warning(f"无法解析 LLM JSON: {json_str[:200]}")
                 return None
 
-
-# ── 向后兼容别名 ──
-BusinessKnowledgeExtractor = KnowledgeExtractor
 
 
 def get_knowledge_extractor() -> KnowledgeExtractor:

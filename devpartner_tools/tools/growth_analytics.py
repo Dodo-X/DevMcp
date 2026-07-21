@@ -88,7 +88,7 @@ def get_user_growth_overview() -> str:
         """)
         top_domain = top_domain_result[0]['skill_domain'] if top_domain_result else '未分类'
         
-        # 6. 各领域技能分布
+        # 6. 各领域技能分布（v9.3: 按 skill_domain 聚合，展示领域下的技能名）
         domain_dist_result = db.query_local("""
             SELECT skill_domain, COUNT(*) as count,
                    AVG(CASE skill_level
@@ -96,7 +96,8 @@ def get_user_growth_overview() -> str:
                     WHEN 'intermediate' THEN 55
                     WHEN 'advanced' THEN 80
                     WHEN 'expert' THEN 95
-                    ELSE 25 END) as avg_mastery
+                    ELSE 25 END) as avg_mastery,
+                   sub_skills
             FROM user_skills
             GROUP BY skill_domain
             ORDER BY count DESC
@@ -105,7 +106,8 @@ def get_user_growth_overview() -> str:
             {
                 'domain': row['skill_domain'] or '其他',
                 'count': row['count'],
-                'avg_mastery': round(row['avg_mastery'], 1) if row['avg_mastery'] else 0
+                'avg_mastery': round(row['avg_mastery'], 1) if row['avg_mastery'] else 0,
+                'skills': [s.strip() for s in (str(row.get('sub_skills', '') or '')).split(',') if s.strip()],
             }
             for row in domain_dist_result
         ] if domain_dist_result else []
@@ -237,18 +239,23 @@ def get_system_evolution_stats() -> str:
         else:
             knowledge_growth_rate = 0.0
         
-        # 5. 优化建议采纳率（optimization_feedback 中 status='adopted' 的比例）
+        # 5. 优化建议采纳率（growth_analysis 表中 approved + applied_at 非空 的比例）
+        #    注意：growth_analysis 取代了 optimization_feedback，是 v8.1.0+ 的官方优化建议表
+        ninety_days_ago = (datetime.now() - timedelta(days=90)).isoformat()
         adoption_result = db.query_local("""
             SELECT 
-                SUM(CASE WHEN status = 'adopted' THEN 1 ELSE 0 END) as adopted,
+                SUM(CASE WHEN status = 'approved' AND applied_at IS NOT NULL THEN 1 ELSE 0 END) as adopted,
+                SUM(CASE WHEN status IN ('approved', 'rejected') THEN 1 ELSE 0 END) as reviewed,
                 COUNT(*) as total
-            FROM optimization_feedback
-            WHERE created_at >= datetime('now', '-90 days')
-        """)
+            FROM growth_analysis
+            WHERE timestamp >= ?
+        """, (ninety_days_ago,))
         total_suggestions = adoption_result[0]['total'] if adoption_result else 0
+        reviewed = adoption_result[0]['reviewed'] if adoption_result else 0
         adopted = adoption_result[0]['adopted'] if adoption_result else 0
-        
-        suggestion_adoption_rate = round((adopted / total_suggestions) * 100, 1) if total_suggestions > 0 else 0.0
+
+        # 采纳率 = 已应用 / 已审核（而非 / 总数，避免 pending 拉低比例）
+        suggestion_adoption_rate = round((adopted / reviewed) * 100, 1) if reviewed > 0 else 0.0
         
         # 6. 当前版本号（从最近一次 evolution_log 推导，空则回退到服务端 VERSION）
         current_version = recent_changes[0]['version'] if recent_changes else '6.0.0'
@@ -305,7 +312,7 @@ def get_system_evolution_stats() -> str:
             'iteration_rate_per_week': round(total_iterations / max(1, days_since_first / 7), 1) if days_since_first > 0 else 0.0,
             # 原始字段
             'last_iteration_time': last_iteration_time,
-            'pending_suggestions': max(0, total_suggestions - adopted),
+            'pending_suggestions': max(0, total_suggestions - reviewed),
             'last_updated': datetime.now().isoformat(),
             'status': 'success'
         }
@@ -358,29 +365,26 @@ def get_user_skill_radar() -> str:
         
         db = get_db()
         
-        # 定义6个维度及其对应的 domain 映射
-        dimension_map = {
-            'frontend': ['前端', 'Frontend', 'React', 'Vue', 'JavaScript', 'TypeScript', 'HTML', 'CSS'],
-            'backend': ['后端', 'Backend', 'Python', 'Java', 'Go', 'Node.js', 'API', '微服务'],
-            'database': ['数据库', 'Database', 'SQL', 'MySQL', 'PostgreSQL', 'Redis', 'MongoDB'],
-            'devops': ['DevOps', '运维', 'Docker', 'Kubernetes', 'CI/CD', 'Linux', 'Nginx'],
-            'algorithm': ['算法', 'Algorithm', '数据结构', 'LeetCode', '排序', '搜索'],
-            'ai_ml': ['AI', 'ML', '机器学习', '深度学习', 'NLP', 'PyTorch', 'TensorFlow', 'LLM']
+        # v9.3: 直接按 skill_domain 字段分组，不再用硬编码关键词 LIKE 匹配
+        # 标准7大领域 → 雷达图7个维度
+        domain_label_map = {
+            'Python': 'Python',
+            '前端': '前端开发',
+            'AI/LLM': 'AI/LLM',
+            'DevOps': 'DevOps',
+            '数据库': '数据库',
+            '架构设计': '架构设计',
+            '通用工程': '通用工程',
         }
         
-        # 当前时间
         now = datetime.now()
         thirty_days_ago = (now - timedelta(days=30)).isoformat()
         
         radar_data = {'current': [], 'thirty_days_ago': [], 'labels': []}
         
-        for dim_name, keywords in dimension_map.items():
-            # 构建SQL查询：匹配 skill_domain 的模糊查询
-            conditions = ' OR '.join([f"skill_domain LIKE ?" for _ in keywords])
-            params = [f'%{kw}%' for kw in keywords]
-            
+        for domain, label in domain_label_map.items():
             # 当前掌握度
-            current_result = db.query_local(f"""
+            current_result = db.query_local("""
                 SELECT AVG(CASE skill_level
                     WHEN 'beginner' THEN 25
                     WHEN 'intermediate' THEN 55
@@ -388,12 +392,12 @@ def get_user_skill_radar() -> str:
                     WHEN 'expert' THEN 95
                     ELSE 25 END) as avg_mastery
                 FROM user_skills
-                WHERE ({conditions})
-            """, tuple(params))
+                WHERE skill_domain = ?
+            """, (domain,))
             current_score = round(current_result[0]['avg_mastery'], 1) if current_result and current_result[0]['avg_mastery'] else 0
             
             # 30天前的掌握度（基于 timestamp）
-            historical_result = db.query_local(f"""
+            historical_result = db.query_local("""
                 SELECT AVG(CASE skill_level
                     WHEN 'beginner' THEN 25
                     WHEN 'intermediate' THEN 55
@@ -401,23 +405,13 @@ def get_user_skill_radar() -> str:
                     WHEN 'expert' THEN 95
                     ELSE 25 END) as avg_mastery
                 FROM user_skills
-                WHERE ({conditions}) AND timestamp < ?
-            """, tuple(params) + (thirty_days_ago,))
+                WHERE skill_domain = ? AND timestamp < ?
+            """, (domain, thirty_days_ago))
             historical_score = round(historical_result[0]['avg_mastery'], 1) if historical_result and historical_result[0]['avg_mastery'] else 0
-            
-            # 维度显示名称
-            label_map = {
-                'frontend': '前端开发',
-                'backend': '后端开发',
-                'database': '数据库',
-                'devops': 'DevOps',
-                'algorithm': '算法设计',
-                'ai_ml': 'AI/ML'
-            }
             
             radar_data['current'].append(current_score)
             radar_data['thirty_days_ago'].append(historical_score)
-            radar_data['labels'].append(label_map.get(dim_name, dim_name))
+            radar_data['labels'].append(label)
         
         result = {
             'dimensions': radar_data['labels'],

@@ -1,4 +1,4 @@
-from devpartner_agent.core.llm_prompts._common import AnalysisTask, parse_json
+from prompts._common import AnalysisTask, parse_json
 
 def _parse_self_improvement(raw: str) -> list:
     """自我改进专用解析器：返回建议列表"""

@@ -1,7 +1,7 @@
 """
-异步任务队列 (v8.1)
-==================
-管理后台任务的异步执行，支持 FIFO 调度和阶段级并发控制。
+异步任务队列 (v9.5.1)
+=====================
+管理后台任务的异步执行，支持 FIFO 调度、阶段级并发控制、心跳保活和进度报告。
 
 核心职责（仅限调度）：
   ✅ FIFO 先进先出调度
@@ -15,11 +15,14 @@
   ✅ 任务超时处理
   ✅ 失败重试机制
   ✅ 僵尸任务清理
+  ✅ 心跳保活（v9.5.1）：长任务定期报告存活状态
+  ✅ 进度报告（v9.5.1）：Worker 可更新任务进度和部分结果
 
-v8.1 变更（相比 v8.0）：
-  - 锁粒度从"会话级互斥"细化为"阶段级并发"
-  - Semaphore/ThreadPool 与 OLLAMA_NUM_PARALLEL 对齐
-  - step_analysis 同会话可并行，finalize 必须等步骤全完成
+v9.5.1 变更（相比 v9.5.0）：
+  - 新增心跳机制：Worker 定期更新 last_heartbeat，防止被误杀
+  - 新增进度更新：update_task_progress() 让长任务报告进度
+  - 僵尸检测改用 last_heartbeat 替代 started_at 判断
+  - 任务元数据新增 last_heartbeat / progress / partial_result 字段
 """
 import json
 import uuid
@@ -68,7 +71,7 @@ class TaskQueue:
     资源策略：
       - 全局并发数: 与 OLLAMA_NUM_PARALLEL 对齐
       - 最大内存阈值: 1.5GB
-      - 单任务超时: 300秒
+      - 单任务超时: 3600秒（v9.5: LLM 推理不设 HTTP 超时，任务级给 1h 兜底）
       - 最大重试: 3次
 
     并发模型（v8.1 阶段级）：
@@ -84,7 +87,6 @@ class TaskQueue:
         "vault_export_project", "vault_export_weekly", "vault_export_monthly",
         "vault_export_annual", "vault_export_daily",
         "cleanup_force", "cleanup_vacuum", "cleanup_full",
-        "optimization_report", "optimization_apply", "optimization_feedback",
     }
     PHASE_SEQUENTIAL = {"conversation_finalize", "conversation_analysis",
                         "profile_update", "knowledge_extraction", "system_optimization",
@@ -182,7 +184,7 @@ class TaskQueue:
         task_type: str,
         payload: Dict[str, Any],
         priority: int = TaskPriority.MEDIUM,
-        timeout_seconds: int = 300,
+        timeout_seconds: int = 3600,
         max_retries: int = 3,
         estimated_memory_mb: int = 100,
         callback: Optional[Callable] = None
@@ -206,6 +208,11 @@ class TaskQueue:
             "completed_at": None,
             "error_message": None,
             "result": None,
+            # v9.5.1: 心跳 & 进度
+            "last_heartbeat": None,
+            "progress": 0.0,
+            "partial_result": "",
+            "status_note": "",
         }
 
         try:
@@ -377,6 +384,7 @@ class TaskQueue:
         start_time = time.time()
         db = None
         release_event = threading.Event()
+        heartbeat_stop = threading.Event()
 
         acquired = self._semaphore.acquire(timeout=1.0)
         if not acquired:
@@ -389,10 +397,26 @@ class TaskQueue:
 
             from devpartner_agent.core.database import get_db
             db = get_db()
+            now_ts = datetime.now().isoformat()
             db.query_local("""
-                UPDATE task_queue SET status = 'running', started_at = ?, worker_id = ?
+                UPDATE task_queue SET status = 'running', started_at = ?, last_heartbeat = ?, worker_id = ?
                 WHERE task_id = ?
-            """, (datetime.now().isoformat(), threading.current_thread().name, task_id))
+            """, (now_ts, now_ts, threading.current_thread().name, task_id))
+            if task_id in self._task_map:
+                self._task_map[task_id]["started_at"] = now_ts
+                self._task_map[task_id]["last_heartbeat"] = now_ts
+
+            # v9.5.1: 启动心跳线程（每 45 秒更新一次）
+            def _heartbeat_loop():
+                while not heartbeat_stop.is_set():
+                    heartbeat_stop.wait(45)
+                    if not heartbeat_stop.is_set():
+                        self.update_heartbeat(task_id)
+
+            heartbeat_thread = threading.Thread(
+                target=_heartbeat_loop, name=f"hb_{task_id[:8]}", daemon=True
+            )
+            heartbeat_thread.start()
 
             timeout_seconds = task_meta.get("timeout_seconds", 300)
             result = self._execute_with_timeout(task_meta, timeout_seconds)
@@ -432,6 +456,7 @@ class TaskQueue:
             self._handle_task_failure(task_id, error_msg, db, release_event)
 
         finally:
+            heartbeat_stop.set()
             self._semaphore.release()
             self._update_memory_usage(task_meta.get("estimated_memory_mb", 100), delta=False)
             release_event.set()
@@ -479,9 +504,19 @@ class TaskQueue:
         raise TimeoutError(f"Task execution exceeded {timeout_seconds}s")
 
     def _dispatch_task_execution(self, task_meta: dict) -> Any:
-        """根据任务类型分发到已注册的 handler"""
+        """根据任务类型分发到已注册的 handler
+
+        v9.5.1: payload 中自动注入 _task_id 和 _progress_callback，
+        让 handler 可以更新任务进度和心跳。
+        """
         task_type = task_meta["task_type"]
-        payload = task_meta["payload"]
+        payload = task_meta["payload"].copy()
+        task_id = task_meta["task_id"]
+
+        # 注入任务上下文
+        payload["_task_id"] = task_id
+        payload["_progress_callback"] = lambda progress, partial="", note="": \
+            self.update_task_progress(task_id, progress, partial, note)
 
         handler = self._handlers.get(task_type)
         if handler is None:
@@ -623,6 +658,78 @@ class TaskQueue:
             self._stats["total_cancelled"] += 1
         return True
 
+    # ══════════════════════════════════════════════════════════
+    # v9.5.1: 心跳保活 & 进度报告
+    # ══════════════════════════════════════════════════════════
+
+    def update_heartbeat(self, task_id: str):
+        """更新任务心跳时间戳，防止被僵尸检测误杀。
+
+        长任务（如重型 LLM 分析）应每 30-60 秒调用一次。
+        心跳同时写入内存和数据库。
+        """
+        now = datetime.now().isoformat()
+        if task_id in self._task_map:
+            self._task_map[task_id]["last_heartbeat"] = now
+
+        try:
+            from devpartner_agent.core.database import get_db
+            db = get_db()
+            db.query_local(
+                "UPDATE task_queue SET last_heartbeat = ? WHERE task_id = ?",
+                (now, task_id)
+            )
+        except Exception:
+            pass
+
+    def update_task_progress(self, task_id: str, progress: float,
+                              partial_result: str = "", status_note: str = ""):
+        """更新任务进度（0.0 ~ 1.0）和部分结果预览。
+
+        Worker 在处理长任务时调用，让外部轮询者看到实时进度。
+
+        Args:
+            task_id: 任务ID
+            progress: 进度 0.0 ~ 1.0
+            partial_result: 部分生成结果的前若干字符（预览用）
+            status_note: 状态备注（如 "正在生成用户画像..."）
+        """
+        progress = max(0.0, min(1.0, progress))
+        now = datetime.now().isoformat()
+
+        if task_id in self._task_map:
+            self._task_map[task_id]["progress"] = progress
+            self._task_map[task_id]["partial_result"] = partial_result[:2000] if partial_result else ""
+            self._task_map[task_id]["status_note"] = status_note
+            self._task_map[task_id]["last_heartbeat"] = now
+
+        try:
+            from devpartner_agent.core.database import get_db
+            db = get_db()
+            db.query_local(
+                "UPDATE task_queue SET progress = ?, partial_result = ?, status_note = ?, last_heartbeat = ? WHERE task_id = ?",
+                (progress, partial_result[:2000] if partial_result else "", status_note, now, task_id)
+            )
+        except Exception:
+            pass
+
+    def get_running_tasks_with_progress(self) -> list:
+        """获取所有运行中任务的进度信息（用于 Dashboard 展示）"""
+        running = []
+        for tid, meta in self._task_map.items():
+            if meta.get("status") == TaskStatus.RUNNING.value:
+                running.append({
+                    "task_id": tid,
+                    "task_type": meta.get("task_type", ""),
+                    "progress": meta.get("progress", 0.0),
+                    "partial_result": meta.get("partial_result", ""),
+                    "status_note": meta.get("status_note", ""),
+                    "last_heartbeat": meta.get("last_heartbeat", ""),
+                    "started_at": meta.get("started_at", ""),
+                    "conversation_id": meta.get("payload", {}).get("conversation_id", ""),
+                })
+        return running
+
     def get_queue_stats(self) -> dict:
         pending_count = sum(
             1 for t in self._task_map.values()
@@ -715,6 +822,8 @@ class TaskQueue:
         try:
             from devpartner_agent.core.database import get_db
             db = get_db()
+            if not db.is_local_initialized():
+                return
             rows = db.query_local(
                 "SELECT task_id, status FROM task_queue WHERE status IN ('processing', 'running') AND is_deleted = 0"
             )
@@ -733,6 +842,9 @@ class TaskQueue:
                 time.sleep(10)
                 from devpartner_agent.core.database import get_db
                 db = get_db()
+                if not db.is_local_initialized():
+                    time.sleep(10)
+                    continue
                 now = datetime.now().isoformat()
                 rows = db.query_local(
                     "SELECT task_id, retry_count, max_retries FROM task_queue "
@@ -765,19 +877,36 @@ class TaskQueue:
     # ══════════════════════════════════════════════════════════
 
     def _auto_cleanup_zombies(self):
+        """v9.5.1: 基于 last_heartbeat 判断僵尸（优先），fallback 到 started_at"""
         try:
             from devpartner_agent.core.database import get_db
             db = get_db()
+            if not db.is_local_initialized():
+                return
             rows = db.query_local(
-                "SELECT task_id, started_at FROM task_queue WHERE status='running'"
+                "SELECT task_id, started_at, last_heartbeat FROM task_queue WHERE status='running'"
             )
             if not rows:
                 return
 
             now = datetime.now()
-            max_age = 600
+            max_age = 3600  # 1 小时无心跳 = 僵尸
             cleaned = 0
             for row in rows:
+                # 优先使用心跳时间判断
+                heartbeat = row.get("last_heartbeat")
+                if heartbeat:
+                    try:
+                        hb_time = datetime.fromisoformat(heartbeat)
+                        age_s = (now - hb_time).total_seconds()
+                        if age_s > max_age:
+                            self._mark_zombie(db, row['task_id'], age_s, now)
+                            cleaned += 1
+                        continue
+                    except Exception:
+                        pass
+
+                # fallback: 用 started_at 判断
                 started_at = row.get("started_at")
                 if not started_at:
                     continue
@@ -785,10 +914,7 @@ class TaskQueue:
                     started = datetime.fromisoformat(started_at)
                     age_s = (now - started).total_seconds()
                     if age_s > max_age:
-                        db.query_local(
-                            "UPDATE task_queue SET status='timeout', error_message=?, completed_at=? WHERE task_id=?",
-                            (f"Auto zombie cleanup after {age_s/3600:.1f}h", now.isoformat(), row['task_id'])
-                        )
+                        self._mark_zombie(db, row['task_id'], age_s, now)
                         cleaned += 1
                 except Exception:
                     pass
@@ -799,10 +925,28 @@ class TaskQueue:
         except Exception as e:
             logger.warning(f"⚠️ 僵尸任务检查失败（非致命）: {e}")
 
+    def _mark_zombie(self, db, task_id: str, age_s: float, now: datetime):
+        """标记任务为僵尸/超时"""
+        db.query_local(
+            "UPDATE task_queue SET status='timeout', error_message=?, completed_at=? WHERE task_id=?",
+            (f"Auto zombie cleanup after {age_s/3600:.1f}h (no heartbeat)", now.isoformat(), task_id)
+        )
+        if task_id in self._task_map:
+            self._update_task_status(task_id, TaskStatus.TIMEOUT.value,
+                                      error=f"Zombie after {age_s/3600:.1f}h")
+        if task_id in self._futures:
+            try:
+                self._futures[task_id].cancel()
+            except Exception:
+                pass
+            del self._futures[task_id]
+
     def _auto_cleanup_orphan_steps(self):
         try:
             from devpartner_agent.core.database import get_db
             db = get_db()
+            if not db.is_local_initialized():
+                return
             now = datetime.now()
 
             db.query_local("""

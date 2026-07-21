@@ -1,0 +1,2 @@
+hasattr ollama_model: True
+after merge: Qwen3.5-9B-Q4_1:latest

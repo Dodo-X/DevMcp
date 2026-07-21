@@ -19,6 +19,52 @@ logger = logging.getLogger(__name__)
 
 _core_initialized = False
 _ollama_started = False
+_ollama_logs: list = []  # 启动日志缓冲区，供 Dashboard 消费
+_MAX_OLLAMA_LOGS = 200
+
+
+def _ollama_log(msg: str, level: str = "INFO"):
+    """记录 Ollama 操作日志到缓冲区"""
+    ts = time.strftime("%H:%M:%S")
+    _ollama_logs.append({"time": ts, "level": level, "msg": msg})
+    if len(_ollama_logs) > _MAX_OLLAMA_LOGS:
+        _ollama_logs.pop(0)
+    if level == "ERROR":
+        logger.error(msg)
+    elif level == "WARN":
+        logger.warning(msg)
+    else:
+        logger.info(msg)
+
+
+def get_ollama_logs() -> list:
+    """获取 Ollama 操作日志（供 API 和 Dashboard 消费）"""
+    return list(_ollama_logs)
+
+
+def reset_ollama_state():
+    """重置 Ollama 状态，允许重新尝试连接"""
+    global _ollama_started
+    _ollama_started = False
+    _ollama_logs.clear()
+    _ollama_log("Ollama 状态已重置，准备重新连接...", "INFO")
+
+
+def start_ollama_service(timeout: int = 30) -> dict:
+    """手动启动 Ollama 服务并连接（供 Dashboard 调用）
+
+    Returns:
+        {"success": bool, "logs": [...], "error": str|None}
+    """
+    reset_ollama_state()
+    ok = _ensure_ollama_running(timeout=timeout)
+    if ok:
+        _ollama_log("Ollama 服务已就绪，LLM 引擎可用", "INFO")
+        return {"success": True, "logs": get_ollama_logs(), "error": None}
+    else:
+        _ollama_log("Ollama 启动失败，请检查安装和配置", "ERROR")
+        return {"success": False, "logs": get_ollama_logs(),
+                "error": "Ollama 启动超时或命令不可用，请确认已安装 Ollama"}
 
 
 def _ensure_ollama_running(timeout: int = 30) -> bool:
@@ -32,9 +78,11 @@ def _ensure_ollama_running(timeout: int = 30) -> bool:
     """
     global _ollama_started
     if _ollama_started:
+        _ollama_log("Ollama 已标记为就绪，跳过启动检查", "INFO")
         return True
 
     ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+    _ollama_log(f"Ollama 地址: {ollama_url}", "INFO")
 
     def _check_ollama() -> bool:
         try:
@@ -42,59 +90,85 @@ def _ensure_ollama_running(timeout: int = 30) -> bool:
             req.add_header("Content-Type", "application/json")
             with urllib.request.urlopen(req, timeout=3) as resp:
                 return resp.status == 200
-        except Exception:
+        except urllib.error.URLError as e:
+            _ollama_log(f"连接 Ollama 失败: {e.reason}", "WARN")
+            return False
+        except Exception as e:
+            _ollama_log(f"检查 Ollama 异常: {e}", "WARN")
             return False
 
-    # 1. 检查是否已运行
     if _check_ollama():
         _ollama_started = True
+        _ollama_log("Ollama 服务已在运行", "INFO")
         return True
 
-    # 2. 检查 ollama 命令是否可用
+    _ollama_log("Ollama 未运行，检查 ollama 命令...", "INFO")
+
     try:
         result = subprocess.run(
             ["ollama", "--version"],
             capture_output=True, text=True, timeout=5
         )
         if result.returncode != 0:
-            print("[WARN] ollama 命令不可用，请确保已安装 Ollama: https://ollama.com/download")
+            _ollama_log("ollama 命令不可用，请确保已安装 Ollama: https://ollama.com/download", "ERROR")
             return False
+        _ollama_log(f"ollama 版本: {result.stdout.strip()}", "INFO")
     except FileNotFoundError:
-        print("[WARN] ollama 命令未找到，请确保已安装 Ollama: https://ollama.com/download")
+        _ollama_log("ollama 命令未找到，请确保已安装 Ollama: https://ollama.com/download", "ERROR")
         return False
     except Exception as e:
-        print(f"[WARN] 检查 ollama 命令失败: {e}")
+        _ollama_log(f"检查 ollama 命令失败: {e}", "ERROR")
         return False
 
-    # 3. 尝试自动启动 Ollama
-    print("[INFO] Ollama 未运行，正在自动启动...")
+    _ollama_log("正在启动 ollama serve...", "INFO")
     try:
         kwargs = {
-            "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.DEVNULL,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
         }
         if sys.platform == "win32":
-            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-        else:
-            kwargs["start_new_session"] = True
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
 
-        subprocess.Popen(["ollama", "serve"], **kwargs)
-        print("[INFO] ollama serve 已启动，等待服务就绪...")
+        proc = subprocess.Popen(["ollama", "serve"], **kwargs)
+        _ollama_log(f"ollama serve 已启动 (PID: {proc.pid})", "INFO")
+
+        import threading
+        def _read_ollama_output():
+            try:
+                stdout, stderr = proc.communicate(timeout=5)
+                if stdout:
+                    for line in stdout.decode("utf-8", errors="replace").split("\n")[:5]:
+                        if line.strip():
+                            _ollama_log(f"[ollama] {line.strip()}", "INFO")
+                if stderr:
+                    for line in stderr.decode("utf-8", errors="replace").split("\n")[:5]:
+                        if line.strip():
+                            _ollama_log(f"[ollama ERR] {line.strip()}", "WARN")
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_read_ollama_output, daemon=True)
+        t.start()
     except Exception as e:
-        print(f"[WARN] 启动 Ollama 失败: {e}")
+        _ollama_log(f"启动 Ollama 失败: {e}", "ERROR")
         return False
 
-    # 4. 轮询等待 Ollama 就绪
+    _ollama_log(f"等待 Ollama 就绪 (最长 {timeout}s)...", "INFO")
     start = time.time()
+    last_log = start
     while time.time() - start < timeout:
         if _check_ollama():
             elapsed = time.time() - start
-            print(f"[INFO] Ollama 已就绪 (耗时 {elapsed:.1f}s)")
+            _ollama_log(f"Ollama 已就绪 (耗时 {elapsed:.1f}s)", "INFO")
             _ollama_started = True
             return True
+        if time.time() - last_log >= 5:
+            _ollama_log(f"等待中... ({time.time() - start:.0f}s/{timeout}s)", "INFO")
+            last_log = time.time()
         time.sleep(2)
 
-    print(f"[WARN] Ollama 启动超时 ({timeout}s)，将以降级模式运行")
+    _ollama_log(f"Ollama 启动超时 ({timeout}s)，将以降级模式运行", "ERROR")
+    _ollama_started = False
     return False
 
 
@@ -150,9 +224,6 @@ def ensure_ready():
             db._local_conn.commit()
         except Exception:
             pass
-
-        from devpartner_agent.core.rule_engine import get_engine
-        from devpartner_agent.core.identity import get_identity
 
         try:
             from devpartner_agent.services.cleanup_service import get_cleanup_scheduler

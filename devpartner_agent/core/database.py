@@ -101,6 +101,8 @@ class Database:
                 self._migrate_v80()
                 # v8.1: 系统成长分析表（growth_analysis）
                 self._migrate_v81()
+                # v9.3: 技能领域分类重构（skill_name 字段 + 存量归类）
+                self._migrate_v93()
                 # 记录当前 schema 版本
                 self._set_schema_version(current_version)
                 print(f"[DB] Schema 迁移完成 → {current_version}")
@@ -129,19 +131,14 @@ class Database:
         #   topic            TEXT     对话主题（一句话）
         #   task_type        TEXT     任务类型（debug/design/code_change/learn/deploy/general）
         #   user_intent      TEXT     用户意图描述
-        #   actions          JSON     对话中执行的操作摘要
-        #   problems         TEXT     遇到的问题
-        #   solutions        TEXT     采用的解决方案
-        #   decisions        TEXT     关键决策记录
-        #   files_touched    JSON     涉及的文件列表
-        #   thinking_steps   JSON     思考步骤
         #   self_reflection  TEXT     AI 复盘反思
-        #   raw_json         JSON     原始对话数据
         #   skill_domains    JSON     涉及的技能领域
         #   complexity       TEXT     复杂度（simple/medium/complex）
         #   feedback_type    JSON     反馈类型
         #   analyzed         INTEGER  是否已完成用户画像分析（0/1）
         # ════════════════════════════════════════════════════════════════
+        # v9.2: 删除废弃字段 problems/solutions/decisions/files_touched/thinking_steps/raw_json
+        #       这些是 v1 旧接口 insert_conversation 的产物，当前 start_conversation 不走此路径
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS conversations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -152,13 +149,7 @@ class Database:
                 task_type TEXT,
                 user_intent TEXT,
                 actions JSON,
-                problems TEXT,
-                solutions TEXT,
-                decisions TEXT,
-                files_touched JSON,
-                thinking_steps JSON,
                 self_reflection TEXT,
-                raw_json JSON,
                 skill_domains JSON DEFAULT '',
                 complexity TEXT DEFAULT 'simple',
                 feedback_type JSON DEFAULT '',
@@ -230,11 +221,7 @@ class Database:
                 changelog TEXT,
                 tools_count INTEGER DEFAULT 0,
                 triggered_by TEXT DEFAULT 'startup',
-                diff_detail TEXT DEFAULT '',
-                optimize_point TEXT DEFAULT '',
-                bug_fix TEXT DEFAULT '',
-                new_feature TEXT DEFAULT '',
-                data_change TEXT DEFAULT ''
+                diff_detail TEXT DEFAULT ''
             )
         """)
 
@@ -302,10 +289,12 @@ class Database:
         # ════════════════════════════════════════════════════════════════
         # 表: user_skills — 用户技能表
         # 用途: 记录用户已掌握的技术技能及其熟练度
+        # v9.3: 新增 skill_name 字段，skill_domain 回归"领域"语义
         # 字段:
         #   id               INTEGER  自增主键
         #   timestamp        TEXT     记录时间
-        #   skill_domain     TEXT     技能领域（Python/SQL/...）
+        #   skill_domain     TEXT     技能领域（Python/前端/AI/DevOps/数据库/架构/...）
+        #   skill_name       TEXT     具体技能名称（如"FastAPI"、"React Hooks"）
         #   skill_level      TEXT     熟练度（beginner/intermediate/advanced/expert）
         #   sub_skills       TEXT     子技能列表
         #   evidence         TEXT     技能证据（观察来源）
@@ -319,6 +308,7 @@ class Database:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp TEXT NOT NULL,
                 skill_domain TEXT NOT NULL,
+                skill_name TEXT DEFAULT '',
                 skill_level TEXT DEFAULT 'beginner',
                 sub_skills TEXT,
                 evidence TEXT,
@@ -477,9 +467,9 @@ class Database:
         #   retry_count         INTEGER  重试次数
         #   max_retries         INTEGER  最大重试次数
         #   priority            INTEGER  优先级（越大越高）
-        #   depends_on          TEXT     依赖的前置步骤ID
         #   created_at          TEXT     创建时间
         # ════════════════════════════════════════════════════════════════
+        # v9.2: 删除 depends_on 字段 — 从未被实际使用，始终写入空字符串
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS conversation_steps (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -500,7 +490,6 @@ class Database:
                 retry_count INTEGER DEFAULT 0,
                 max_retries INTEGER DEFAULT 3,
                 priority INTEGER DEFAULT 0,
-                depends_on TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id) ON DELETE CASCADE,
                 FOREIGN KEY (conversations_id) REFERENCES conversations(id)
@@ -699,15 +688,13 @@ class Database:
                 system_id TEXT PRIMARY KEY,
                 system_type TEXT NOT NULL,
                 display_name TEXT,
-                project_path TEXT,
                 tech_stack JSON DEFAULT '[]',
                 architecture JSON DEFAULT '{}',
                 business_domains JSON DEFAULT '[]',
                 maturity TEXT DEFAULT 'unknown',
                 first_connected TEXT NOT NULL,
                 last_active TEXT NOT NULL,
-                conversation_count INTEGER DEFAULT 0,
-                metadata JSON DEFAULT '{}'
+                conversation_count INTEGER DEFAULT 0
             )
         """)
 
@@ -825,41 +812,7 @@ class Database:
             ON pending_analyses(analysis_type, source_date)
         """)
 
-        # ════════════════════════════════════════════════════════════════
-        # 表: archived_conversations — 已归档对话摘要表（v8.0 数据生命周期）
-        # 用途: 对话数据归档后，仅保留摘要信息，原始 steps/detail 被清理
-        #        归档条件：已分析(analyzed=1) + 已总结(summary_generated=1) + 超过保留期
-        #        归档后 MD 文件为唯一完整数据源，SQLite 仅保留统计摘要
-        # 字段:
-        #   id                INTEGER  自增主键
-        #   conversation_id   TEXT     原对话ID（唯一）
-        #   system_id         TEXT     系统标识
-        #   topic             TEXT     对话主题
-        #   task_type         TEXT     任务类型
-        #   step_count        INTEGER  原始步骤数
-        #   knowledge_count   INTEGER  提取的知识点数
-        #   key_summary       TEXT     LLM 生成的对话摘要（200字以内）
-        #   archived_at       TEXT     归档时间
-        #   original_created  TEXT     原始创建时间
-        # ════════════════════════════════════════════════════════════════
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS archived_conversations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                conversation_id TEXT UNIQUE NOT NULL,
-                system_id TEXT DEFAULT 'default',
-                topic TEXT,
-                task_type TEXT,
-                step_count INTEGER DEFAULT 0,
-                knowledge_count INTEGER DEFAULT 0,
-                key_summary TEXT,
-                archived_at TEXT NOT NULL,
-                original_created TEXT
-            )
-        """)
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_arch_conv_date
-            ON archived_conversations(archived_at)
-        """)
+        # v9.2: archived_conversations 表已删除 — MD 文件为唯一数据源，无需 SQLite 冗余存储
 
         # ── 迁移：为已有 conversations 表补列 ──
         # 注意：SQLite ALTER TABLE ADD COLUMN 不支持 UNIQUE 约束，
@@ -883,6 +836,10 @@ class Database:
             ("behavior_signals", "JSON DEFAULT '{}'"),     # v8.0: 行为信号（规则化提取）
             ("user_raw_input", "TEXT DEFAULT ''"),         # v8.0: 用户原始输入文本
             ("archive_tier", "TEXT DEFAULT 'hot'"),        # v8.0: 归档层级 hot/warm/cold/archived，避免重复扫描
+            ("ai_analysis", "TEXT DEFAULT ''"),           # v9.1: AI 对用户意图的分析推理过程
+            ("trace_id", "TEXT DEFAULT ''"),              # v9.3: 外部调用链追踪ID
+            ("request_id", "TEXT DEFAULT ''"),            # v9.3: 外部会话请求ID
+            ("external_conv_id", "TEXT DEFAULT ''"),      # v9.3: 外部系统会话ID
         ]:
             try:
                 cursor.execute(f"ALTER TABLE conversations ADD COLUMN {col} {col_def}")
@@ -1091,10 +1048,10 @@ class Database:
         cursor = self._local_conn.cursor()
 
         # ── 需要迁移的表与字段映射 ──
+        # v9.2: conversations 迁移已清理废弃字段，仅保留有效 JSON 字段
         migrations = {
             "conversations": {
-                "json_columns": ["actions", "files_touched", "thinking_steps",
-                                 "raw_json", "skill_domains", "feedback_type"],
+                "json_columns": ["actions", "skill_domains", "feedback_type"],
                 "create_sql": """
                     CREATE TABLE conversations_new (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1105,17 +1062,15 @@ class Database:
                         task_type TEXT,
                         user_intent TEXT,
                         actions JSON,
-                        problems TEXT,
-                        solutions TEXT,
-                        decisions TEXT,
-                        files_touched JSON,
-                        thinking_steps JSON,
                         self_reflection TEXT,
-                        raw_json JSON,
                         skill_domains JSON DEFAULT '',
                         complexity TEXT DEFAULT 'simple',
                         feedback_type JSON DEFAULT '',
-                        analyzed INTEGER DEFAULT 0
+                        analyzed INTEGER DEFAULT 0,
+                        ai_analysis TEXT DEFAULT '',
+                        trace_id TEXT DEFAULT '',
+                        request_id TEXT DEFAULT '',
+                        external_conv_id TEXT DEFAULT ''
                     )
                 """,
             },
@@ -1542,6 +1497,97 @@ class Database:
         self._local_conn.commit()
         print("[DB] v6.0 数据库迁移完成")
 
+    def _migrate_v93(self):
+        """
+        v9.3.0: 技能领域分类重构 — user_skills 表新增 skill_name 字段。
+
+        变更内容：
+        1. user_skills 新增 skill_name TEXT 字段（具体技能名）
+        2. skill_domain 回归"领域"语义（Python/前端/AI/DevOps/数据库/架构）
+        3. 旧唯一索引 idx_user_skills_unique 重建为 (skill_domain, skill_name)
+        4. 存量数据自动归类：将旧 skill_domain 值映射到标准领域
+        """
+        cursor = self._local_conn.cursor()
+
+        # 1. 新增 skill_name 列
+        try:
+            cursor.execute("ALTER TABLE user_skills ADD COLUMN skill_name TEXT DEFAULT ''")
+            print("[DB] user_skills.skill_name 列已添加")
+        except Exception:
+            pass  # 列已存在
+
+        # 2. 重建唯一索引：从 (skill_domain) → (skill_domain, skill_name)
+        try:
+            cursor.execute("DROP INDEX IF EXISTS idx_user_skills_unique")
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_user_skills_unique 
+                ON user_skills(skill_domain, skill_name)
+            """)
+            print("[DB] user_skills 唯一索引已重建为 (skill_domain, skill_name)")
+        except Exception as e:
+            print(f"[DB] user_skills 唯一索引重建失败: {e}")
+
+        # 3. 存量数据迁移：将旧的 skill_domain 值归类 + 填入 skill_name
+        # 映射规则：如果旧值本身就是领域名（在标准领域列表中），则保留为 domain，skill_name 留空
+        # 如果旧值是具体技能名，则归类到对应 domain，skill_name 设为原值
+        domain_keywords = {
+            "Python": ["python", "pip", "conda", "pytest", "django", "fastapi", "flask"],
+            "前端": ["前端", "frontend", "html", "css", "javascript", "typescript", "react", "vue", "webpack", "vite"],
+            "AI/LLM": ["ai", "ml", "llm", "rag", "agent", "prompt", "mcp", "ponytail", "大模型", "机器学习", "深度学习", "nlp", "gpt", "claude", "ollama", "openai"],
+            "DevOps": ["devops", "docker", "kubernetes", "ci/cd", "ci-cd", "linux", "nginx", "git", "github", "部署", "运维"],
+            "数据库": ["sql", "sqlite", "mysql", "postgresql", "redis", "mongodb", "数据库", "wal", "索引", "查询"],
+            "架构设计": ["架构", "设计模式", "重构", "系统设计", "微服务", "异步", "并发", "管道", "队列"],
+            "通用工程": ["代码质量", "安全", "问题定位", "调试", "测试", "文档"],
+        }
+
+        # 查询所有现有记录
+        cursor.execute("SELECT id, skill_domain FROM user_skills WHERE skill_name IS NULL OR skill_name = ''")
+        rows = cursor.fetchall()
+
+        migrated = 0
+        for row in rows:
+            old_domain = (row[1] or "").strip()
+            if not old_domain:
+                continue
+
+            # 判断旧值属于哪个领域
+            matched_domain = None
+            old_lower = old_domain.lower()
+
+            for domain_name, keywords in domain_keywords.items():
+                for kw in keywords:
+                    if kw in old_lower:
+                        matched_domain = domain_name
+                        break
+                if matched_domain:
+                    break
+
+            if matched_domain:
+                # 如果旧值本身就像领域名（完全匹配某个标准领域）
+                if old_domain in domain_keywords:
+                    # 旧值已经是标准领域名，保持 domain 不变，skill_name 留空
+                    cursor.execute(
+                        "UPDATE user_skills SET skill_name = ? WHERE id = ?",
+                        (old_domain, row[0])
+                    )
+                else:
+                    # 旧值是具体技能名，归类到对应领域
+                    cursor.execute(
+                        "UPDATE user_skills SET skill_domain = ?, skill_name = ? WHERE id = ?",
+                        (matched_domain, old_domain, row[0])
+                    )
+                migrated += 1
+            else:
+                # 无法自动归类的，归入"其他"
+                cursor.execute(
+                    "UPDATE user_skills SET skill_name = ?, skill_domain = '其他' WHERE id = ?",
+                    (old_domain, row[0])
+                )
+                migrated += 1
+
+        self._local_conn.commit()
+        print(f"[DB] v9.3 迁移完成: {migrated} 条 user_skills 已归类")
+
     def _migrate_v74(self):
         """
         v7.4.0: 知识库系统扩展 — knowledge_points 表新增字段。
@@ -1611,6 +1657,7 @@ class Database:
             ("system_id", "TEXT DEFAULT 'default'"),
             ("behavior_signals", "JSON DEFAULT '{}'"),
             ("user_raw_input", "TEXT DEFAULT ''"),
+            ("ai_analysis", "TEXT DEFAULT ''"),
         ]
         for col_name, col_type in conv_new_columns:
             try:
@@ -1666,7 +1713,7 @@ class Database:
                 source TEXT DEFAULT 'monthly_report',
                 source_period TEXT,
                 conversations_id INTEGER,
-                FOREIGN KEY (conversations_id) conversations(id)
+                FOREIGN KEY (conversations_id) REFERENCES conversations(id)
             )
         """)
         cursor.execute("""
@@ -1754,6 +1801,9 @@ class Database:
     # 通用查询
     # ══════════════════════════════════════════════════════════
 
+    def is_local_initialized(self) -> bool:
+        return self._local_conn is not None
+
     def query_local(self, sql: str, params: tuple = ()) -> list[dict]:
         """
         执行本地数据库查询（v5.3: 读写锁分离）
@@ -1794,72 +1844,8 @@ class Database:
                 self._shared_conn.commit()
                 return [{"affected_rows": cursor.rowcount}]
 
-    # ══════════════════════════════════════════════════════════
-    # 对话记录
-    # ══════════════════════════════════════════════════════════
-
-    def insert_conversation(self, data: dict):
-        """
-        插入对话记录（v4.3 增强：analyzed 字段 + 关键字段非空校验）
-
-        Returns:
-            [{"affected_rows": N, "last_id": <conversations.id 主键>}]
-        """
-        client = data.get("client") or data.get("agent", "unknown")
-
-        if "raw_json_override" in data:
-            raw_json_str = json.dumps(data.pop("raw_json_override"), ensure_ascii=False)
-        else:
-            raw_json_str = json.dumps(data, ensure_ascii=False)
-
-        # 确保有 conversation_id（优先用传入的，否则自动生成）
-        conv_id = data.get("conversation_id", "") or datetime.now().strftime("%Y%m%d%H%M%S%f")
-
-        # v4.1: skill_domains / feedback_type / complexity 填充
-        skill_domains = data.get("skill_domains", "")
-        if isinstance(skill_domains, (list, dict)):
-            skill_domains = json.dumps(skill_domains, ensure_ascii=False)
-        feedback_type = data.get("feedback_type", "")
-        if isinstance(feedback_type, (list, dict)):
-            feedback_type = json.dumps(feedback_type, ensure_ascii=False)
-        complexity = data.get("complexity", "simple")
-        analyzed = data.get("analyzed", 0)  # v4.3: 默认 0，分析后回写
-
-        # v4.3: 关键字段非空校验
-        topic = data.get("topic", "")
-        task_type = data.get("task_type", "")
-        if not topic or not task_type:
-            print(f"[DB] ⚠️ insert_conversation 警告: topic='{topic[:30] if topic else '(空)'}', "
-                  f"task_type='{task_type or '(空)'}' — 关键字段不应为空")
-
-        sql = """
-            INSERT INTO conversations
-            (conversation_id, timestamp, client, topic, task_type, user_intent, actions,
-             problems, solutions, decisions, files_touched, thinking_steps, self_reflection,
-             raw_json, skill_domains, complexity, feedback_type, analyzed)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """
-        params = (
-            conv_id,
-            data.get("timestamp", datetime.now().isoformat()),
-            client,
-            topic,
-            task_type,
-            data.get("user_intent", ""),
-            data.get("actions", ""),
-            data.get("problems", ""),
-            data.get("solutions", ""),
-            data.get("decisions", ""),
-            json.dumps(data.get("files_touched", []), ensure_ascii=False),
-            json.dumps(data.get("thinking_steps", []), ensure_ascii=False),
-            data.get("self_reflection", ""),
-            raw_json_str,
-            skill_domains,
-            complexity,
-            feedback_type,
-            analyzed,
-        )
-        return self.query_local(sql, params)
+    # v9.2: insert_conversation 已删除 — 已被 start_conversation (conversation_engine) 替代
+    # 旧方法依赖 6 个废弃字段 (problems/solutions/decisions/files_touched/thinking_steps/raw_json)
 
     def get_daily_stats(self, date_str: str = None) -> dict:
         """获取每日统计"""
@@ -1907,18 +1893,34 @@ class Database:
     # ══════════════════════════════════════════════════════════
 
     def upsert_user_skills(self, domain: str, data: dict):
-        """插入或更新用户技能"""
-        existing = self.query_local(
-            "SELECT id FROM user_skills WHERE skill_domain = ?", (domain,)
-        )
+        """
+        插入或更新用户技能（v9.3 兼容旧调用）
+        
+        旧调用方式：domain 参数传入的是 skill_name（因为历史原因）
+        v9.3 新调用：domain 是 skill_domain，skill_name 在 data 中
+        """
+        skill_name = data.get("skill_name", domain)
         now = datetime.now().isoformat()
+        
+        # 优先按 (skill_domain, skill_name) 联合查询
+        existing = self.query_local(
+            "SELECT id FROM user_skills WHERE skill_domain = ? AND skill_name = ?",
+            (domain, skill_name)
+        )
+        if not existing:
+            # fallback: 只按 skill_name 查
+            existing = self.query_local(
+                "SELECT id FROM user_skills WHERE skill_name = ? OR (skill_name = '' AND skill_domain = ?)",
+                (skill_name, domain)
+            )
+        
         if existing:
             sql = """
                 UPDATE user_skills
                 SET skill_level = ?, sub_skills = ?, evidence = ?,
                     conversation_ids = ?, hours_spent = hours_spent + ?,
                     growth_trend = ?, last_updated = ?
-                WHERE skill_domain = ?
+                WHERE skill_domain = ? AND skill_name = ?
             """
             self.query_local(sql, (
                 data.get("skill_level", "beginner"),
@@ -1929,16 +1931,17 @@ class Database:
                 data.get("growth_trend", "stable"),
                 now,
                 domain,
+                skill_name,
             ))
         else:
             sql = """
                 INSERT INTO user_skills
-                (timestamp, skill_domain, skill_level, sub_skills, evidence,
+                (timestamp, skill_domain, skill_name, skill_level, sub_skills, evidence,
                  conversation_ids, hours_spent, growth_trend, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
             self.query_local(sql, (
-                now, domain,
+                now, domain, skill_name,
                 data.get("skill_level", "beginner"),
                 data.get("sub_skills", ""),
                 data.get("evidence", ""),
@@ -1959,18 +1962,19 @@ class Database:
         )
 
     def get_skill_summary(self) -> dict:
-        """获取技能评估摘要"""
+        """获取技能评估摘要（v9.3: 按 skill_domain 领域聚合）"""
         rows = self.query_local(
-            "SELECT skill_domain, skill_level, hours_spent, growth_trend FROM user_skills"
+            "SELECT skill_domain, skill_name, skill_level, hours_spent, growth_trend FROM user_skills"
         )
         domains = {}
         total_hours = 0
         for r in rows:
-            domains[r["skill_domain"]] = {
-                "level": r["skill_level"],
-                "hours": r["hours_spent"] or 0,
-                "trend": r["growth_trend"],
-            }
+            domain = r["skill_domain"] or "其他"
+            if domain not in domains:
+                domains[domain] = {"level": r["skill_level"], "hours": 0, "trend": r["growth_trend"], "skills": []}
+            domains[domain]["hours"] += r["hours_spent"] or 0
+            if r.get("skill_name"):
+                domains[domain]["skills"].append(r["skill_name"])
             total_hours += r["hours_spent"] or 0
         return {
             "total_domains": len(rows),
@@ -1982,32 +1986,46 @@ class Database:
     # v6.0 新增: 技能追溯与增量合并支持
     # ══════════════════════════════════════════════════════════
 
-    def query_user_skill(self, skill_name: str) -> Optional[dict]:
+    def query_user_skill(self, skill_name: str, skill_domain: str = "") -> Optional[dict]:
         """
         查询单个用户技能（用于增量合并判断）
         
+        v9.3: 支持 skill_domain + skill_name 联合查询
+        
         Args:
-            skill_name: 技能名称（对应 skill_domain 字段）
+            skill_name: 技能名称（对应 skill_name 字段）
+            skill_domain: 技能领域（可选，配合 skill_name 精确定位）
             
         Returns:
             技能记录字典，不存在则返回 None
         """
-        results = self.query_local(
-            "SELECT * FROM user_skills WHERE skill_domain = ?", (skill_name,)
-        )
+        if skill_domain:
+            results = self.query_local(
+                "SELECT * FROM user_skills WHERE skill_domain = ? AND skill_name = ?",
+                (skill_domain, skill_name)
+            )
+        else:
+            # 兼容旧调用：优先匹配 skill_name，fallback 到 skill_domain
+            results = self.query_local(
+                "SELECT * FROM user_skills WHERE skill_name = ? OR (skill_name = '' AND skill_domain = ?)",
+                (skill_name, skill_name)
+            )
         
         if results and len(results) > 0:
             return dict(results[0])
         
         return None
 
-    def update_user_skill(self, skill_name: str, data: dict):
+    def update_user_skill(self, skill_name: str, data: dict, skill_domain: str = ""):
         """
         更新用户技能记录（增量合并时使用）
+        
+        v9.3: 支持 skill_domain + skill_name 联合定位
         
         Args:
             skill_name: 技能名称
             data: 要更新的字段字典
+            skill_domain: 技能领域（可选）
         """
         if not data:
             return
@@ -2025,29 +2043,36 @@ class Database:
             
         values.append(skill_name)
         
-        sql = f"UPDATE user_skills SET {', '.join(set_clauses)} WHERE skill_domain = ?"
+        if skill_domain:
+            values.append(skill_domain)
+            sql = f"UPDATE user_skills SET {', '.join(set_clauses)} WHERE skill_domain = ? AND skill_name = ?"
+        else:
+            sql = f"UPDATE user_skills SET {', '.join(set_clauses)} WHERE skill_name = ? OR (skill_name = '' AND skill_domain = ?)"
         self.query_local(sql, values)
 
     def insert_user_skill(self, data: dict):
         """
         新增用户技能记录
         
+        v9.3: skill_domain 存领域名，skill_name 存具体技能名
+        
         Args:
-            data: 技能数据字典，必须包含 skill_name
+            data: 技能数据字典，必须包含 skill_name 和 skill_domain
         """
         now = datetime.now().isoformat()
         
         sql = """
             INSERT INTO user_skills 
-            (timestamp, skill_domain, skill_level, sub_skills, evidence,
+            (timestamp, skill_domain, skill_name, skill_level, sub_skills, evidence,
              conversation_ids, hours_spent, growth_trend, last_updated,
              confidence, first_seen, last_seen, evidence_count,
              source_conversation_id, source_timestamp, extraction_method)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         
         self.query_local(sql, (
             now,
+            data.get("skill_domain", "其他"),
             data.get("skill_name", ""),
             data.get("skill_level", "beginner"),
             data.get("sub_skills", ""),
@@ -2164,55 +2189,6 @@ class Database:
             conversations_id,
             _json.dumps(dimensions, ensure_ascii=False) if dimensions else None,
         ))
-
-    def query_improvements_by_dimension(
-        self, 
-        dimension_key: str = None, 
-        limit: int = 50
-    ) -> list:
-        """
-        按维度查询改进日志
-        
-        Args:
-            dimension_key: 维度键名（如 "mistakes", "strengths" 等）
-                        为 None 时返回所有记录
-            limit: 返回记录数上限
-                        
-        Returns:
-            改进日志列表，每条记录包含解析后的 dimensions 字段
-        """
-        import json as _json
-        
-        if dimension_key:
-            # 使用 JSON 函数查询特定维度
-            rows = self.query_local(f"""
-                SELECT * FROM improvement_log 
-                WHERE json_extract(dimensions, '$.{dimension_key}') IS NOT NULL
-                ORDER BY timestamp DESC 
-                LIMIT ?
-            """, (limit,))
-        else:
-            rows = self.query_local("""
-                SELECT * FROM improvement_log 
-                ORDER BY timestamp DESC 
-                LIMIT ?
-            """, (limit,))
-        
-        # 解析 dimensions JSON 字段
-        result = []
-        for row in rows:
-            row_dict = dict(row)
-            if row_dict.get("dimensions"):
-                try:
-                    row_dict["dimensions_parsed"] = _json.loads(row_dict["dimensions"])
-                except Exception:
-                    row_dict["dimensions_parsed"] = {}
-            else:
-                row_dict["dimensions_parsed"] = {}
-            
-            result.append(row_dict)
-        
-        return result
 
     # ══════════════════════════════════════════════════════════
     # 用户技能规划（新增）
@@ -2406,22 +2382,30 @@ class Database:
 
     def insert_knowledge_point(self, title: str, content: str, category: str,
                                domain: str, tags: list, source_type: str = "system",
-                               source_id: str = "") -> Optional[str]:
+                               source_id: str = "",
+                               kp_type: str = "skill",
+                               aliases: list = None,
+                               source_session_id: str = "",
+                               source_step_id: str = "") -> Optional[str]:
         """创建知识点记录，返回 knowledge_id 或 None"""
         import uuid
         try:
             kp_id = f"kp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+            now = datetime.now().isoformat()
             self.query_local("""
                 INSERT INTO knowledge_points (
                     knowledge_id, title, content, category, domain,
-                    tags, source_type, source_id, confidence, difficulty,
-                    created_by, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0.8, 'medium', 'system', ?, ?)
+                    tags, source_type, source_id, type, confidence, difficulty,
+                    aliases, source_session_id, source_step_id,
+                    last_used_at, created_by, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.8, 'medium', ?, ?, ?, ?, 'system', ?, ?)
             """, (
                 kp_id, title, content, category, domain,
                 json.dumps(tags, ensure_ascii=False),
-                source_type, source_id,
-                datetime.now().isoformat(), datetime.now().isoformat(),
+                source_type, source_id, kp_type,
+                json.dumps(aliases or [], ensure_ascii=False),
+                source_session_id, source_step_id,
+                now, now, now,
             ))
             return kp_id
         except Exception as e:
@@ -2435,16 +2419,13 @@ class Database:
     def record_version(self, version: str, previous_version: str = "",
                        change_summary: str = "", changelog: str = "",
                        tools_count: int = 0, triggered_by: str = "startup",
-                       diff_detail: str = "", optimize_point: str = "",
-                       bug_fix: str = "", new_feature: str = "",
-                       data_change: str = ""):
-        """记录版本变更（v4.2: 扩充结构化字段）"""
+                       diff_detail: str = ""):
+        """记录版本变更"""
         sql = """
             INSERT INTO version_history
             (timestamp, version, previous_version, change_summary, changelog,
-             tools_count, triggered_by, diff_detail, optimize_point,
-             bug_fix, new_feature, data_change)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             tools_count, triggered_by, diff_detail)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
         self.query_local(sql, (
             datetime.now().isoformat(),
@@ -2455,10 +2436,6 @@ class Database:
             tools_count,
             triggered_by,
             diff_detail,
-            optimize_point,
-            bug_fix,
-            new_feature,
-            data_change,
         ))
 
     def get_version_history(self, limit: int = 20) -> list[dict]:

@@ -303,6 +303,7 @@ class CleanupScheduler:
                 sleep_chunks -= 60
 
     def _do_cleanup(self) -> dict:
+        """执行数据清理（v8.1: 委托给统一的 archive_and_cleanup_data 入口，避免直接删除导致数据丢失）"""
         result = {
             "timestamp": datetime.now().isoformat(),
             "actions": [],
@@ -311,65 +312,39 @@ class CleanupScheduler:
         }
 
         try:
-            from devpartner_agent.core.config import get_config
-            cfg = get_config()
-            retention_days = cfg.data_lifecycle.log_retention_days
-            backup_before = cfg.data_lifecycle.backup_before_cleanup
-        except Exception:
-            retention_days = 90
-            backup_before = True
+            from devpartner_agent.skills.daily_summary import archive_and_cleanup_data
+            archive_result = archive_and_cleanup_data()
 
-        cutoff_date = (datetime.now() - timedelta(days=retention_days)).strftime("%Y-%m-%d")
+            result["actions"].append({
+                "action": "archive_and_cleanup",
+                "warm_archived": archive_result.get("warm_archived", 0),
+                "cold_archived": archive_result.get("cold_archived", 0),
+                "deep_cleaned": archive_result.get("deep_cleaned", 0),
+                "pending_failed": archive_result.get("pending_failed", 0),
+                "logs_cleaned": archive_result.get("logs_cleaned", 0),
+            })
 
-        try:
-            from devpartner_agent.core.database import get_db
-            db = get_db()
+            if archive_result.get("errors"):
+                result["errors"].extend(archive_result["errors"])
 
-            count_result = db.query_local(
-                "SELECT COUNT(*) as cnt FROM conversations WHERE date(timestamp) < ?",
-                (cutoff_date,)
+            total_actions = (
+                archive_result.get("warm_archived", 0) +
+                archive_result.get("cold_archived", 0) +
+                archive_result.get("deep_cleaned", 0) +
+                archive_result.get("pending_failed", 0) +
+                archive_result.get("logs_cleaned", 0)
             )
-            before_count = count_result[0]["cnt"] if count_result else 0
 
-            if before_count > 0:
-                if backup_before:
-                    db.query_local(
-                        """INSERT INTO conversations_archive
-                           SELECT * FROM conversations WHERE date(timestamp) < ?""",
-                        (cutoff_date,)
-                    )
+            result["summary"] = {
+                "total_cleaned": total_actions,
+                "success": len(result["errors"]) == 0,
+            }
 
-                db.query_local(
-                    "DELETE FROM conversations WHERE date(timestamp) < ?",
-                    (cutoff_date,)
-                )
-                result["actions"].append({
-                    "action": "db_cleanup",
-                    "table": "conversations",
-                    "deleted_count": before_count,
-                    "cutoff_date": cutoff_date,
-                })
-
-                try:
-                    db.execute_raw("PRAGMA wal_checkpoint(TRUNCATE)")
-                    db.execute_raw("VACUUM")
-                    result["actions"].append({"action": "vacuum", "status": "completed"})
-                except Exception:
-                    pass
         except Exception as e:
-            result["errors"].append(f"数据库清理失败: {e}")
+            result["errors"].append(f"归档清理失败: {e}")
+            logger.error(f"CleanupScheduler 归档清理异常: {e}", exc_info=True)
 
         self._last_cleanup = datetime.now()
-        total_cleaned = sum(
-            a.get("deleted_count", a.get("archived_count", 0))
-            for a in result["actions"]
-        )
-        result["summary"] = {
-            "total_cleaned": total_cleaned,
-            "retention_days": retention_days,
-            "cutoff_date": cutoff_date,
-            "success": len(result["errors"]) == 0,
-        }
         self._cleanup_history.append(result)
 
         return result

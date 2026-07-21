@@ -1,20 +1,20 @@
 
-from devpartner_agent.core.llm_prompts.conversation import TASK_CONVERSATION_ANALYSIS
-from devpartner_agent.core.llm_prompts.step import TASK_STEP_ANALYSIS
-from devpartner_agent.core.llm_prompts.deep_analysis import TASK_CONVERSATION_DEEP_ANALYSIS
-from devpartner_agent.core.llm_prompts.daily_summary import TASK_DAILY_SUMMARY
-from devpartner_agent.core.llm_prompts.daily_summary import TASK_WEEKLY_REPORT
-from devpartner_agent.core.llm_prompts.daily_summary import TASK_MONTHLY_REPORT
-from devpartner_agent.core.llm_prompts.daily_summary import TASK_ANNUAL_REPORT
-from devpartner_agent.core.llm_prompts.daily_summary import TASK_GROWTH_ANALYSIS
-from devpartner_agent.core.llm_prompts.self_improvement import TASK_SELF_IMPROVEMENT
-from devpartner_agent.core.llm_prompts.file_parse import TASK_FILE_PARSE
-from devpartner_agent.core.llm_prompts.schema import TASK_SCHEMA_ANALYSIS
-from devpartner_agent.core.llm_prompts.knowledge_extraction import (
+from prompts.conversation import TASK_CONVERSATION_ANALYSIS
+from prompts.step import TASK_STEP_ANALYSIS
+from prompts.deep_analysis import TASK_CONVERSATION_DEEP_ANALYSIS
+from prompts.daily_summary import TASK_DAILY_SUMMARY
+from prompts.daily_summary import TASK_WEEKLY_REPORT
+from prompts.daily_summary import TASK_MONTHLY_REPORT
+from prompts.daily_summary import TASK_ANNUAL_REPORT
+from prompts.daily_summary import TASK_GROWTH_ANALYSIS
+from prompts.self_improvement import TASK_SELF_IMPROVEMENT
+from prompts.file_parse import TASK_FILE_PARSE
+from prompts.schema import TASK_SCHEMA_ANALYSIS
+from prompts.knowledge_extraction import (
     TASK_KNOWLEDGE_EXTRACTION,
     TASK_BATCH_STEP_ANALYSIS,
 )
-from devpartner_agent.core.llm_prompts.user_profile import (
+from prompts.user_profile import (
     TASK_USER_PROFILE_ANALYSIS,
     TASK_DAILY_PROFILE_MERGE,
     TASK_DAILY_SYSTEM_MERGE,
@@ -24,7 +24,7 @@ from devpartner_agent.core.llm_prompts.user_profile import (
     ANALYSIS_GUIDELINES,
 )
 
-from devpartner_agent.core.llm_prompts._common import (
+from prompts._common import (
     parse_json,
     normalize_analysis,
     AnalysisTask,

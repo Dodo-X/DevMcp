@@ -99,7 +99,7 @@ class AnalysisTask:
     将业务逻辑从引擎中解耦：
     - prompt_template: 如何构造 prompt
     - parser: 如何解析输出
-    - max_tokens / input_truncate: 推理参数
+    - max_tokens / input_truncate / timeout: 推理参数
     
     使用示例：
         task = TASK_CONVERSATION_ANALYSIS
@@ -111,14 +111,16 @@ class AnalysisTask:
     parser: Callable[[str], dict] = parse_json
     max_tokens: int = 2048
     input_truncate: int = 8000
+    timeout: int = 0       # 0 = 使用配置默认值（重试自适应）
     feature_flag: str = ""
 
-def run_analysis(task: AnalysisTask, **kwargs) -> Optional[dict | list]:
+def run_analysis(task: AnalysisTask, on_progress: Callable = None, **kwargs) -> Optional[dict | list]:
     """
     执行 LLM 分析任务（统一入口）
 
     Args:
         task: 任务描述符
+        on_progress: 进度回调 callable(partial_text, progress_pct)，用于流式推理进度报告
         **kwargs: prompt 模板中的变量
 
     Returns:
@@ -134,7 +136,7 @@ def run_analysis(task: AnalysisTask, **kwargs) -> Optional[dict | list]:
     # 检查 feature flag
     if task.feature_flag:
         cfg = engine._get_config()
-        if not getattr(cfg, task.feature_flag, False):
+        if not getattr(cfg.llm, task.feature_flag, False):
             logger.debug(f"功能开关 {task.feature_flag} 未启用，跳过任务: {task.name}")
             return None
 
@@ -146,8 +148,10 @@ def run_analysis(task: AnalysisTask, **kwargs) -> Optional[dict | list]:
         if len(prompt) > task.input_truncate:
             prompt = prompt[:task.input_truncate] + "..."
 
-        # 推理
-        raw = engine.infer(prompt, task.max_tokens)
+        # 推理（支持任务级 timeout，0=使用配置默认值）
+        timeout = task.timeout if task.timeout > 0 else None
+        raw = engine.infer(prompt, task.max_tokens, timeout=timeout,
+                           on_progress=on_progress)
         if not raw or len(raw.strip()) < 20:
             logger.warning(f"LLM 推理返回空或过短: {task.name}")
             return None

@@ -1,4 +1,4 @@
-﻿# DevPartner v7.5 - AI 驱动的开发者智能伴侣
+﻿# DevPartner v9.5 - AI 驱动的开发者智能伴侣
 
 <p align="center">
   <strong>基于本地 Ollama (Qwen3 等) 的全栈开发辅助系统</strong><br>
@@ -9,9 +9,9 @@
 
 ## ✨ 核心特性
 
-### 🏗️ Engine Pattern 架构 (v7.5)
-- **领域引擎模式**: 8 个独立 Engine 按业务域封装，server.py 仅 360 行薄壳入口
-- **统一装饰器**: `@mcp_tool_handler` 消除 74 个裸函数的重复 try/except + json.dumps
+### 🏗️ Engine Pattern 架构 (v8.3)
+- **领域引擎模式**: 5 个独立 Engine 按业务域封装，server.py 仅 ~380 行薄壳入口
+- **统一装饰器**: `@mcp_tool_handler` 消除样板代码
 - **关注点分离**: core/ 有状态引擎 vs services/ 无状态工具 vs routes/ HTTP 端点
 - **可插拔注册**: 每个 Engine 自带 `register_*_tools(mcp)` 函数，按需加载
 
@@ -27,7 +27,7 @@
 2. **每日工作总结** - LLM 生成专业日报（非模板化）
 3. **自我迭代优化** - 基于数据驱动的系统改进建议
 4. **用户画像融合** - 动态构建开发者能力模型
-5. **MCP 工具集成** - 20+ 开发工具无缝调用
+5. **MCP 工具集成** - 42 个开发工具无缝调用
 6. **知识图谱** - 自动沉淀和关联知识点
 
 ### 🏗️ 技术栈
@@ -98,11 +98,11 @@ python -m server
 **预期输出**:
 ```
 ============================================================
-  DevPartner v7.5 (Engine Pattern)
+  DevPartner v8.3 (Engine Pattern)
   架构: server.py(薄壳) → core/*_engine.py(业务)
 ============================================================
 
-  工具层: 32 个工具已注册
+  工具层: 42 个工具已注册
   管家层: 已加载
 
   启动模式: MCP 服务 (Streamable HTTP)
@@ -135,19 +135,16 @@ devPartner/
 ├── README.md                          # ← 你在这里（主文档）
 ├── CHANGELOG.md                       # 版本迭代记录
 │
-├── server.py                          # 🚀 MCP 薄壳入口 (~360行)
+├── server.py                          # 🚀 MCP 薄壳入口 (~380行)
 │                                      #    4 个核心 @mcp.tool + 引擎注册
 │
 ├── devpartner_agent/                  # 🎯 核心 Agent 系统
 │   ├── core/                          #    ├─ 核心引擎层 (有状态, 单例)
 │   │   ├── conversation_engine.py     #    │  ⭐ 对话引擎 (总分三步走)
-│   │   ├── knowledge_engine.py        #    │  📚 知识引擎 (图谱+检索)
-│   │   ├── system_engine.py           #    │  🔧 系统引擎 (诊断+清理)
-│   │   ├── daily_engine.py            #    │  📋 日报引擎 (总结+日志)
-│   │   ├── optimization_engine.py     #    │  🔄 优化引擎 (反馈+闭环)
-│   │   ├── memory_engine.py           #    │  🧠 记忆引擎 (跨会话)
-│   │   ├── iteration_engine.py        #    │  🧬 迭代引擎 (自我进化+规则+权限)
-│   │   ├── vault_engine.py            #    │  🏦 Vault 引擎 (归档+回调+任务)
+│   │   ├── knowledge_engine.py        #    │  📚 知识引擎 (图谱+检索, 4工具)
+│   │   ├── system_engine.py           #    │  🔧 系统引擎 (诊断+清理, 6工具)
+│   │   ├── daily_engine.py            #    │  📋 日报引擎 (总结+日志, 9工具)
+│   │   ├── optimization_engine.py     #    │  🔄 优化引擎 (反馈+闭环, 2工具)
 │   │   ├── llm_engine.py              #    │  🤖 LLM 推理引擎 (Ollama)
 │   │   ├── bootstrap.py               #    │  🏗️ 启动与初始化
 │   │   ├── decorators.py              #    │  🎯 @mcp_tool_handler 统一装饰器
@@ -161,20 +158,18 @@ devPartner/
 │   │   ├── task_queue.py              #    │  异步任务队列
 │   │   ├── knowledge_graph.py         #    │  知识图谱服务
 │   │   ├── callback_registry.py       #    │  回调注册表
-│   │   ├── cleanup_scheduler.py       #    │  清理调度器
-│   │   ├── optimization_loop.py       #    │  优化闭环
+│   │   ├── cleanup_service.py         #    │  清理调度器
+│   │   ├── vault_exporter.py          #    │  Obsidian 导出
 │   │   └── ...                        #    └─ 其他无状态服务
 │   │
 │   ├── skills/                        #    ├─ 技能模块
-│   │   ├── daily_summary.py           #    │  日报生成技能
-│   │   └── self_iterate.py            #    │  自我迭代技能
+│   │   └── daily_summary.py           #    │  日报生成技能
 │   │
 │   └── config.yaml                    #    Agent 配置文件
 │
-├── devpartner_tools/                  # 🔧 MCP 工具集 (无状态, 21个纯工具)
+├── devpartner_tools/                  # 🔧 MCP 工具集 (无状态, 17个纯工具)
 │   └── tools/
 │       ├── filesystem.py              #    文件系统操作 (5个工具)
-│       ├── git_operations.py          #    Git 命令封装 (3个工具)
 │       ├── web_requests.py            #    HTTP 请求 (3个工具)
 │       ├── system_utils.py            #    系统工具 (4个工具)
 │       └── growth_analytics.py        #    成长分析 (5个工具)
@@ -195,8 +190,8 @@ devPartner/
 **核心原则**: 不包含任何业务逻辑，所有调用委托给 Engine  
 **包含**:
 - 4 个核心 `@mcp.tool`: `start_conversation`, `record_step`, `finalize_conversation`, `question_with_context`
-- `_register_tool_layer()`: 注册工具层 21 个纯工具
-- `_register_agent_engines()`: 注册 8 个领域引擎
+- `_register_tool_layer()`: 注册工具层 17 个纯工具
+- `_register_agent_engines()`: 注册 4 个领域引擎
 - `_register_rest_routes()`: 注册 HTTP REST 路由
 
 #### `devpartner_agent/core/` - 核心引擎层 🧠
@@ -206,13 +201,9 @@ devPartner/
 | Engine | 职责 | MCP 工具数 |
 |--------|------|-----------|
 | ConversationEngine | 对话生命周期 (start→record→finalize) | 4 (在 server.py 直接注册) |
-| KnowledgeEngine | 知识点 + 图谱 + 检索 | 10 |
-| SystemEngine | 诊断 + 清理 + LLM状态 + 热重载 | 9 |
+| KnowledgeEngine | 知识点 + 图谱 + 检索 | 4 |
+| SystemEngine | 诊断 + 清理 + LLM状态 + 热重载 | 6 |
 | DailyEngine | 日报 + 日志 + 工作数据 | 9 |
-| OptimizationEngine | 反馈 + 优化闭环 + 检查 | 5 |
-| MemoryEngine | 跨会话记忆 + 对话检索 | 3 |
-| IterationEngine | 自我迭代 + 规则 + 权限 + Git + 并行 | 27 |
-| VaultEngine | 归档 + 回调 + 任务状态 | 8 |
 
 #### `devpartner_agent/services/` - 无状态服务层 ⚙️
 **定位**: 无状态的辅助工具，被 Engine 调用  
@@ -220,8 +211,8 @@ devPartner/
 - `task_queue.py`: 异步任务队列 (FIFO + 对话级互斥)
 - `knowledge_graph.py`: 知识图谱构建与查询
 - `callback_registry.py`: 回调通知注册表
-- `cleanup_scheduler.py`: 数据清理调度
-- `optimization_loop.py`: 优化闭环处理
+- `cleanup_service.py`: 数据清理调度
+- `vault_exporter.py`: Obsidian Vault 导出
 
 #### `devpartner_agent/routes/` - HTTP 路由层 🌐
 **定位**: REST API 端点，从 server.py 提取  
@@ -299,17 +290,7 @@ report = engine.get_daily_summary(date="2026-07-13")
 print(f"📊 今日摘要: {report.get('summary', '')}")
 ```
 
-#### 3️⃣ 触发自我优化
-
-```python
-from devpartner_agent.core.iteration_engine import get_iteration_engine
-
-engine = get_iteration_engine()
-result = engine.self_iterate(mode="auto")
-print(f"生成建议: {len(result.get('suggestions_generated', []))} 条")
-```
-
-#### 4️⃣ 使用 MCP 工具
+#### 3️⃣ 使用 MCP 工具
 
 通过 MCP 协议调用工具（已集成到 Cursor/Windsurf/Trae 等 IDE）：
 
@@ -330,14 +311,17 @@ print(f"生成建议: {len(result.get('suggestions_generated', []))} 条")
 - `finalize_conversation` - 结束对话
 - `question_with_context` - 基于上下文提问
 
-**领域 MCP 工具 (75+个)**:
+**领域 MCP 工具 (21个)**:
 - 知识域: `list_knowledge_points`, `search_knowledge`, `build_knowledge_graph` 等
 - 系统域: `get_system_health`, `system_diagnose`, `hot_reload` 等
 - 日报域: `get_daily_summary`, `read_daily_log`, `list_logs` 等
 - 优化域: `process_user_feedback`, `check_optimization_needed` 等
-- 记忆域: `get_memory`, `update_memory`, `search_conversations` 等
-- 迭代域: `self_iterate`, `self_upgrade`, `get_rules`, `git_auto_commit` 等
-- Vault域: `archive_conversation`, `register_callback`, `get_task_status` 等
+
+**工具层 MCP 工具 (17个)**:
+- 文件系统: `read_file`, `write_file`, `list_directory` 等
+- 网络请求: `fetch_url`, `github_search_code` 等
+- 系统工具: `execute_system_command`, `environment_scan` 等
+- 成长分析: `get_user_growth_overview`, `get_user_skill_radar` 等
 
 ---
 
@@ -427,37 +411,33 @@ python scripts/check_db_integrity.py
 
 ## 🔄 版本迭代记录
 
-### v7.5.0 (2026-07-13) - Engine Pattern 架构重构 ⭐
+### v8.3.0 (2026-07-16) - 文档整理与工具计数修正
+**变更**:
+- ✅ 移除 README 中不存在的 3 个引擎文档（memory/iteration/vault 已废弃或合并）
+- ✅ 移除不存在的 `git_operations.py` 文档引用
+- ✅ 修正 `_tools_count` 为真实数字（server.py 中 5+3+4+5 替代硬编码的 6+3+4+10）
+- ✅ 统一版本号（server.py / README / pyproject.toml → 8.3）
+- ✅ 引擎注册计数精确化（4+6+9+2 替代统一 10）
+- ✅ `__init__.py` 注释更新（17 个工具，包含 growth_analytics）
+
+### v8.0-v8.2 (2026-07-14) - 清理自迭代子系统
 **重大变更**:
-- ✅ server.py 从 4240 行 → 360 行薄壳入口（减少 91%）
-- ✅ 8 个领域引擎按业务域封装 (core/*_engine.py)
+- ✅ server.py 从 4240 行 → ~380 行薄壳入口
+- ✅ 5 个领域引擎按业务域封装 (core/*_engine.py)
 - ✅ `@mcp_tool_handler` 统一装饰器消除样板代码
 - ✅ HTTP REST 路由提取到 `routes/rest_api.py`
 - ✅ 启动逻辑提取到 `core/bootstrap.py`
 - ✅ 工具层添加 `register_*_tools(mcp)` 注册函数
-- ✅ 删除废弃文件: `conversation_manager.py`, `conversation_analyzer.py`, `log_service.py`
-
-**新增文件**:
-- `core/conversation_engine.py` - 对话引擎 (已有，补充 register 函数)
-- `core/knowledge_engine.py` - 知识引擎
-- `core/system_engine.py` - 系统引擎
-- `core/daily_engine.py` - 日报引擎
-- `core/optimization_engine.py` - 优化引擎
-- `core/memory_engine.py` - 记忆引擎
-- `core/iteration_engine.py` - 迭代引擎
-- `core/vault_engine.py` - Vault 引擎
-- `core/bootstrap.py` - 启动与初始化
-- `core/decorators.py` - 统一装饰器
-- `routes/rest_api.py` - REST API 路由
+- ✅ 移除废弃的 memory_engine / iteration_engine / vault_engine（功能已合并到其他模块）
 
 **架构对比**:
-| 维度 | v7.3 | v7.5 |
+| 维度 | v7.3 | v8.3 |
 |------|------|------|
-| server.py 行数 | 4240 | 360 |
+| server.py 行数 | 4240 | ~380 |
+| 引擎数 | 8 (含3个空壳) | 5 (实际运作) |
 | 业务逻辑位置 | 散落在 server.py | 集中在 core/*_engine.py |
 | MCP 工具注册 | 内联在 server.py | 每个 Engine 自带 register 函数 |
 | HTTP 路由 | 混在 server.py | 独立 routes/rest_api.py |
-| 启动逻辑 | 内嵌 server.py | 独立 core/bootstrap.py |
 
 详见 [CHANGELOG.md](./CHANGELOG.md)
 

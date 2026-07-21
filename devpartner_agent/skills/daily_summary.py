@@ -29,14 +29,13 @@ def get_daily_work_data(date_str: str = None, fallback_to_log: bool = False) -> 
     if date_str is None:
         date_str = datetime.now().strftime("%Y-%m-%d")
 
+    # v9.2: problems_found/thinking_data 废弃 — 由 conversation_steps 聚合替代
     result = {
         "date": date_str,
         "generated_at": datetime.now().isoformat(),
         "conversations": [],
         "stats": {},
         "files_touched": [],
-        "problems_found": [],
-        "thinking_data": [],
         "data_source": "db",
     }
 
@@ -53,6 +52,7 @@ def get_daily_work_data(date_str: str = None, fallback_to_log: bool = False) -> 
             (date_str,)
         )
         
+        # v9.2: 废弃字段已从 conversations 表删除，改为从 conversation_steps 聚合
         for c in (convs or []):
             entry = {
                 "timestamp": c.get("timestamp", ""),
@@ -60,39 +60,33 @@ def get_daily_work_data(date_str: str = None, fallback_to_log: bool = False) -> 
                 "topic": c.get("topic", ""),
                 "task_type": c.get("task_type", ""),
                 "user_intent": c.get("user_intent", ""),
-                "actions": c.get("actions", ""),
-                "problems": c.get("problems", ""),
-                "solutions": c.get("solutions", ""),
-                "decisions": c.get("decisions", ""),
                 "self_reflection": c.get("self_reflection", ""),
                 "client": c.get("client", "unknown"),
+                "ai_analysis": c.get("ai_analysis", ""),
             }
-            
-            # 解析 JSON 字段
-            try:
-                files = json.loads(c.get("files_touched", "[]"))
-                entry["files_touched"] = files
-                result["files_touched"].extend(files)
-            except (json.JSONDecodeError, TypeError):
-                entry["files_touched"] = []
 
-            try:
-                thinking = json.loads(c.get("thinking_steps", "[]"))
-                entry["thinking_steps"] = thinking
-                if thinking:
-                    result["thinking_data"].append({
-                        "topic": entry["topic"],
-                        "steps": thinking,
-                        "self_reflection": entry["self_reflection"],
-                    })
-            except (json.JSONDecodeError, TypeError):
-                entry["thinking_steps"] = []
-
-            if entry["problems"]:
-                result["problems_found"].append(entry["problems"])
-            if entry["solutions"]:
-                if result["problems_found"]:
-                    result["problems_found"][-1] += f" → 解决: {entry['solutions']}"
+            # 从 conversation_steps 聚合文件变更信息
+            conv_id = c.get("conversation_id", "")
+            if conv_id:
+                steps = db.query_local(
+                    "SELECT input_data FROM conversation_steps WHERE conversation_id = ? ORDER BY step_order",
+                    (conv_id,)
+                )
+                for s in (steps or []):
+                    try:
+                        sd = json.loads(s.get("input_data", "{}"))
+                        fc = sd.get("files_changed", "")
+                        if fc:
+                            if isinstance(fc, str):
+                                try:
+                                    fc_list = json.loads(fc)
+                                except (json.JSONDecodeError, TypeError):
+                                    fc_list = [fc] if fc else []
+                            else:
+                                fc_list = fc if isinstance(fc, list) else [fc]
+                            result["files_touched"].extend(fc_list)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
 
             result["conversations"].append(entry)
 
@@ -154,14 +148,15 @@ def save_daily_analysis(analysis_json: str) -> dict:
         db = get_db()
 
         timestamp = datetime.now().isoformat()
+        # v9.2: raw_json 字段已删除，使用 ai_analysis 替代
+        conv_id = datetime.now().strftime("daily_%Y%m%d%H%M%S")
         db.query_local(
             """INSERT INTO conversations
-               (timestamp, topic, task_type, user_intent, actions, raw_json)
+               (conversation_id, timestamp, topic, task_type, user_intent, ai_analysis)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            (timestamp, "每日总结",
+            (conv_id, timestamp, "每日总结",
              "daily_summary",
              f"AI客户端生成 {target_date} 工作总结",
-             "AI分析 + 生成日报",
              json.dumps(analysis, ensure_ascii=False)),
         )
         result["steps"].append({"step": "save_to_local_db", "status": "ok"})
@@ -305,7 +300,7 @@ def generate_daily_summary(date_str: str = "", use_llm: bool = True) -> dict:
                 
                 # 检查是否启用 LLM 总结功能
                 cfg = llm._get_config()
-                if getattr(cfg, 'enhance_daily_summary', False) and llm.is_available():
+                if getattr(cfg.llm, 'enhance_daily_summary', False) and llm.is_available():
                     logger.info(f"使用 LLM 生成 {target_date} 的每日总结...")
                     llm_analysis = llm.generate_daily_summary(target_date, data)
                     
@@ -333,7 +328,6 @@ def generate_daily_summary(date_str: str = "", use_llm: bool = True) -> dict:
                 "total_conversations": len(tasks),
                 "task_types": stats.get("by_type", {}),
                 "files_touched": len(data.get("files_touched", [])),
-                "problems_count": sum(1 for t in tasks if t.get("problems")),
                 "clients_active": data.get("active_clients", []),
             },
             "conversations": tasks[:20],
@@ -359,16 +353,20 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def _check_llm_available() -> tuple:
-    """检查 LLM 是否可用，返回 (available: bool, reason: str)"""
+def _check_llm_available(feature_flag: str = "enhance_daily_summary") -> tuple:
+    """检查 LLM 是否可用，返回 (available: bool, reason: str)
+
+    Args:
+        feature_flag: 要检查的配置开关名（enhance_daily_summary / enhance_profile_merge / enhance_weekly_report）
+    """
     try:
         from devpartner_agent.core.llm_engine import get_llm_engine
         llm = get_llm_engine()
         if not llm.is_available():
             return False, "LLM 引擎未加载或服务不可用"
         cfg = llm._get_config()
-        if not getattr(cfg, "enhance_profile_merge", False):
-            return False, "feature flag enhance_profile_merge 未开启"
+        if not getattr(cfg.llm, feature_flag, False):
+            return False, f"feature flag {feature_flag} 未开启"
         return True, ""
     except Exception as e:
         return False, f"LLM 检查异常: {e}"
@@ -507,7 +505,7 @@ def _execute_profile_merge_llm(db, behavior_signals_list: list,
                                 source_date: str) -> dict:
     """执行用户画像 LLM 合并（核心逻辑，被 merge_daily_profile 和 process_pending_analyses 复用）"""
     try:
-        from devpartner_agent.core.llm_prompts import run_analysis, TASK_DAILY_PROFILE_MERGE
+        from prompts import run_analysis, TASK_DAILY_PROFILE_MERGE
         llm_result = run_analysis(
             TASK_DAILY_PROFILE_MERGE,
             behavior_signals_json=json.dumps(behavior_signals_list, ensure_ascii=False, indent=2)[:6000],
@@ -574,7 +572,7 @@ def _execute_system_merge_llm(db, system_id: str, all_tech: list, all_arch: list
                                source_date: str, fragment_ids: list = None) -> dict:
     """执行系统认知 LLM 合并（核心逻辑，被 merge_daily_system_context 和 process_pending_analyses 复用）"""
     try:
-        from devpartner_agent.core.llm_prompts import run_analysis, TASK_DAILY_SYSTEM_MERGE
+        from prompts import run_analysis, TASK_DAILY_SYSTEM_MERGE
         fragments_json = json.dumps({
             "tech_signals": all_tech[:30],
             "architecture_signals": all_arch[:20],
@@ -698,7 +696,7 @@ def merge_daily_profile(date_str: str = "") -> dict:
                 "trend": row["trend"],
             }
 
-        llm_ok, llm_reason = _check_llm_available()
+        llm_ok, llm_reason = _check_llm_available("enhance_profile_merge")
         if not llm_ok:
             _write_pending_analysis(
                 db=db,
@@ -810,7 +808,7 @@ def merge_daily_system_context(date_str: str = "") -> dict:
             grouped[f["system_id"]].append(f)
             fragment_ids.append(f["id"])
 
-        llm_ok, llm_reason = _check_llm_available()
+        llm_ok, llm_reason = _check_llm_available("enhance_system_merge")
 
         for system_id, group in grouped.items():
             try:
@@ -926,8 +924,8 @@ def archive_and_cleanup_data() -> dict:
     执行顺序：
     1. 清理 pending_analyses 中超过最大重试次数的记录
     2. 温数据归档：30-180天的对话，压缩 steps 详情
-    3. 冷数据归档：超过180天的对话，移入 archived_conversations，删除原始数据
-    4. 清理超过365天的 archived_conversations
+    3. 冷数据归档：超过180天的对话，标记 archive_tier='archived'
+    4. 深度清理：超过365天，直接删除（MD为唯一数据源）
     5. 清理过期的 improvement_log / evolution_log
 
     数据生命周期：
@@ -1041,122 +1039,47 @@ def archive_and_cleanup_data() -> dict:
         except Exception as e:
             result["errors"].append(f"温数据归档失败: {e}")
 
-        # ── 3. 冷数据归档：超过180天，移入 archived_conversations ──
+        # ── 3. 冷数据归档：超过180天，标记为 'archived'（v9.2: 不再使用 archived_conversations 表）──
         try:
             cold_days = getattr(lc, "conversation_warm_days", 180)
             cold_cutoff = (now - timedelta(days=cold_days)).strftime("%Y-%m-%d")
 
-            cold_convs = db.query_local(
-                "SELECT conversation_id, system_id, topic, task_type, timestamp, "
-                "total_steps, actions, behavior_signals "
-                "FROM conversations WHERE date(timestamp) < ? "
+            cold_rows = db.query_local(
+                "SELECT COUNT(*) as cnt FROM conversations WHERE date(timestamp) < ? "
                 "AND archive_tier IN ('hot', 'warm') AND analyzed = 1",
                 (cold_cutoff,),
             )
-
-            if cold_convs:
-                ensure_md = getattr(lc, "ensure_md_exported_before_archive", True)
-                archived_count = 0
-                skipped_count = 0
-
-                if ensure_md:
-                    from devpartner_agent.services.vault_exporter import get_vault_exporter
-                    exporter = get_vault_exporter()
-                    calendar_dir = exporter._calendar_dir
-
-                for conv in cold_convs:
-                    try:
-                        conv_id = conv["conversation_id"]
-                        conv_date = conv.get("timestamp", "")[:10]
-
-                        if ensure_md:
-                            md_path = calendar_dir / f"{conv_date}.md"
-                            if not md_path.exists():
-                                skipped_count += 1
-                                continue
-
-                        step_count = conv.get("total_steps", 0) or 0
-                        if step_count == 0:
-                            try:
-                                sc = db.query_local(
-                                    "SELECT COUNT(*) as cnt FROM conversation_steps WHERE conversation_id = ?",
-                                    (conv_id,),
-                                )
-                                step_count = sc[0]["cnt"] if sc else 0
-                            except Exception:
-                                pass
-
-                        kp_total = 0
-                        try:
-                            kt = db.query_local(
-                                "SELECT COUNT(*) as cnt FROM knowledge_points WHERE source_id = ?",
-                                (conv_id,),
-                            )
-                            kp_total = kt[0]["cnt"] if kt else 0
-                        except Exception:
-                            pass
-
-                        actions_raw = conv.get("actions", "")
-                        key_summary = ""
-                        if isinstance(actions_raw, str) and len(actions_raw) > 10:
-                            key_summary = actions_raw[:200]
-                        elif isinstance(actions_raw, dict):
-                            key_summary = str(actions_raw.get("summary", ""))[:200]
-
-                        db.query_local("""
-                            INSERT OR IGNORE INTO archived_conversations (
-                                conversation_id, system_id, topic, task_type,
-                                step_count, knowledge_count, key_summary,
-                                archived_at, original_created
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """, (
-                            conv_id,
-                            conv.get("system_id", "default") or "default",
-                            conv.get("topic", ""),
-                            conv.get("task_type", ""),
-                            step_count,
-                            kp_total,
-                            key_summary,
-                            now.isoformat(),
-                            conv.get("timestamp", ""),
-                        ))
-
-                        db.query_local(
-                            "DELETE FROM conversation_steps WHERE conversation_id = ?",
-                            (conv_id,),
-                        )
-                        db.query_local(
-                            "DELETE FROM conversations WHERE conversation_id = ?",
-                            (conv_id,),
-                        )
-
-                        archived_count += 1
-                    except Exception as e:
-                        result["errors"].append(f"冷数据归档失败 [{conv.get('conversation_id', '?')}]: {e}")
-
-                result["cold_archived"] = archived_count
-                result["cold_skipped"] = skipped_count
-                if archived_count > 0 or skipped_count > 0:
-                    logger.info(f"🗄️ 冷数据归档完成: {archived_count} 个对话已归档, {skipped_count} 个跳过（MD未导出）")
+            cold_count = cold_rows[0]["cnt"] if cold_rows else 0
+            if cold_count > 0:
+                db.query_local(
+                    "UPDATE conversations SET archive_tier = 'archived', updated_at = ? "
+                    "WHERE date(timestamp) < ? AND archive_tier IN ('hot', 'warm') AND analyzed = 1",
+                    (now.isoformat(), cold_cutoff),
+                )
+                result["cold_archived"] = cold_count
+                logger.info(f"🗄️ 冷数据归档完成: {cold_count} 个对话标记为 'archived'")
         except Exception as e:
             result["errors"].append(f"冷数据归档失败: {e}")
 
-        # ── 4. 深度清理：超过365天的 archived_conversations ──
+        # ── 4. 深度清理：超过365天，直接删除（v9.2: MD 为唯一完整数据源）──
         try:
             deep_days = getattr(lc, "conversation_cold_days", 365)
             deep_cutoff = (now - timedelta(days=deep_days)).strftime("%Y-%m-%d")
 
             deep_rows = db.query_local(
-                "SELECT id FROM archived_conversations WHERE date(archived_at) < ?",
+                "SELECT id FROM conversations WHERE date(timestamp) < ? AND archive_tier = 'archived'",
                 (deep_cutoff,),
             )
             if deep_rows:
+                conv_ids = [r["id"] for r in deep_rows]
+                for cid in conv_ids:
+                    db.query_local("DELETE FROM conversation_steps WHERE conversations_id = ?", (cid,))
                 db.query_local(
-                    "DELETE FROM archived_conversations WHERE date(archived_at) < ?",
+                    "DELETE FROM conversations WHERE date(timestamp) < ? AND archive_tier = 'archived'",
                     (deep_cutoff,),
                 )
                 result["deep_cleaned"] = len(deep_rows)
-                logger.info(f"🗑️ 深度清理完成: {len(deep_rows)} 条 archived_conversations 已删除（MD为唯一数据源）")
+                logger.info(f"🗑️ 深度清理完成: {len(deep_rows)} 条对话已删除（MD为唯一数据源）")
         except Exception as e:
             result["errors"].append(f"深度清理失败: {e}")
 
@@ -1300,18 +1223,20 @@ def _read_md_reports(directory: Path, limit: int = 10,
     return reports
 
 
-def generate_weekly_report(trigger_time: datetime = None) -> dict:
+def generate_weekly_report(trigger_time: datetime = None,
+                            target_date: str = None,
+                            force_overwrite: bool = False) -> dict:
     """
     生成周报（v8.0 — LLM 驱动 + MD 自包含）
+    v8.5.7: 新增 target_date + force_overwrite，支持手动覆盖生成
 
     数据来源：上周的 Calendar/*.md 日报文件 + 用户/项目画像快照
     输出：Reports/Weekly/{YYYY-WXX}.md
 
-    注意：周一触发时，生成的是**上周**的周报。
-    例如 7月14号(周一)9:00 触发 → 生成上周周报（7月7日~7月13日）。
-
     Args:
         trigger_time: 触发时间，默认当前时间
+        target_date: 目标日期（YYYY-MM-DD），定位到该日期所在周，默认上周
+        force_overwrite: 是否覆盖已存在的报告
 
     Returns:
         {"success": bool, "method": "llm"/"pending", "file_path": str}
@@ -1328,12 +1253,33 @@ def generate_weekly_report(trigger_time: datetime = None) -> dict:
         db = get_db()
         exporter = get_vault_exporter()
 
-        today = trigger_time.date()
-        this_monday = today - timedelta(days=today.weekday())
-        last_monday = this_monday - timedelta(days=7)
-        last_sunday = this_monday - timedelta(days=1)
-        period_start = last_monday.strftime("%Y-%m-%d")
-        period_end = last_sunday.strftime("%Y-%m-%d")
+        if target_date:
+            # 手动指定目标日期 → 定位到该日期所在 ISO 周
+            td = datetime.strptime(target_date, "%Y-%m-%d").date()
+            week_monday = td - timedelta(days=td.weekday())
+            week_sunday = week_monday + timedelta(days=6)
+            period_start = week_monday.strftime("%Y-%m-%d")
+            period_end = week_sunday.strftime("%Y-%m-%d")
+            week_num = week_monday.strftime("%Y-W%W")
+        else:
+            today = trigger_time.date()
+            this_monday = today - timedelta(days=today.weekday())
+            last_monday = this_monday - timedelta(days=7)
+            last_sunday = this_monday - timedelta(days=1)
+            period_start = last_monday.strftime("%Y-%m-%d")
+            period_end = last_sunday.strftime("%Y-%m-%d")
+            week_num = last_monday.strftime("%Y-W%W")
+
+        # 覆盖模式：检查目标文件是否已存在
+        target_file = exporter._reports_dir / "Weekly" / f"{week_num}.md"
+        if target_file.exists() and not force_overwrite:
+            result["success"] = True
+            result["method"] = "skipped"
+            result["file_path"] = str(target_file)
+            result["note"] = f"报告已存在: {week_num}.md（勾选覆盖可重新生成）"
+            result["period_start"] = period_start
+            result["period_end"] = period_end
+            return result
 
         daily_summaries = _read_md_reports(
             exporter._calendar_dir, limit=7,
@@ -1352,7 +1298,7 @@ def generate_weekly_report(trigger_time: datetime = None) -> dict:
         user_snapshot = _get_user_profile_snapshot(db)
         project_snapshot = _get_project_profile_snapshot(db)
 
-        llm_ok, llm_reason = _check_llm_available()
+        llm_ok, llm_reason = _check_llm_available("enhance_weekly_report")
         if not llm_ok:
             _write_pending_analysis(
                 db=db,
@@ -1373,7 +1319,7 @@ def generate_weekly_report(trigger_time: datetime = None) -> dict:
             result["note"] = f"LLM 不可用 ({llm_reason})，数据已暂存等待清算"
             return result
 
-        from devpartner_agent.core.llm_prompts import run_analysis, TASK_WEEKLY_REPORT
+        from prompts import run_analysis, TASK_WEEKLY_REPORT
         llm_result = run_analysis(
             TASK_WEEKLY_REPORT,
             period_start=period_start,
@@ -1414,18 +1360,20 @@ def generate_weekly_report(trigger_time: datetime = None) -> dict:
     return result
 
 
-def generate_monthly_report(trigger_time: datetime = None) -> dict:
+def generate_monthly_report(trigger_time: datetime = None,
+                             target_date: str = None,
+                             force_overwrite: bool = False) -> dict:
     """
     生成月报（v8.0 — LLM 驱动 + MD 自包含）
+    v8.5.7: 新增 target_date + force_overwrite，支持手动覆盖生成
 
     数据来源：上月的 Reports/Weekly/*.md 周报文件 + 用户/项目画像快照
     输出：Reports/Monthly/{YYYY-MM}.md
 
-    注意：每月1号触发时，生成的是**上个月**的月报。
-    例如 7月1号10:00 触发 → 生成 6月月报（6月1日~6月30日）。
-
     Args:
         trigger_time: 触发时间，默认当前时间
+        target_date: 目标日期（YYYY-MM-DD），定位到该日期所在月，默认上月
+        force_overwrite: 是否覆盖已存在的报告
 
     Returns:
         {"success": bool, "method": "llm"/"pending", "file_path": str}
@@ -1442,12 +1390,36 @@ def generate_monthly_report(trigger_time: datetime = None) -> dict:
         db = get_db()
         exporter = get_vault_exporter()
 
-        today = trigger_time.date()
-        first_of_this_month = today.replace(day=1)
-        last_of_prev_month = first_of_this_month - timedelta(days=1)
-        first_of_prev_month = last_of_prev_month.replace(day=1)
-        period_start = first_of_prev_month.strftime("%Y-%m-%d")
-        period_end = last_of_prev_month.strftime("%Y-%m-%d")
+        if target_date:
+            td = datetime.strptime(target_date, "%Y-%m-%d").date()
+            first_of_month = td.replace(day=1)
+            if td.month == 12:
+                last_of_month = td.replace(day=31)
+            else:
+                next_month = td.replace(month=td.month + 1, day=1)
+                last_of_month = next_month - timedelta(days=1)
+            period_start = first_of_month.strftime("%Y-%m-%d")
+            period_end = last_of_month.strftime("%Y-%m-%d")
+            month_str = first_of_month.strftime("%Y-%m")
+        else:
+            today = trigger_time.date()
+            first_of_this_month = today.replace(day=1)
+            last_of_prev_month = first_of_this_month - timedelta(days=1)
+            first_of_prev_month = last_of_prev_month.replace(day=1)
+            period_start = first_of_prev_month.strftime("%Y-%m-%d")
+            period_end = last_of_prev_month.strftime("%Y-%m-%d")
+            month_str = first_of_prev_month.strftime("%Y-%m")
+
+        # 覆盖模式：检查目标文件是否已存在
+        target_file = exporter._reports_dir / "Monthly" / f"{month_str}.md"
+        if target_file.exists() and not force_overwrite:
+            result["success"] = True
+            result["method"] = "skipped"
+            result["file_path"] = str(target_file)
+            result["note"] = f"报告已存在: {month_str}.md（勾选覆盖可重新生成）"
+            result["period_start"] = period_start
+            result["period_end"] = period_end
+            return result
 
         weekly_summaries = _read_md_reports(
             exporter._reports_dir / "Weekly", limit=5,
@@ -1466,7 +1438,7 @@ def generate_monthly_report(trigger_time: datetime = None) -> dict:
         user_snapshot = _get_user_profile_snapshot(db)
         project_snapshot = _get_project_profile_snapshot(db)
 
-        llm_ok, llm_reason = _check_llm_available()
+        llm_ok, llm_reason = _check_llm_available("enhance_monthly_report")
         if not llm_ok:
             _write_pending_analysis(
                 db=db,
@@ -1487,7 +1459,7 @@ def generate_monthly_report(trigger_time: datetime = None) -> dict:
             result["note"] = f"LLM 不可用 ({llm_reason})，数据已暂存等待清算"
             return result
 
-        from devpartner_agent.core.llm_prompts import run_analysis, TASK_MONTHLY_REPORT
+        from prompts import run_analysis, TASK_MONTHLY_REPORT
         llm_result = run_analysis(
             TASK_MONTHLY_REPORT,
             period_start=period_start,
@@ -1541,14 +1513,14 @@ def _run_growth_analysis(db, period_start: str, period_end: str,
                           weekly_summaries_text: str, user_snapshot: str,
                           project_snapshot: str):
     """
-    月报生成后触发系统成长分析，产出 growth_analysis 表数据。
+    月报生成后触发系统+用户双维度成长分析，产出 growth_analysis 表数据。
 
-    分析四个维度：prompt_optimize / analysis_add / knowledge_gap / user_profile_enhance
+    v8.5.0: 双维度分析 — system_analyses（系统优化）+ user_analyses（用户成长）
     结果写入 growth_analysis 表，状态为 pending，等待 Dashboard 人工审核。
     """
     month_str = period_start[:7]
     try:
-        from devpartner_agent.core.llm_prompts import run_analysis, TASK_GROWTH_ANALYSIS
+        from prompts import run_analysis, TASK_GROWTH_ANALYSIS
 
         ga_result = run_analysis(
             TASK_GROWTH_ANALYSIS,
@@ -1563,20 +1535,29 @@ def _run_growth_analysis(db, period_start: str, period_end: str,
             logger.warning("成长分析 LLM 返回无效结果，跳过")
             return
 
-        analyses = ga_result.get("analyses", [])
-        if not analyses:
-            logger.info("本月无系统优化建议")
+        # v8.5.0: 双维度 — system_analyses + user_analyses
+        system_items = ga_result.get("system_analyses", [])
+        user_items = ga_result.get("user_analyses", [])
+        all_items = system_items + user_items
+
+        if not all_items:
+            logger.info("本月无成长分析建议")
             return
 
         count = 0
-        for item in analyses:
+        for item in all_items:
             try:
                 db.insert_growth_analysis({
                     "analysis_type": item.get("analysis_type", ""),
                     "title": item.get("title", ""),
                     "description": item.get("description", ""),
                     "suggestion": item.get("suggestion", ""),
-                    "related_data": item.get("related_data", {}),
+                    "related_data": {
+                        **(item.get("related_data", {}) or {}),
+                        "related_skills": item.get("related_skills", []),
+                        "trend_keywords": item.get("trend_keywords", []),
+                        "expected_effect": item.get("expected_effect", ""),
+                    },
                     "priority": item.get("priority", "medium"),
                     "source": "monthly_report",
                     "source_period": month_str,
@@ -1585,8 +1566,22 @@ def _run_growth_analysis(db, period_start: str, period_end: str,
             except Exception as e:
                 logger.error(f"写入 growth_analysis 失败: {e}")
 
+        # v8.5.0: 保存汇总信息到 improvement_log
+        summary = ga_result.get("summary", {})
+        if summary:
+            try:
+                db.query_local("""
+                    INSERT INTO improvement_log (
+                        timestamp, category, suggestion, priority, status
+                    ) VALUES (?, 'growth_summary', ?, 'medium', 'pending')
+                """, (datetime.now().isoformat(),
+                      json.dumps(summary, ensure_ascii=False)[:500]))
+            except Exception:
+                pass
+
         if count > 0:
-            logger.info(f"成长分析完成: {count} 条建议已写入 growth_analysis 表（{month_str}）")
+            logger.info(f"成长分析完成: {count} 条建议已写入 growth_analysis 表（{month_str}）"
+                        f" | 系统={len(system_items)} 用户={len(user_items)}")
 
         _cleanup_old_growth_analysis(db, month_str)
 
@@ -1614,15 +1609,20 @@ def _cleanup_old_growth_analysis(db, current_period: str):
         logger.error(f"清理 growth_analysis 失败: {e}")
 
 
-def generate_annual_report(trigger_time: datetime = None) -> dict:
+def generate_annual_report(trigger_time: datetime = None,
+                            target_date: str = None,
+                            force_overwrite: bool = False) -> dict:
     """
     生成年报（v8.0 — LLM 驱动 + MD 自包含）
+    v8.5.7: 新增 target_date + force_overwrite，支持手动覆盖生成
 
     数据来源：本年的 Reports/Monthly/*.md 月报文件 + 用户/项目画像快照
     输出：Reports/Annual/{YYYY}.md
 
     Args:
         trigger_time: 触发时间，默认当前时间
+        target_date: 目标日期（YYYY-MM-DD），定位到该日期所在年，默认去年
+        force_overwrite: 是否覆盖已存在的报告
 
     Returns:
         {"success": bool, "method": "llm"/"pending", "file_path": str}
@@ -1639,9 +1639,24 @@ def generate_annual_report(trigger_time: datetime = None) -> dict:
         db = get_db()
         exporter = get_vault_exporter()
 
-        year_str = str(trigger_time.year)
+        if target_date:
+            year_str = str(datetime.strptime(target_date, "%Y-%m-%d").year)
+        else:
+            year_str = str(trigger_time.year - 1)
+
         period_start = f"{year_str}-01-01"
         period_end = f"{year_str}-12-31"
+
+        # 覆盖模式：检查目标文件是否已存在
+        target_file = exporter._reports_dir / "Annual" / f"{year_str}.md"
+        if target_file.exists() and not force_overwrite:
+            result["success"] = True
+            result["method"] = "skipped"
+            result["file_path"] = str(target_file)
+            result["note"] = f"报告已存在: {year_str}.md（勾选覆盖可重新生成）"
+            result["period_start"] = period_start
+            result["period_end"] = period_end
+            return result
 
         monthly_summaries = _read_md_reports(
             exporter._reports_dir / "Monthly", limit=12,
@@ -1660,7 +1675,7 @@ def generate_annual_report(trigger_time: datetime = None) -> dict:
         user_snapshot = _get_user_profile_snapshot(db)
         project_snapshot = _get_project_profile_snapshot(db)
 
-        llm_ok, llm_reason = _check_llm_available()
+        llm_ok, llm_reason = _check_llm_available("enhance_annual_report")
         if not llm_ok:
             _write_pending_analysis(
                 db=db,
@@ -1680,7 +1695,7 @@ def generate_annual_report(trigger_time: datetime = None) -> dict:
             result["note"] = f"LLM 不可用 ({llm_reason})，数据已暂存等待清算"
             return result
 
-        from devpartner_agent.core.llm_prompts import run_analysis, TASK_ANNUAL_REPORT
+        from prompts import run_analysis, TASK_ANNUAL_REPORT
         llm_result = run_analysis(
             TASK_ANNUAL_REPORT,
             period_start=period_start,

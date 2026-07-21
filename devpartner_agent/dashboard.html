@@ -56,6 +56,9 @@
   td { padding:10px 8px; border-bottom:1px solid var(--border); }
   tr:hover td { background:rgba(99,102,241,0.05); }
 
+  .kb-table .kb-title { max-width:350px; }
+  .kb-table .kb-summary { font-size:11px; color:var(--text-muted); margin-top:4px; line-height:1.4; }
+
   .tag { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:500; }
   .tag.pending { background:rgba(234,179,8,0.15); color:var(--yellow); }
   .tag.running { background:rgba(99,102,241,0.15); color:var(--accent); }
@@ -72,6 +75,79 @@
   .empty { text-align:center; padding:32px; color:var(--text-muted); font-size:13px; }
 
   .error-banner { background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:var(--radius); padding:12px 16px; margin-bottom:16px; color:var(--red); font-size:13px; display:none; }
+
+  
+  .nav-tabs{display:flex;gap:8px;margin-bottom:24px;border-bottom:1px solid var(--border);padding-bottom:0;flex-wrap:wrap;}
+  .nav-tabs .tab{padding:8px 16px;border-radius:6px 6px 0 0;font-size:13px;cursor:pointer;color:var(--text-muted);border:1px solid transparent;border-bottom:none;transition:all 0.2s;white-space:nowrap;}
+  .nav-tabs .tab:hover{color:var(--text);}
+  .nav-tabs .tab.active{color:var(--accent);border-color:var(--border);background:var(--card-bg);}
+  .tab-page{display:none;}.tab-page.active{display:block;}
+  .skill-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
+  .skill-row .s-name{width:80px;font-size:12px;color:var(--text-muted);flex-shrink:0;}
+  .skill-row .s-bar{flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden;}
+  .skill-row .s-bar .s-fill{height:100%;border-radius:3px;transition:width 0.5s ease;}
+  .skill-row .s-val{font-size:12px;width:36px;text-align:right;flex-shrink:0;}
+  .search-box{display:flex;gap:8px;margin-bottom:12px;}
+  .search-box input{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;}
+  .search-box input:focus,.search-box select:focus{border-color:var(--accent);}
+  .search-box select{background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;}
+  .heatmap-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;}
+  .heatmap-cell{aspect-ratio:1;border-radius:3px;min-width:16px;}
+  .heatmap-labels{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:4px;}
+  .heatmap-labels span{font-size:10px;color:var(--text-muted);text-align:center;}
+  .timeline-item{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;align-items:flex-start;}
+  .timeline-item .tl-icon{font-size:16px;flex-shrink:0;}
+  .timeline-item .tl-time{font-size:11px;color:var(--text-muted);flex-shrink:0;width:80px;}
+  .timeline-item .tl-content{flex:1;}
+  .timeline-item .tl-delta{font-size:11px;color:var(--accent);flex-shrink:0;}
+  .trend-bar-chart{display:flex;align-items:flex-end;gap:2px;height:120px;padding-top:8px;}
+  .trend-bar{flex:1;min-width:12px;background:var(--accent);border-radius:2px 2px 0 0;transition:height 0.5s ease;position:relative;}
+  .trend-bar:hover{background:var(--accent-hover);}
+  .trend-bar-label{font-size:9px;color:var(--text-muted);text-align:center;margin-top:4px;}
+  .ops-action-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;}
+  .ops-result{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;font-family:monospace;font-size:11px;max-height:300px;overflow-y:auto;white-space:pre-wrap;line-height:1.5;color:var(--text-muted);}
+
+  .diag-row{display:flex;justify-content:space-between;align-items:flex-start;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);font-size:12px;}
+  .diag-row:last-child{border-bottom:none;}
+  .diag-name{color:var(--text-muted);flex-shrink:0;margin-right:16px;min-width:80px;}
+  .diag-val{color:var(--text);text-align:right;word-break:break-all;}
+  .diag-ok{color:var(--green)!important;}
+  .diag-err{color:var(--red)!important;}
+  .diag-warn{color:var(--yellow)!important;}
+  .diag-issues{margin-top:10px;padding:10px 12px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:6px;font-size:12px;color:var(--red);}
+  .diag-issue{padding:2px 0;font-size:11px;}
+  .integrity-summary{padding:8px 12px;border-radius:6px;margin-bottom:10px;font-size:13px;font-weight:500;}
+
+  /* 优化建议卡片 */
+  .sg-card{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;margin-bottom:12px;transition:border-color 0.2s;}
+  .sg-card:hover{border-color:var(--accent);}
+  .sg-card.pending{border-left:3px solid var(--yellow);}
+  .sg-card.approved{border-left:3px solid var(--green);}
+  .sg-card.rejected{border-left:3px solid var(--red);}
+  .sg-card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;flex-wrap:wrap;gap:8px;}
+  .sg-card-title{font-size:15px;font-weight:600;color:var(--text);}
+  .sg-card-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+  .sg-card-desc{font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:8px;}
+  .sg-card-suggestion{font-size:13px;color:var(--accent);background:rgba(99,102,241,0.08);border-radius:6px;padding:10px 12px;line-height:1.6;margin-bottom:10px;}
+  .sg-card-footer{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;font-size:12px;color:var(--text-muted);}
+  .sg-card-actions{display:flex;gap:6px;}
+  .sg-card-actions button{padding:4px 12px;border-radius:6px;font-size:12px;cursor:pointer;border:1px solid var(--border);background:var(--card-bg);color:var(--text);transition:all 0.2s;}
+  .sg-card-actions button.approve:hover{background:rgba(34,197,94,0.15);border-color:var(--green);color:var(--green);}
+  .sg-card-actions button.reject:hover{background:rgba(239,68,68,0.15);border-color:var(--red);color:var(--red);}
+  .sg-card-actions button.apply:hover{background:rgba(99,102,241,0.15);border-color:var(--accent);color:var(--accent);}
+  .sg-card-actions button.feedback-btn:hover{background:rgba(234,179,8,0.15);border-color:var(--yellow);color:var(--yellow);}
+  .sg-feedback-area{display:none;margin-top:10px;}
+  .sg-feedback-area textarea{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;resize:vertical;min-height:60px;}
+  .sg-feedback-area textarea:focus{border-color:var(--accent);}
+  .sg-feedback-area .btn-row{display:flex;gap:6px;margin-top:8px;justify-content:flex-end;}
+
+  /* tooltip */
+  .card-header{position:relative;}
+  .card-header .info-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--border);color:var(--text-muted);font-size:11px;cursor:help;margin-left:8px;transition:all 0.2s;flex-shrink:0;}
+  .card-header .info-icon:hover{background:var(--accent);color:#fff;}
+  .card-header .info-icon .tooltip{display:none;position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:8px;background:#232738;border:1px solid var(--accent);border-radius:8px;padding:12px 16px;font-size:12px;color:var(--text);white-space:normal;width:280px;line-height:1.6;z-index:100;box-shadow:0 8px 32px rgba(0,0,0,0.4);text-transform:none;letter-spacing:0;font-weight:400;}
+  .card-header .info-icon:hover .tooltip{display:block;}
+  .card-header .info-icon .tooltip::before{content:'';position:absolute;top:-6px;left:50%;transform:translateX(-50%);border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:6px solid var(--accent);}
 
   @media (max-width:768px) {
     .grid-4 { grid-template-columns:repeat(2,1fr); }
@@ -97,6 +173,18 @@
     <button onclick="refreshAll()">⟳ 刷新</button>
   </div>
 
+  <!-- 导航标签 -->
+  <div class="nav-tabs" id="mainNav">
+    <div class="tab active" onclick="switchPage('overview',this)">总览</div>
+    <div class="tab" onclick="switchPage('growth',this)">用户成长</div>
+    <div class="tab" onclick="switchPage('knowledge',this)">知识库</div>
+    <div class="tab" onclick="switchPage('projects',this)">项目</div>
+    <div class="tab" onclick="switchPage('ops',this)">系统运维</div>
+    <div class="tab" onclick="switchPage('reports',this)">报告</div>
+    <div class="tab" onclick="switchPage('suggestions',this)">优化建议</div>
+  </div>
+  <div class="tab-page active" id="page-overview">
+
   <!-- 核心指标 -->
   <div class="grid-4">
     <div class="card">
@@ -115,6 +203,12 @@
       <div class="metric-value" id="todayKnowledge">-</div>
       <div class="metric-label">今日新增知识</div>
     </div>
+  </div>
+
+  <!-- 系统趋势图 -->
+  <div class="card" style="margin-bottom:24px;">
+    <div class="card-header"><h2>会话趋势 (近30天)</h2></div>
+    <div id="trendContent" class="empty">加载中...</div>
   </div>
 
   <!-- 任务队列 + 内存 -->
@@ -202,6 +296,266 @@
     </div>
   </div>
 
+  </div><!-- end page-overview -->
+
+  <!-- ==================== 用户成长 ==================== -->
+  <div class="tab-page" id="page-growth">
+    <div class="grid-4">
+      <div class="card"><div class="metric-value" id="ugTotalSkills">-</div><div class="metric-label">总技能数</div></div>
+      <div class="card"><div class="metric-value" id="ugAvgMastery">-</div><div class="metric-label">平均掌握度</div><div class="progress-bar"><div class="fill green" id="ugMasteryBar" style="width:0%"></div></div></div>
+      <div class="card"><div class="metric-value" id="ugStreakDays">-</div><div class="metric-label">连续学习天数</div></div>
+      <div class="card"><div class="metric-value" id="ugWeekNew">-</div><div class="metric-label">本周新增技能</div></div>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header"><h2>技能掌握度</h2><span class="badge" id="ugTopDomain">-</span></div>
+        <div id="radarContent" class="empty">加载中...</div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2>领域技能清单</h2></div>
+        <div id="domainDistContent" class="empty" style="max-height:360px;overflow-y:auto;">加载中...</div>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header"><h2>学习效率</h2></div>
+        <div class="metric-value" style="font-size:28px;" id="ugEfficiency">-</div>
+        <div class="metric-label">近30天学习效率</div>
+        <div class="progress-bar"><div class="fill accent" id="ugEffBar" style="width:0%"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2>最近更新</h2></div>
+        <div style="font-size:12px;color:var(--text-muted);" id="ugLastUpdate">-</div>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:24px;">
+      <div class="card-header"><h2>学习热力图 (近4周)</h2><span class="badge" id="heatActiveDays">-</span></div>
+      <div class="heatmap-labels" id="heatLabels"></div>
+      <div class="heatmap-grid" id="heatGrid"></div>
+      <div style="margin-top:12px;font-size:11px;color:var(--text-muted);display:flex;gap:12px;align-items:center;">
+        <span>峰值: <b id="heatPeak" style="color:var(--text);">-</b></span>
+        <span>均值: <b id="heatAvg" style="color:var(--text);">-</b></span>
+        <span style="margin-left:auto;display:flex;align-items:center;gap:4px;">
+          <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:#1a1d27;"></span>低
+          <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:rgba(99,102,241,0.4);"></span>
+          <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:rgba(99,102,241,0.7);"></span>
+          <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:var(--accent);"></span>高
+        </span>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:24px;">
+      <div class="card-header"><h2>学习时间线</h2><span class="badge" id="tlTotal">-</span></div>
+      <div id="timelineContent" class="empty">加载中...</div>
+    </div>
+  </div>
+
+  <!-- ==================== 知识库 ==================== -->
+  <div class="tab-page" id="page-knowledge">
+    <div class="card" style="margin-bottom:24px;">
+      <div class="card-header"><h2>知识库智能匹配</h2><span class="badge" id="kbListTotal">-</span></div>
+      <div class="search-box">
+        <input type="text" id="kbSearchInput" placeholder="输入问题描述，AI 自动匹配领域..." onkeyup="if(event.key==='Enter')matchKnowledge()">
+        <button class="btn primary" onclick="matchKnowledge()">🔍 AI 匹配</button>
+        <button class="btn" onclick="searchKnowledge()">精确搜索</button>
+      </div>
+      <div id="kbMatchInfo" style="display:none;padding:8px 12px;margin-top:8px;border-radius:6px;font-size:12px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);color:var(--accent);"></div>
+      <div id="kbSearchResults" class="empty">输入问题描述，点击"AI 匹配"开始分析...</div>
+    </div>
+  </div>
+
+  <!-- ==================== 项目 ==================== -->
+  <div class="tab-page" id="page-projects">
+    <div class="card" style="margin-bottom:24px;">
+      <div class="card-header"><h2>项目列表</h2><span class="badge" id="projCount">-</span></div>
+      <div id="projContent" class="empty">加载中...</div>
+    </div>
+    <div class="card" style="margin-bottom:24px;">
+      <div class="card-header"><h2>项目知识搜索</h2></div>
+      <div class="search-box">
+        <input type="text" id="projQueryInput" placeholder="输入问题搜索项目知识...">
+        <select id="projSelect" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;"></select>
+        <button class="btn primary" onclick="queryProject()">查询</button>
+      </div>
+      <div id="projQueryResult" class="empty">输入问题并选择项目后查询...</div>
+    </div>
+  </div>
+
+  <!-- ==================== 系统运维 ==================== -->
+  <div class="tab-page" id="page-ops">
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header"><h2>系统诊断</h2><span class="info-icon">?<span class="tooltip">🔍 <b>系统诊断</b><br>深度检查各模块运行状况：数据库表完整性、索引状态、任务队列健康度、配置有效性。发现问题时以警告/错误标签展示。</span></span></div>
+        <div id="sysDiagContent" class="empty">加载中...</div>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header"><h2>数据完整性检查</h2><span class="info-icon">?<span class="tooltip">✅ <b>数据完整性检查</b><br>验证数据库中各表的记录一致性：检查孤立引用、外键完整性、软删除记录数量。同时展示 WriteTracker 写入统计（服务重启后清零）。</span></span></div>
+        <div id="sysIntegrityContent" class="empty">加载中...</div>
+        <div class="ops-action-row" style="margin-top:10px;">
+          <button class="btn primary" onclick="checkIntegrity()">运行检查</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2>LLM 状态</h2><span class="info-icon">?<span class="tooltip">🧠 <b>LLM 大模型状态</b><br>检查 Ollama 服务连接状态、当前加载的模型信息、模型可用性。如果 LLM 不可达，知识提取和对话分析将无法正常工作。</span></span></div>
+        <div id="llmStatusContent" class="empty">加载中...</div>
+        <div id="llmStartResult" class="ops-result" style="display:none;margin-top:10px;"></div>
+        <div class="ops-action-row" style="margin-top:10px;">
+          <button class="btn primary" onclick="checkLlmStatus()">刷新状态</button>
+          <button class="btn" onclick="reconnectOllama()" style="color:var(--green);border-color:var(--green);">重新连接 Ollama</button>
+        </div>
+      </div>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header"><h2>数据清理</h2><span class="info-icon">?<span class="tooltip">🧹 <b>数据清理</b><br>清理过期和无效数据，支持按范围执行：<br>• <b>全部</b> — 归档清理 + 软删除物理清除<br>• <b>旧日志</b> — 清理过期的 improvement_log / evolution_log<br>• <b>孤立数据</b> — 清理无关联的 task_queue 记录<br>点击"预览"可先查看将要清理的内容而不实际执行。</span></span></div>
+        <div style="margin-bottom:10px;">
+          <label style="font-size:12px;color:var(--text-muted);margin-right:10px;">范围:</label>
+          <select id="cleanupScope" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:12px;">
+            <option value="all">全部</option>
+            <option value="old_logs">旧日志</option>
+            <option value="orphan_data">孤立数据</option>
+          </select>
+        </div>
+        <div class="ops-action-row">
+          <button class="btn" onclick="runCleanup(false)">执行清理</button>
+          <button class="btn" onclick="runCleanup(true)" style="color:var(--yellow);border-color:var(--yellow);">预览 (dry-run)</button>
+        </div>
+        <div id="cleanupResult" class="ops-result" style="display:none;margin-top:10px;"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2>数据归档</h2><span class="info-icon">?<span class="tooltip">📦 <b>数据归档</b><br>将旧数据按生命周期分层处理，释放存储空间：<br>• <b>温归档(30-180天)</b> — 压缩步骤详情，保留摘要<br>• <b>冷归档(>180天)</b> — 迁移至归档表，依赖日报MD<br>• <b>深度清理(>365天)</b> — 删除归档记录<br>• <b>日志清理(>90天)</b> — 清除过期操作日志<br>⚠️ 归档前会自动校验日报MD是否已导出。</span></span></div>
+        <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">归档旧数据以释放空间</div>
+        <div class="ops-action-row">
+          <button class="btn primary" onclick="runArchive()">执行归档</button>
+        </div>
+        <div id="archiveResult" class="ops-result" style="display:none;margin-top:10px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== 报告 ==================== -->
+  <div class="tab-page" id="page-reports">
+    <!-- 报告类型选择 -->
+    <div class="card" style="margin-bottom:24px;">
+      <div class="card-header"><h2>生成报告</h2><span class="badge" id="reportGenStatus">手动触发</span></div>
+      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">
+        <div>
+          <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px;">报告类型</label>
+          <select id="reportType" onchange="onReportTypeChange()" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;">
+            <option value="daily">日报</option>
+            <option value="weekly">周报</option>
+            <option value="monthly">月报</option>
+            <option value="annual">年报</option>
+          </select>
+        </div>
+        <!-- 日报：日期选择器 -->
+        <div id="reportDailyPicker" style="display:none;gap:12px;align-items:flex-end;">
+          <div>
+            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px;">选择日期</label>
+            <input type="date" id="reportTargetDate" onchange="onReportDateChange()" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;"/>
+          </div>
+        </div>
+        <!-- 周报：周下拉框 -->
+        <div id="reportWeeklyPicker" style="display:none;flex-direction:column;gap:4px;">
+          <label style="font-size:12px;color:var(--text-muted);">选择周</label>
+          <select id="reportTargetWeek" onchange="onReportDateChange()" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;min-width:280px;"></select>
+        </div>
+        <!-- 月报：月下拉框 -->
+        <div id="reportMonthlyPicker" style="display:none;flex-direction:column;gap:4px;">
+          <label style="font-size:12px;color:var(--text-muted);">选择月份</label>
+          <select id="reportTargetMonth" onchange="onReportDateChange()" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;min-width:200px;"></select>
+        </div>
+        <!-- 年报：年份下拉框 -->
+        <div id="reportYearPicker" style="display:none;flex-direction:column;gap:4px;">
+          <label style="font-size:12px;color:var(--text-muted);">选择年份</label>
+          <select id="reportTargetYear" onchange="onReportDateChange()" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;"></select>
+        </div>
+        <div id="reportPeriodInfo" style="font-size:13px;color:var(--accent);font-weight:600;">周期: --</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <label style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:4px;cursor:pointer;">
+          <input type="checkbox" id="reportForceOverwrite" style="accent-color:var(--yellow);"/> 覆盖已存在的报告
+        </label>
+        <button class="btn primary" onclick="generateReport()" style="margin-left:auto;">⚡ 生成报告</button>
+      </div>
+      <div id="reportGenResult" class="ops-result" style="display:none;margin-top:10px;"></div>
+    </div>
+
+    <!-- 报告列表 -->
+    <div class="grid-2" style="margin-bottom:24px;">
+      <div class="card">
+        <div class="card-header"><h2>日报列表</h2><span class="badge" id="dailyCount">-</span></div>
+        <div id="dailyList" class="empty" style="max-height:300px;overflow-y:auto;">加载中...</div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2>周报列表</h2><span class="badge" id="weeklyCount">-</span></div>
+        <div id="weeklyList" class="empty" style="max-height:300px;overflow-y:auto;">加载中...</div>
+      </div>
+    </div>
+    <div class="grid-2" style="margin-bottom:24px;">
+      <div class="card">
+        <div class="card-header"><h2>月报列表</h2><span class="badge" id="monthlyCount">-</span></div>
+        <div id="monthlyList" class="empty" style="max-height:300px;overflow-y:auto;">加载中...</div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2>年报列表</h2><span class="badge" id="annualCount">-</span></div>
+        <div id="annualList" class="empty" style="max-height:300px;overflow-y:auto;">加载中...</div>
+      </div>
+    </div>
+
+    <!-- ==================== 优化建议 ==================== -->
+  <div class="tab-page" id="page-suggestions">
+    <!-- 统计概览 -->
+    <div class="grid-4" style="margin-bottom:24px;">
+      <div class="card"><div class="metric-value" id="sgPending">-</div><div class="metric-label">待审核</div></div>
+      <div class="card"><div class="metric-value" id="sgApproved">-</div><div class="metric-label">已通过</div></div>
+      <div class="card"><div class="metric-value" id="sgRejected">-</div><div class="metric-label">已拒绝</div></div>
+      <div class="card"><div class="metric-value" id="sgApplied">-</div><div class="metric-label">已应用</div></div>
+    </div>
+
+    <!-- 筛选栏 -->
+    <div class="card" style="margin-bottom:24px;">
+      <div class="card-header"><h2>优化建议列表</h2><span class="badge" id="sgTotal">-</span></div>
+      <div class="search-box">
+        <select id="sgStatusFilter" onchange="refreshSuggestionsPage()" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;">
+          <option value="pending">待审核</option>
+          <option value="approved">已通过</option>
+          <option value="rejected">已拒绝</option>
+          <option value="all">全部</option>
+        </select>
+        <select id="sgTypeFilter" onchange="refreshSuggestionsPage()" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;">
+          <option value="">全部类型</option>
+          <option value="prompt_optimize">Prompt 优化</option>
+          <option value="analysis_add">新增分析</option>
+          <option value="knowledge_gap">知识缺口</option>
+          <option value="user_profile_enhance">用户画像增强</option>
+          <option value="skill_planning">技能规划</option>
+          <option value="tech_trend">技术趋势</option>
+          <option value="growth_path">成长路径</option>
+          <option value="learning_advice">学习建议</option>
+          <option value="data_quality">数据质量</option>
+        </select>
+        <button class="btn" onclick="refreshSuggestionsPage()">刷新</button>
+      </div>
+    </div>
+
+    <!-- 建议卡片列表 -->
+    <div id="sgList" class="empty">加载中...</div>
+  </div>
+
+  <!-- 报告预览 -->
+  <div class="card">
+      <div class="card-header">
+        <h2>报告预览</h2>
+        <span id="reportPreviewTitle" style="font-size:12px;color:var(--text-muted);">点击列表项查看</span>
+      </div>
+      <div id="reportPreviewContent" class="ops-result" style="max-height:600px;overflow-y:auto;font-size:13px;line-height:1.7;">
+        <div class="empty">选择一份报告查看内容</div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -219,13 +573,19 @@ function fmtTime(iso) {
   return d.toLocaleTimeString('zh-CN', { hour12: false });
 }
 
+function escHtml(s) {
+  if (s === null || s === undefined) return '';
+  if (typeof s !== 'string') s = String(s);
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
 function statusTag(s) {
   const cls = {pending:'pending',running:'running',completed:'completed',failed:'failed'}[s] || 'pending';
   return `<span class="tag ${cls}">${s}</span>`;
 }
 
-async function fetchJSON(url) {
-  const r = await fetch(url);
+async function fetchJSON(url, options) {
+  const r = await fetch(url, options || {});
   if (!r.ok) throw new Error(`${url}: ${r.status}`);
   return r.json();
 }
@@ -513,6 +873,415 @@ async function refreshHealth() {
   }
 }
 
+
+// ── Page switching ──
+function switchPage(name, el) {
+  document.querySelectorAll('#mainNav .tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  if (name === 'growth') refreshGrowthPage();
+  if (name === 'knowledge') { document.getElementById('kbSearchResults').innerHTML = '<div class="empty">输入问题描述，点击"AI 匹配"开始分析...</div>'; document.getElementById('kbMatchInfo').style.display = 'none'; }
+  if (name === 'projects') refreshProjects();
+  if (name === 'ops') refreshOpsPage();
+  if (name === 'reports') refreshReportsPage();
+  if (name === 'suggestions') refreshSuggestionsPage();
+}
+
+// ── Trends chart ──
+async function refreshTrends() {
+  try {
+    const d = await fetchJSON('/api/trends/system');
+    const ts = d.timestamps || [];
+    const ss = d.sessions || [];
+    const maxVal = Math.max(...ss, 1);
+    let html = '<div class="trend-bar-chart">';
+    ts.forEach((t, i) => {
+      const h = Math.max(4, Math.round((ss[i] / maxVal) * 100));
+      html += `<div style="flex:1;text-align:center;"><div class="trend-bar" style="height:${h}px;" title="${t}: ${ss[i]} 个会话"></div><div class="trend-bar-label">${t}</div></div>`;
+    });
+    html += '</div>';
+    document.getElementById('trendContent').innerHTML = html || '<div class="empty">无趋势数据</div>';
+  } catch(e) { document.getElementById('trendContent').innerHTML = '<div class="empty">趋势数据获取失败</div>'; }
+}
+
+// ── Growth page ──
+async function refreshGrowthPage() {
+  await Promise.all([refreshUserOverview(), refreshSkillRadar(), refreshHeatmap(), refreshTimeline()]);
+}
+async function refreshUserOverview() {
+  try {
+    const d = await fetchJSON('/api/growth/user-overview');
+    document.getElementById('ugTotalSkills').textContent = d.total_skills ?? '-';
+    document.getElementById('ugAvgMastery').textContent = (d.avg_mastery ?? 0) + '%';
+    document.getElementById('ugMasteryBar').style.width = (d.avg_mastery ?? 0) + '%';
+    document.getElementById('ugStreakDays').textContent = d.streak_days ?? '-';
+    document.getElementById('ugWeekNew').textContent = d.this_week_new ?? '-';
+    document.getElementById('ugEfficiency').textContent = Math.round((d.learning_efficiency ?? 0) * 100) + '%';
+    document.getElementById('ugEffBar').style.width = Math.round((d.learning_efficiency ?? 0) * 100) + '%';
+    document.getElementById('ugTopDomain').textContent = d.top_domain || '-';
+    document.getElementById('ugLastUpdate').textContent = '最后更新: ' + (d.last_updated || '-');
+    const domains = d.skills_by_domain || [];
+    if (domains.length > 0) {
+      const maxCount = Math.max(...domains.map(dd => dd.count), 1);
+      document.getElementById('domainDistContent').innerHTML = domains.map(dd => {
+        const skillsList = (dd.skills || []).slice(0, 12).map(s => '<span class="tag" style="background:rgba(99,102,241,0.1);color:var(--text);margin:2px 3px 2px 0;display:inline-block;font-size:11px;">' + escHtml(s) + '</span>').join('');
+        const more = (dd.skills || []).length > 12 ? '<span style="font-size:11px;color:var(--text-muted);"> +' + (dd.skills.length - 12) + '...</span>' : '';
+        return '<div style="margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--border);">'
+          + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'
+          + '<span style="font-size:13px;font-weight:600;color:var(--accent);">' + escHtml(dd.domain) + '</span>'
+          + '<span style="font-size:12px;color:var(--text-muted);">' + dd.count + ' 项 | 掌握度 ' + dd.avg_mastery + '%</span>'
+          + '</div>'
+          + '<div class="progress-bar" style="margin-bottom:4px;"><div class="fill accent" style="width:' + Math.round((dd.count/maxCount)*100) + '%;"></div></div>'
+          + '<div style="line-height:1.8;">' + skillsList + more + '</div>'
+          + '</div>';
+      }).join('');
+    }
+  } catch(e) { /* silent */ }
+}
+async function refreshSkillRadar() {
+  try {
+    const d = await fetchJSON('/api/growth/skill-radar');
+    const dims = d.dimensions || [];
+    const curr = d.current_scores || [];
+    const hist = d.historical_scores || d.thirty_days_ago_scores || [];
+    if (dims.length > 0) {
+      document.getElementById('radarContent').innerHTML = dims.map((dim, i) => {
+        const c = curr[i] || 0;
+        const h = hist[i] || 0;
+        const diff = c - h;
+        const cls = diff > 0 ? 'up' : (diff < 0 ? 'down' : '');
+        return `<div class="skill-row">
+          <span class="s-name">${escHtml(dim)}</span>
+          <div class="s-bar"><div class="s-fill" style="width:${c}%;background:var(--accent);"></div></div>
+          <span class="s-val">${c}</span>
+          <span class="metric-change ${cls}" style="width:50px;text-align:right;">${diff > 0 ? '+' + diff : diff}</span>
+        </div>`;
+      }).join('');
+    }
+  } catch(e) { /* silent */ }
+}
+async function refreshHeatmap() {
+  try {
+    const d = await fetchJSON('/api/growth/activity-heatmap');
+    document.getElementById('heatActiveDays').textContent = '活跃 ' + (d.active_days || 0) + ' 天';
+    document.getElementById('heatPeak').textContent = (d.peak_intensity ?? 0).toFixed(1);
+    document.getElementById('heatAvg').textContent = (d.avg_intensity ?? 0).toFixed(1);
+    const labels = d.labels || ['一','二','三','四','五','六','日'];
+    document.getElementById('heatLabels').innerHTML = labels.map(l => '<span>' + l + '</span>').join('');
+    const daily = d.daily_data || [];
+    if (daily.length > 0) {
+      const maxV = Math.max(...daily.map(dd => dd.intensity || 0), 0.1);
+      document.getElementById('heatGrid').innerHTML = daily.map(dd => {
+        const v = dd.intensity || 0;
+        const alpha = v / maxV;
+        const color = alpha > 0.7 ? 'var(--accent)' : (alpha > 0.4 ? 'rgba(99,102,241,0.7)' : (alpha > 0.05 ? 'rgba(99,102,241,0.4)' : '#1a1d27'));
+        return '<div class="heatmap-cell" style="background:' + color + ';" title="' + dd.date + ': ' + v.toFixed(1) + '"></div>';
+      }).join('');
+    }
+  } catch(e) { /* silent */ }
+}
+async function refreshTimeline() {
+  try {
+    const d = await fetchJSON('/api/growth/timeline?limit=30');
+    document.getElementById('tlTotal').textContent = d.total_events ?? 0;
+    const events = d.events || [];
+    if (events.length > 0) {
+      document.getElementById('timelineContent').innerHTML = events.map(e => `
+        <div class="timeline-item">
+          <span class="tl-icon">${e.icon || '•'}</span>
+          <span class="tl-time">${fmtTime(e.time)}</span>
+          <span class="tl-content">${escHtml(e.content || '')}</span>
+          <span class="tl-delta">${escHtml(e.delta || e.impact || '')}</span>
+        </div>
+      `).join('');
+    }
+  } catch(e) { /* silent */ }
+}
+
+// ── Knowledge page ──
+function renderKbItems(items) {
+  if (!items || items.length === 0) return '<div class="empty">未找到匹配结果</div>';
+  let html = '<table class="kb-table"><thead><tr><th>标题</th><th>领域</th><th>分类</th><th>置信度</th><th>使用</th></tr></thead><tbody>';
+  items.forEach(item => {
+    const summary = (item.summary || item.content || '').slice(0, 120);
+    html += '<tr>'
+      + '<td class="kb-title" title="' + escHtml(item.title || '') + '">'
+      + escHtml((item.title || '').slice(0, 50))
+      + (summary ? '<div class="kb-summary">' + escHtml(summary) + '</div>' : '')
+      + '</td>'
+      + '<td><span class="tag" style="background:rgba(99,102,241,0.1);color:var(--accent);">' + escHtml(item.domain || '-') + '</span></td>'
+      + '<td style="font-size:11px;color:var(--text-muted);">' + escHtml(item.category || '-') + '</td>'
+      + '<td style="font-size:11px;">' + (item.confidence != null ? (item.confidence * 100).toFixed(0) + '%' : '-') + '</td>'
+      + '<td style="font-size:11px;">' + (item.usage_count || 0) + '</td>'
+      + '</tr>';
+  });
+  html += '</tbody></table>';
+  return html;
+}
+async function matchKnowledge() {
+  const q = document.getElementById('kbSearchInput').value.trim();
+  if (!q) { document.getElementById('kbSearchResults').innerHTML = '<div class="empty">请输入问题描述</div>'; return; }
+  document.getElementById('kbSearchResults').innerHTML = '<div class="empty">AI 分析中...</div>';
+  document.getElementById('kbMatchInfo').style.display = 'none';
+  try {
+    const res = await fetch('/api/knowledge/match', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q }) });
+    const d = await res.json();
+    const infoEl = document.getElementById('kbMatchInfo');
+    if (d.matched_domain) {
+      infoEl.style.display = 'block';
+      infoEl.innerHTML = '🎯 匹配领域: <b>' + escHtml(d.matched_domain) + '</b>' + (d.match_reason ? ' — ' + escHtml(d.match_reason) : '');
+    }
+    document.getElementById('kbListTotal').textContent = d.count || 0;
+    document.getElementById('kbSearchResults').innerHTML = renderKbItems(d.items);
+  } catch(e) { document.getElementById('kbSearchResults').innerHTML = '<div class="empty">AI 匹配失败: ' + e.message + '</div>'; }
+}
+async function searchKnowledge() {
+  const q = document.getElementById('kbSearchInput').value.trim();
+  if (!q) { document.getElementById('kbSearchResults').innerHTML = '<div class="empty">请输入搜索关键词</div>'; return; }
+  document.getElementById('kbSearchResults').innerHTML = '<div class="empty">搜索中...</div>';
+  document.getElementById('kbMatchInfo').style.display = 'none';
+  try {
+    const d = await fetchJSON('/api/knowledge/search?query=' + encodeURIComponent(q));
+    const items = d.data?.items || d.data || [];
+    document.getElementById('kbListTotal').textContent = items.length;
+    document.getElementById('kbSearchResults').innerHTML = renderKbItems(items);
+  } catch(e) { document.getElementById('kbSearchResults').innerHTML = '<div class="empty">搜索失败: ' + e.message + '</div>'; }
+}
+
+// ── Projects page ──
+async function refreshProjects() {
+  try {
+    const d = await fetchJSON('/api/projects/list');
+    const projects = d.projects || [];
+    document.getElementById('projCount').textContent = projects.length;
+    const sel = document.getElementById('projSelect');
+    const names = projects.map(p => p.name).filter(n => n);
+    sel.innerHTML = '<option value="">-- 选择项目 --</option>' + names.map(n => '<option value="' + escHtml(n) + '">' + escHtml(n) + '</option>').join('');
+    if (projects.length > 0) {
+      let html = '<table><thead><tr><th>#</th><th>项目名称</th><th>类型</th><th>操作</th></tr></thead><tbody>';
+      projects.forEach((p, i) => {
+        const sysType = p.system_type ? ('<span class="tag" style="font-size:10px;background:rgba(99,102,241,0.1);color:var(--accent);">' + escHtml(p.system_type) + '</span>') : '<span style="color:var(--text-muted);font-size:11px;">-</span>';
+        html += '<tr>'
+          + '<td style="color:var(--text-muted);font-size:11px;">' + (i + 1) + '</td>'
+          + '<td><a href="javascript:void(0)" onclick="selectProject(\'' + escHtml(p.name) + '\')" style="color:var(--accent);text-decoration:none;font-weight:500;">' + escHtml(p.name) + '</a></td>'
+          + '<td>' + sysType + '</td>'
+          + '<td><button onclick="selectProject(\'' + escHtml(p.name) + '\')" style="padding:2px 8px;border-radius:4px;border:1px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer;font-size:11px;">选择</button></td>'
+          + '</tr>';
+      });
+      html += '</tbody></table>';
+      document.getElementById('projContent').innerHTML = html;
+    } else {
+      document.getElementById('projContent').innerHTML = '<div class="empty">暂无对接项目，等待 CodeBuddy 等客户端连接后自动注册</div>';
+    }
+  } catch(e) { /* silent */ }
+}
+function selectProject(name) {
+  document.getElementById('projSelect').value = name;
+  queryProject();
+}
+
+async function queryProject() {
+  const project = document.getElementById('projSelect').value;
+  const question = document.getElementById('projQueryInput').value.trim();
+  if (!question && !project) return;
+  try {
+    const body = { question, project_name: project || '', limit: 10 };
+    const res = await fetch('/api/projects/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!res.ok) { document.getElementById('projQueryResult').innerHTML = '<div class="empty" style="color:var(--red);">查询失败: HTTP ' + res.status + '</div>'; return; }
+    const d = await res.json();
+    const items = d.results || d.data || [];
+    if (items.length > 0) {
+      document.getElementById('projQueryResult').innerHTML = items.map(item => `
+        <div class="growth-item">
+          <div class="g-header">
+            <span class="g-title">${escHtml(item.title || '')}</span>
+            <span class="tag low">${escHtml(item.domain || '')}</span>
+          </div>
+          <div class="g-body">${escHtml((item.content || '').slice(0, 200))}</div>
+        </div>
+      `).join('');
+    } else {
+      document.getElementById('projQueryResult').innerHTML = '<div class="empty">未找到结果</div>';
+    }
+  } catch(e) { document.getElementById('projQueryResult').innerHTML = '<div class="empty">查询失败: ' + e.message + '</div>'; }
+}
+
+// ── Ops page ──
+async function refreshOpsPage() {
+  await Promise.all([refreshSysDiagnose(), checkLlmStatus()]);
+}
+async function refreshSysDiagnose() {
+  try {
+    const d = await fetchJSON('/api/system/diagnose');
+    const checks = d.checks || d;
+    const issues = d.issues || [];
+    const items = Object.entries(checks);
+    const icon = v => /^healthy/.test(v) ? '✅' : /^error|^unhealthy/.test(v) ? '❌' : '⚠️';
+    document.getElementById('sysDiagContent').innerHTML =
+      items.map(([k, v]) => {
+        let displayVal = v;
+        if (v !== null && typeof v === 'object') {
+          displayVal = Object.entries(v).map(([tk, tv]) => tk + ': ' + tv).join(', ');
+        } else {
+          displayVal = String(v);
+        }
+        const statusCls = /^healthy/.test(displayVal) ? 'diag-ok' : /^error|^unhealthy/.test(displayVal) ? 'diag-err' : 'diag-warn';
+        return '<div class="diag-row"><div class="diag-name">' + escHtml(k) + '</div><div class="diag-val ' + statusCls + '">' + icon(displayVal) + ' ' + escHtml(displayVal) + '</div></div>';
+      }).join('') +
+      (issues.length ? '<div class="diag-issues"><b>⚠ 问题清单</b>' + issues.map(i => '<div class="diag-issue">• ' + escHtml(i) + '</div>').join('') + '</div>' : '') ||
+      '<div class="empty">无诊断数据</div>';
+  } catch(e) { document.getElementById('sysDiagContent').innerHTML = '<div class="empty">诊断失败</div>'; }
+}
+async function checkIntegrity() {
+  document.getElementById('sysIntegrityContent').innerHTML = '<div class="empty">检查中...</div>';
+  try {
+    const d = await fetchJSON('/api/system/check-integrity');
+    const renderItem = (label, val, ok) => {
+      const dot = ok ? '<span class="status-dot online"></span>' : (ok === false ? '<span class="status-dot offline"></span>' : '');
+      return '<div class="diag-row"><div class="diag-name">' + dot + escHtml(label) + '</div><div class="diag-val">' + escHtml(String(val)) + '</div></div>';
+    };
+    let html = '';
+    // overall status
+    const status = d.status || (d.success ? 'healthy' : 'warning');
+    const statusIcon = status === 'healthy' ? '✅' : status === 'warning' ? '⚠️' : '❌';
+    html += '<div class="integrity-summary ' + (status === 'healthy' ? 'diag-ok' : 'diag-warn') + '">' + statusIcon + ' 整体状态: <b>' + escHtml(status) + '</b></div>';
+    // details
+    if (d.issues && d.issues.length) {
+      html += '<div class="diag-issues"><b>发现问题</b>' + d.issues.map(i => '<div class="diag-issue">• ' + escHtml(i) + '</div>').join('') + '</div>';
+    }
+    // write_stats
+    if (d.write_stats && typeof d.write_stats === 'object' && d.write_stats !== null) {
+      const entries = Object.entries(d.write_stats);
+      if (entries.length > 0) {
+        html += '<div style="margin-top:10px;font-size:12px;color:var(--accent);">📊 写入统计（服务重启后清零）</div>';
+        html += entries.map(([k, v]) => {
+          if (v === null || typeof v !== 'object') {
+            return '<div class="diag-row"><div class="diag-name">' + escHtml(k) + '</div><div class="diag-val">' + escHtml(String(v)) + '</div></div>';
+          }
+          const rate = v.success_rate != null ? v.success_rate : (v.success !== undefined && v.total ? (v.success / v.total * 100).toFixed(1) + '%' : '-');
+          return '<div class="diag-row"><div class="diag-name">' + escHtml(k) + '</div><div class="diag-val">成功率: ' + escHtml(rate) + ' | 成功: ' + (v.success ?? '-') + ' | 失败: ' + (v.failure ?? '-') + '</div></div>';
+        }).join('');
+      } else {
+        html += '<div style="margin-top:10px;font-size:12px;color:var(--accent);">📊 写入统计（服务重启后清零）</div>';
+        html += '<div class="empty" style="color:var(--yellow);">暂无写入记录 — 服务刚启动或尚未有对话操作触发写入</div>';
+      }
+    } else {
+      html += '<div style="margin-top:10px;font-size:12px;color:var(--accent);">📊 写入统计</div>';
+      html += '<div class="empty" style="color:var(--text-muted);">WriteTracker 未激活</div>';
+    }
+    // summary
+    if (d.summary) {
+      html += '<div class="diag-row"><div class="diag-name">汇总</div><div class="diag-val">' + escHtml(String(d.summary)) + '</div></div>';
+    }
+    // fallback: raw keys
+    if (!html) {
+      html = Object.entries(d).filter(([k]) => k !== 'success').map(([k, v]) => renderItem(k, (v !== null && typeof v === 'object') ? JSON.stringify(v) : v, true)).join('');
+    }
+    document.getElementById('sysIntegrityContent').innerHTML = html || '<div class="empty">无数据</div>';
+  } catch(e) { document.getElementById('sysIntegrityContent').innerHTML = '<div class="empty">检查失败: ' + e.message + '</div>'; }
+}
+async function checkLlmStatus() {
+  document.getElementById('llmStatusContent').innerHTML = '<div class="empty">查询中...</div>';
+  try {
+    const d = await fetchJSON('/api/system/llm-status');
+    const renderItem = (label, val, icon) => {
+      return '<div class="diag-row"><div class="diag-name">' + (icon || '') + ' ' + escHtml(label) + '</div><div class="diag-val">' + escHtml(String(val)) + '</div></div>';
+    };
+    const available = d.available !== undefined ? d.available : (d.success ? true : false);
+    const statusIcon = available ? '<span class="status-dot online"></span>' : '<span class="status-dot offline"></span>';
+    let html = '<div class="integrity-summary ' + (available ? 'diag-ok' : 'diag-err') + '">' + statusIcon + ' Ollama: <b>' + (available ? '已连接' : '不可达') + '</b></div>';
+    const skip = ['success', 'available', 'preload_result'];
+    for (const [k, v] of Object.entries(d)) {
+      if (skip.includes(k)) continue;
+      if (v !== null && typeof v === 'object') {
+        html += '<div style="margin-top:8px;font-size:12px;color:var(--accent);font-weight:600;">' + escHtml(k) + '</div>';
+        for (const [sk, sv] of Object.entries(v)) {
+          html += renderItem(sk, sv !== null ? sv : '(空)', '');
+        }
+      } else {
+        html += renderItem(k, v !== null ? v : '(空)', '');
+      }
+    }
+    if (d.preload_result !== undefined) {
+      html += renderItem('预加载', d.preload_result ? '✅ 成功' : '❌ 失败', '');
+    }
+    document.getElementById('llmStatusContent').innerHTML = html || '<div class="empty">无状态数据</div>';
+  } catch(e) { document.getElementById('llmStatusContent').innerHTML = '<div class="empty">获取失败: ' + e.message + '</div>'; }
+}
+async function reconnectOllama() {
+  const el = document.getElementById('llmStartResult');
+  el.style.display = 'block';
+  el.innerHTML = '<div class="empty">正在重新连接 Ollama 服务...</div>';
+  try {
+    const res = await fetch('/api/ollama/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ timeout: 30 }) });
+    const d = await res.json();
+    const ok = d.success;
+    el.innerHTML = '<div class="integrity-summary ' + (ok ? 'diag-ok' : 'diag-err') + '">' + (ok ? '✅ Ollama 重新连接成功' : '❌ 连接失败: ' + escHtml(d.error || '未知错误')) + '</div>';
+    if (d.logs && d.logs.length) {
+      el.innerHTML += '<div style="margin-top:6px;font-size:11px;color:var(--text-muted);">' + d.logs.map(l => escHtml('[' + l.level + '] ' + l.msg)).join('<br>') + '</div>';
+    }
+    // 连接后自动刷新状态
+    setTimeout(() => checkLlmStatus(), 500);
+  } catch(e) { el.innerHTML = '<div class="integrity-summary diag-err">❌ 请求失败: ' + e.message + '</div>'; }
+}
+async function runCleanup(dryRun) {
+  const scope = document.getElementById('cleanupScope').value;
+  const el = document.getElementById('cleanupResult');
+  el.style.display = 'block';
+  el.innerHTML = '<div class="empty">执行中...</div>';
+  try {
+    const res = await fetch('/api/system/cleanup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope, dry_run: dryRun }) });
+    const d = await res.json();
+    const prefix = dryRun ? '🧪 预览模式' : '🧹 清理完成';
+    const conv = d.conversations;
+    const tasks = d.tasks;
+    let html = '<div class="integrity-summary diag-ok">' + prefix + ' | 范围: <b>' + escHtml(scope) + '</b></div>';
+    if (conv) {
+      html += '<div style="margin-top:8px;font-size:12px;color:var(--accent);font-weight:600;">会话清理</div>';
+      if (conv.deleted != null) html += '<div class="diag-row"><div class="diag-name">已删除</div><div class="diag-val">' + escHtml(conv.deleted) + '</div></div>';
+      if (conv.archived != null) html += '<div class="diag-row"><div class="diag-name">已归档</div><div class="diag-val">' + escHtml(conv.archived) + '</div></div>';
+      if (conv.errors != null) html += '<div class="diag-row"><div class="diag-name">错误</div><div class="diag-val">' + escHtml(conv.errors) + '</div></div>';
+    }
+    if (tasks) {
+      html += '<div style="margin-top:8px;font-size:12px;color:var(--accent);font-weight:600;">任务清理</div>';
+      if (tasks.deleted != null) html += '<div class="diag-row"><div class="diag-name">已删除</div><div class="diag-val">' + escHtml(tasks.deleted) + '</div></div>';
+      if (tasks.would_delete != null) html += '<div class="diag-row"><div class="diag-name">将删除</div><div class="diag-val">' + escHtml(tasks.would_delete) + '</div></div>';
+      if (tasks.soft_deleted_count != null) html += '<div class="diag-row"><div class="diag-name">软删除数</div><div class="diag-val">' + escHtml(tasks.soft_deleted_count) + '</div></div>';
+    }
+    // fallback
+    if (!conv && !tasks) {
+      html += '<div class="diag-row"><div class="diag-name">结果</div><div class="diag-val">' + escHtml(JSON.stringify(d)) + '</div></div>';
+    }
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = '<div class="diag-row diag-err">错误: ' + escHtml(e.message) + '</div>';
+  }
+}
+async function runArchive() {
+  const el = document.getElementById('archiveResult');
+  el.style.display = 'block';
+  el.innerHTML = '<div class="empty">执行中...</div>';
+  try {
+    const res = await fetch('/api/archive/cleanup', { method: 'POST' });
+    const d = await res.json();
+    let html = '<div class="integrity-summary diag-ok">📦 归档完成</div>';
+    for (const [k, v] of Object.entries(d)) {
+      if (typeof v === 'object' && v !== null) {
+        html += '<div style="margin-top:8px;font-size:12px;color:var(--accent);font-weight:600;">' + escHtml(k) + '</div>';
+        for (const [sk, sv] of Object.entries(v)) {
+          html += '<div class="diag-row"><div class="diag-name">' + escHtml(sk) + '</div><div class="diag-val">' + escHtml(String(sv)) + '</div></div>';
+        }
+      } else {
+        html += '<div class="diag-row"><div class="diag-name">' + escHtml(k) + '</div><div class="diag-val">' + escHtml(String(v)) + '</div></div>';
+      }
+    }
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = '<div class="diag-row diag-err">错误: ' + escHtml(e.message) + '</div>';
+  }
+}
+
 async function refreshAll() {
   document.getElementById('lastUpdate').textContent = '刷新中...';
   await Promise.all([
@@ -524,12 +1293,447 @@ async function refreshAll() {
     refreshMemory(),
     refreshCallbacks(),
     refreshHealth(),
+    refreshTrends(),
   ]);
   document.getElementById('lastUpdate').textContent = '最后更新: ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
 }
 
 refreshAll();
 setInterval(refreshAll, 30000);
+
+// ════════════════════════════════════════════════
+// 报告 Tab 页 (v8.5.8 — 统一入口 + 优化时间选择器)
+// ════════════════════════════════════════════════
+
+// 计算某日期所在 ISO 周范围
+function getWeekRange(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const day = d.getDay() || 7; // 周日=7
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - day + 1);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  const fmt = dt => dt.toISOString().slice(0, 10);
+  // 计算第几周（ISO 标准）
+  const jan1 = new Date(monday.getFullYear(), 0, 1);
+  const weekNum = Math.ceil(((monday - jan1) / 86400000 + jan1.getDay() + 1) / 7);
+  const monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  const startMonth = monthNames[monday.getMonth()];
+  const endMonth = monthNames[sunday.getMonth()];
+  const rangeLabel = (startMonth === endMonth)
+    ? startMonth + '第' + weekNum + '周 (' + fmt(monday) + ' ~ ' + fmt(sunday) + ')'
+    : startMonth + '-' + endMonth + ' 第' + weekNum + '周 (' + fmt(monday) + ' ~ ' + fmt(sunday) + ')';
+  return { start: fmt(monday), end: fmt(sunday), label: rangeLabel, weekNum: weekNum };
+}
+
+// 初始化年份下拉框
+function initYearPicker() {
+  const sel = document.getElementById('reportTargetYear');
+  const now = new Date().getFullYear();
+  sel.innerHTML = '';
+  for (let y = now; y >= now - 5; y--) {
+    sel.innerHTML += '<option value="' + y + '"' + (y === now ? ' selected' : '') + '>' + y + ' 年</option>';
+  }
+}
+
+// 初始化周下拉框（最近2年的所有 ISO 周）
+function initWeekPicker() {
+  const sel = document.getElementById('reportTargetWeek');
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentWeekMonday = getWeekRange(now.toISOString().slice(0, 10)).start;
+  sel.innerHTML = '';
+
+  // 生成最近2年的所有周（从去年到今年）
+  for (let y = currentYear - 1; y <= currentYear; y++) {
+    // 找到该年的第一个周一
+    const jan1 = new Date(y, 0, 1);
+    const jan1Day = jan1.getDay() || 7;
+    const firstMonday = new Date(jan1);
+    firstMonday.setDate(jan1.getDate() - jan1Day + 1);
+    if (firstMonday.getFullYear() < y) firstMonday.setDate(firstMonday.getDate() + 7);
+
+    // 生成该年所有周（最多53周）
+    const yearEnd = new Date(y, 11, 31);
+    let weekMonday = new Date(firstMonday);
+    while (weekMonday <= yearEnd) {
+      const weekSunday = new Date(weekMonday);
+      weekSunday.setDate(weekMonday.getDate() + 6);
+      const fmt = dt => dt.toISOString().slice(0, 10);
+      const weekStart = fmt(weekMonday);
+
+      // 计算ISO周号
+      const jan1OfYear = new Date(y, 0, 1);
+      const weekNum = Math.ceil(((weekMonday - jan1OfYear) / 86400000 + jan1OfYear.getDay() + 1) / 7);
+
+      const label = y + '年第' + weekNum + '周 (' + weekStart + ' ~ ' + fmt(weekSunday) + ')';
+      const selected = (weekStart === currentWeekMonday) ? ' selected' : '';
+      sel.innerHTML += '<option value="' + weekStart + '"' + selected + '>' + label + '</option>';
+
+      weekMonday.setDate(weekMonday.getDate() + 7);
+    }
+  }
+}
+
+// 初始化月下拉框（最近2年的所有月）
+function initMonthPicker() {
+  const sel = document.getElementById('reportTargetMonth');
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth(); // 0-11
+  sel.innerHTML = '';
+
+  for (let y = currentYear - 1; y <= currentYear; y++) {
+    for (let m = 0; m < 12; m++) {
+      const value = y + '-' + String(m + 1).padStart(2, '0') + '-01';
+      const label = y + '年' + (m + 1) + '月';
+      const selected = (y === currentYear && m === currentMonth) ? ' selected' : '';
+      sel.innerHTML += '<option value="' + value + '"' + selected + '>' + label + '</option>';
+    }
+  }
+}
+
+function onReportTypeChange() {
+  const type = document.getElementById('reportType').value;
+  const dailyPicker = document.getElementById('reportDailyPicker');
+  const weeklyPicker = document.getElementById('reportWeeklyPicker');
+  const monthlyPicker = document.getElementById('reportMonthlyPicker');
+  const yearPicker = document.getElementById('reportYearPicker');
+
+  // 全部隐藏
+  dailyPicker.style.display = 'none';
+  weeklyPicker.style.display = 'none';
+  monthlyPicker.style.display = 'none';
+  yearPicker.style.display = 'none';
+
+  if (type === 'daily') {
+    dailyPicker.style.display = 'flex';
+    if (!document.getElementById('reportTargetDate').value) {
+      document.getElementById('reportTargetDate').value = new Date().toISOString().slice(0, 10);
+    }
+  } else if (type === 'weekly') {
+    weeklyPicker.style.display = 'flex';
+    initWeekPicker();
+  } else if (type === 'monthly') {
+    monthlyPicker.style.display = 'flex';
+    initMonthPicker();
+  } else if (type === 'annual') {
+    yearPicker.style.display = 'flex';
+    initYearPicker();
+  }
+  onReportDateChange();
+}
+
+function onReportDateChange() {
+  const type = document.getElementById('reportType').value;
+  const info = document.getElementById('reportPeriodInfo');
+
+  if (type === 'annual') {
+    const y = document.getElementById('reportTargetYear').value || new Date().getFullYear();
+    info.textContent = '📅 ' + y + ' 年';
+  } else if (type === 'daily') {
+    const d = document.getElementById('reportTargetDate').value || new Date().toISOString().slice(0, 10);
+    info.textContent = '📅 ' + d;
+  } else if (type === 'weekly') {
+    const sel = document.getElementById('reportTargetWeek');
+    const opt = sel.options[sel.selectedIndex];
+    info.textContent = '📅 ' + (opt ? opt.text : '--');
+  } else if (type === 'monthly') {
+    const sel = document.getElementById('reportTargetMonth');
+    const opt = sel.options[sel.selectedIndex];
+    info.textContent = '📅 ' + (opt ? opt.text : '--');
+  }
+}
+
+async function refreshReportsPage() {
+  onReportTypeChange();
+  await loadReportList();
+}
+
+async function loadReportList() {
+  try {
+    const d = await fetchJSON('/api/reports/list');
+    document.getElementById('dailyCount').textContent = d.totals.daily;
+    document.getElementById('weeklyCount').textContent = d.totals.weekly;
+    document.getElementById('monthlyCount').textContent = d.totals.monthly;
+    document.getElementById('annualCount').textContent = d.totals.annual;
+
+    const renderList = (items, type) => {
+      if (!items || items.length === 0) return '<div class="empty">暂无报告</div>';
+      return items.slice(0, 20).map(it => {
+        const sizeKB = (it.size / 1024).toFixed(1);
+        return '<div class="diag-row" style="cursor:pointer;" onclick="previewReport(\'' + type + '\',\'' + escHtml(it.name) + '\')" title="点击查看">'
+          + '<div class="diag-name">' + escHtml(it.name) + '</div>'
+          + '<div class="diag-val" style="font-size:10px;color:var(--text-muted);">' + sizeKB + ' KB | ' + (it.modified || '').slice(0,10) + '</div>'
+          + '</div>';
+      }).join('');
+    };
+
+    document.getElementById('dailyList').innerHTML = renderList(d.daily, 'daily');
+    document.getElementById('weeklyList').innerHTML = renderList(d.weekly, 'weekly');
+    document.getElementById('monthlyList').innerHTML = renderList(d.monthly, 'monthly');
+    document.getElementById('annualList').innerHTML = renderList(d.annual, 'annual');
+  } catch(e) {
+    ['dailyList','weeklyList','monthlyList','annualList'].forEach(id => {
+      document.getElementById(id).innerHTML = '<div class="empty" style="color:var(--red);">加载失败: ' + escHtml(e.message) + '</div>';
+    });
+  }
+}
+
+async function previewReport(type, name) {
+  document.getElementById('reportPreviewTitle').textContent = '加载中...';
+  document.getElementById('reportPreviewContent').innerHTML = '<div class="empty">加载中...</div>';
+  try {
+    const d = await fetchJSON('/api/reports/read?type=' + type + '&name=' + encodeURIComponent(name));
+    if (d.success) {
+      document.getElementById('reportPreviewTitle').textContent = name + ' (' + type + ')';
+      let html = escHtml(d.content)
+        .replace(/^# (.+)$/gm, '<h3 style="margin:16px 0 8px;font-size:16px;">$1</h3>')
+        .replace(/^## (.+)$/gm, '<h4 style="margin:12px 0 6px;font-size:14px;">$1</h4>')
+        .replace(/^### (.+)$/gm, '<h5 style="margin:10px 0 4px;font-size:13px;">$1</h5>')
+        .replace(/^- (.+)$/gm, '<li style="margin-left:16px;">$1</li>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n\n/g, '<br/><br/>')
+        .replace(/\n/g, '<br/>');
+      document.getElementById('reportPreviewContent').innerHTML = html;
+    } else {
+      document.getElementById('reportPreviewContent').innerHTML = '<div class="empty" style="color:var(--red);">' + escHtml(d.error) + '</div>';
+    }
+  } catch(e) {
+    document.getElementById('reportPreviewContent').innerHTML = '<div class="empty" style="color:var(--red);">加载失败: ' + escHtml(e.message) + '</div>';
+  }
+}
+
+// 统一生成入口：日/周/月/年 使用同一个 generate_report 逻辑
+async function generateReport() {
+  const type = document.getElementById('reportType').value;
+  const forceOverwrite = document.getElementById('reportForceOverwrite').checked;
+  const resultDiv = document.getElementById('reportGenResult');
+  const statusBadge = document.getElementById('reportGenStatus');
+
+  resultDiv.style.display = 'block';
+  resultDiv.textContent = '⏳ 正在生成 ' + type + ' 报告...';
+  statusBadge.textContent = '生成中...';
+
+  try {
+    let url = '/api/reports/generate';
+    let body = { type: type, force_overwrite: forceOverwrite };
+
+    if (type === 'annual') {
+      body.target_date = (document.getElementById('reportTargetYear').value || new Date().getFullYear()) + '-06-15';
+    } else if (type === 'daily') {
+      body.target_date = document.getElementById('reportTargetDate').value;
+    } else if (type === 'weekly') {
+      body.target_date = document.getElementById('reportTargetWeek').value;
+    } else if (type === 'monthly') {
+      body.target_date = document.getElementById('reportTargetMonth').value;
+    }
+
+    if (type === 'daily') {
+      url = '/api/reports/generate-daily';
+      body = { date: body.target_date || new Date().toISOString().slice(0,10), force_overwrite: forceOverwrite };
+    }
+
+    const d = await fetchJSON(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (d.success) {
+      const methodLabel = { llm: 'LLM 生成', pending: '已暂存（待清算）', skipped: '已跳过', none: '无数据', rules_fallback: '规则兜底', data_only: '仅返回原始数据', error: '生成失败' };
+      const method = methodLabel[d.method] || d.method;
+      resultDiv.style.color = (d.method === 'skipped' || d.method === 'rules_fallback' || d.method === 'data_only') ? 'var(--yellow)' : 'var(--green)';
+      resultDiv.textContent = '✅ ' + method + (d.file_path ? ' | 文件: ' + d.file_path.split('/').pop() : '') + (d.note ? ' | ' + d.note : '');
+      statusBadge.textContent = '已完成';
+      setTimeout(loadReportList, 1000);
+    } else {
+      resultDiv.style.color = 'var(--red)';
+      resultDiv.textContent = '❌ 生成失败: ' + (d.error || '未知错误');
+      statusBadge.textContent = '失败';
+    }
+  } catch(e) {
+    resultDiv.style.color = 'var(--red)';
+    resultDiv.textContent = '❌ 请求失败: ' + e.message;
+    statusBadge.textContent = '失败';
+  }
+}
+
+// ── Suggestions page (growth_analysis 审核) ──
+async function refreshSuggestionsPage() {
+  await Promise.all([refreshSgStats(), refreshSgList()]);
+}
+
+async function refreshSgStats() {
+  try {
+    // 获取各状态计数
+    const [pending, approved, rejected] = await Promise.all([
+      fetchJSON('/api/growth/list?status=pending&limit=999'),
+      fetchJSON('/api/growth/list?status=approved&limit=999'),
+      fetchJSON('/api/growth/list?status=rejected&limit=999'),
+    ]);
+    document.getElementById('sgPending').textContent = pending.total ?? 0;
+    document.getElementById('sgApproved').textContent = approved.total ?? 0;
+    document.getElementById('sgRejected').textContent = rejected.total ?? 0;
+    // applied 从 approved 中统计
+    const appliedCount = (approved.items || []).filter(i => i.applied_at).length;
+    document.getElementById('sgApplied').textContent = appliedCount;
+  } catch(e) { /* silent */ }
+}
+
+async function refreshSgList() {
+  const status = document.getElementById('sgStatusFilter').value;
+  const typeFilter = document.getElementById('sgTypeFilter').value;
+  try {
+    const statusParam = status === 'all' ? '' : status;
+    const d = await fetchJSON('/api/growth/list?status=' + (statusParam || 'pending') + '&limit=200');
+    let items = d.items || [];
+    document.getElementById('sgTotal').textContent = items.length;
+
+    // 客户端类型筛选
+    if (typeFilter) {
+      items = items.filter(i => i.analysis_type === typeFilter);
+    }
+
+    if (!items.length) {
+      document.getElementById('sgList').innerHTML = '<div class="empty">暂无优化建议</div>';
+      return;
+    }
+
+    const typeLabels = {
+      prompt_optimize: 'Prompt 优化',
+      analysis_add: '新增分析',
+      knowledge_gap: '知识缺口',
+      user_profile_enhance: '用户画像增强',
+      skill_planning: '技能规划',
+      tech_trend: '技术趋势',
+      growth_path: '成长路径',
+      learning_advice: '学习建议',
+      data_quality: '数据质量',
+    };
+
+    const priorityLabels = { high: '🔴 高', medium: '🟡 中', low: '🟢 低' };
+
+    document.getElementById('sgList').innerHTML = items.map(item => {
+      const typeLabel = typeLabels[item.analysis_type] || item.analysis_type;
+      const priorityLabel = priorityLabels[item.priority] || item.priority;
+      const isPending = item.status === 'pending';
+      const isApproved = item.status === 'approved';
+      const statusClass = item.status;
+
+      let actionsHtml = '';
+      if (isPending) {
+        actionsHtml = `
+          <button class="approve" onclick="reviewSuggestion(${item.id},'approved')">同意</button>
+          <button class="reject" onclick="showRejectFeedback(${item.id})">拒绝</button>`;
+      } else if (isApproved && !item.applied_at) {
+        actionsHtml = `<button class="apply" onclick="applySuggestion(${item.id})">标记已应用</button>`;
+      }
+
+      const feedbackHtml = isPending ? `
+        <div class="sg-feedback-area" id="sgFeedback${item.id}">
+          <textarea id="sgComment${item.id}" placeholder="审核意见（可选）..."></textarea>
+          <div class="btn-row">
+            <button class="btn" onclick="cancelFeedback(${item.id})">取消</button>
+            <button class="btn primary" onclick="confirmReject(${item.id})">确认拒绝</button>
+          </div>
+        </div>` : '';
+
+      const reviewInfo = item.reviewed_at ? `
+        <span>审核人: ${escHtml(item.reviewer || '-')}</span>
+        <span>时间: ${item.reviewed_at.slice(0,16).replace('T',' ')}</span>
+        ${item.review_comment ? `<span style="color:var(--yellow);">意见: ${escHtml(item.review_comment)}</span>` : ''}` : '';
+
+      return `
+        <div class="sg-card ${statusClass}">
+          <div class="sg-card-header">
+            <span class="sg-card-title">${escHtml(item.title || '未命名建议')}</span>
+            <div class="sg-card-meta">
+              <span class="tag ${statusClass === 'pending' ? 'pending' : (statusClass === 'approved' ? 'completed' : 'failed')}">${statusClass === 'pending' ? '待审核' : (statusClass === 'approved' ? '已通过' : '已拒绝')}</span>
+              <span class="tag" style="background:rgba(99,102,241,0.1);color:var(--accent);">${typeLabel}</span>
+              <span style="font-size:11px;">${priorityLabel}</span>
+            </div>
+          </div>
+          <div class="sg-card-desc">${escHtml(item.description || '')}</div>
+          ${item.suggestion ? `<div class="sg-card-suggestion">💡 ${escHtml(item.suggestion)}</div>` : ''}
+          <div class="sg-card-footer">
+            <div>
+              <span>来源: ${item.source_period || '-'}</span>
+              <span style="margin-left:12px;">${item.timestamp ? item.timestamp.slice(0,16).replace('T',' ') : '-'}</span>
+              ${reviewInfo}
+            </div>
+            <div class="sg-card-actions">${actionsHtml}</div>
+          </div>
+          ${feedbackHtml}
+        </div>`;
+    }).join('');
+  } catch(e) {
+    document.getElementById('sgList').innerHTML = '<div class="empty" style="color:var(--red);">加载失败: ' + e.message + '</div>';
+  }
+}
+
+async function reviewSuggestion(id, action) {
+  try {
+    const d = await fetchJSON('/api/growth/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, action, reviewer: 'admin', comment: '' }),
+    });
+    if (d.success) {
+      refreshSuggestionsPage();
+    } else {
+      alert('操作失败: ' + (d.error || '未知错误'));
+    }
+  } catch(e) {
+    alert('请求失败: ' + e.message);
+  }
+}
+
+function showRejectFeedback(id) {
+  const area = document.getElementById('sgFeedback' + id);
+  if (area) area.style.display = 'block';
+}
+
+function cancelFeedback(id) {
+  const area = document.getElementById('sgFeedback' + id);
+  if (area) area.style.display = 'none';
+}
+
+async function confirmReject(id) {
+  const comment = document.getElementById('sgComment' + id).value;
+  try {
+    const d = await fetchJSON('/api/growth/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, action: 'rejected', reviewer: 'admin', comment }),
+    });
+    if (d.success) {
+      refreshSuggestionsPage();
+    } else {
+      alert('操作失败: ' + (d.error || '未知错误'));
+    }
+  } catch(e) {
+    alert('请求失败: ' + e.message);
+  }
+}
+
+async function applySuggestion(id) {
+  try {
+    const d = await fetchJSON('/api/growth/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    if (d.success) {
+      refreshSuggestionsPage();
+    } else {
+      alert('操作失败: ' + (d.error || '未知错误'));
+    }
+  } catch(e) {
+    alert('请求失败: ' + e.message);
+  }
+}
+
 </script>
 </body>
 </html>

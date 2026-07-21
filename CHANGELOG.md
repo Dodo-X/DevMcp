@@ -5,6 +5,276 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [9.2.2] - 2026-07-20
+
+### 🧹 代码清理：移除废弃配置和死代码
+
+#### 删除的文件（3个）
+- `devpartner_agent/core/optimization_engine.py` — 空文件（0字节），v8.3 起废弃
+- `devpartner_agent/services/optimization_loop.py` — 空文件（0字节），v8.3 起废弃
+- `devpartner_agent/routes/__init__.py` — 空文件（0字节）
+
+#### config.yaml 清理
+- 删除 `data.daily_logs_dir`（DataConfig 中无对应字段）
+- 删除整个 `services` 段（log_service/dialogue_service/evolution_service 均零引用）
+- 删除 `rules` 段（auto_load_builtin/trigger_on_startup 零引用）
+- 删除 `llm.fallback_to_rules`（降级逻辑未实现）
+- `data_lifecycle` 从 services 子段提升到顶级配置
+
+#### config.py 清理
+- 删除 `LogServiceConfig`（零引用）
+- 删除 `DialogueServiceConfig`（零引用）
+- 删除 `EvolutionServiceConfig`（零引用，含 known_mcp_servers）
+- 删除 `RulesConfig`（零引用）
+- 删除 `get_config_manager()`（零外部引用，内联到 get_config()）
+- 删除 `LLMConfig.fallback_to_rules`
+- 更新 `_merge_yaml` 删除 services/rules 合并逻辑，新增 data_lifecycle 顶级合并
+
+#### __init__.py 清理
+- `core/__init__.py` — 删除全部 9 个零引用导出
+- `services/__init__.py` — 删除全部 12 个零引用导出
+- `skills/__init__.py` — 删除全部 8 个零引用导出 + `__all__`
+
+#### 其他
+- 删除 `BusinessKnowledgeExtractor` 别名（knowledge_extractor.py，零引用）
+
+---
+
+## [9.2.1] - 2026-07-20
+
+### ✨ Dashboard 优化建议审核面板
+
+#### 新增功能
+- Dashboard 新增 **"优化建议"** Tab 页（page-suggestions）
+- 展示 `growth_analysis` 表中的系统优化建议（双维度：系统优化 + 用户成长）
+- **审核交互**：每条建议支持「同意/拒绝」操作，拒绝时可填写反馈意见
+- **应用追踪**：已通过的优化建议可「标记已应用」
+- **筛选功能**：按状态（待审核/已通过/已拒绝/全部）+ 类型（9种分析类型）筛选
+- **统计概览**：顶部卡片展示待审核/已通过/已拒绝/已应用数量
+
+#### 修复
+- `growth_analytics.py` 采纳率统计：从废弃的 `optimization_feedback` 表迁移到 `growth_analysis` 表
+- 修复原代码 SQL 错误：`optimization_feedback` 表无 `created_at` 字段
+
+#### 涉及文件
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/dashboard.html` | +CSS 样式 +HTML 页面 +JS 函数（~150行） |
+| `devpartner_tools/tools/growth_analytics.py` | 采纳率统计数据源切换 + SQL 修复 |
+
+### 📋 版本发布检查清单（新增规范）
+
+每次版本更新后，AI 必须执行以下 6 项审计检查：
+1. **模块引用完整性** — 扫描 `__init__.py` 导出，标记零引用死代码
+2. **数据生命周期完整性** — 对比 DDL vs INSERT/SELECT 字段一致性
+3. **配置项使用情况** — config.yaml 所有叶子节点 vs 代码引用
+4. **文件级死代码** — 所有 .py 文件中零调用的公开函数/类
+5. **import 副作用** — `from X import Y` + `get_xxx()` 模式的无用初始化
+6. **版本注释一致性** — 代码中版本号引用 vs 当前实际版本
+
+---
+
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
+
+---
+
+## [8.5.0] - 2026-07-17
+
+### 🏗️ 架构重构 — Prompt提取 + MCP解耦 + 消除硬编码
+
+#### Prompt 提取
+- **新建 `prompts/` 目录**（项目根目录）：所有 LLM Prompt 模板独立存放
+- 从 `devpartner_agent/core/llm_prompts/` 迁移到 `prompts/`
+- 保留旧路径兼容桥（`llm_prompts/__init__.py` 重定向到 `prompts/`）
+- 所有引用已更新：`devpartner_agent.core.llm_prompts` → `prompts`
+- 清理旧 `llm_prompts/` 下 10 个冗余子模块文件，仅保留兼容桥 `__init__.py`
+
+#### MCP 工具解耦
+- **移除 `question_with_context` MCP 工具**：不再暴露给客户端，仅系统内部使用
+- `question_with_context()` 方法保留在 ConversationEngine 中，供知识库查询
+- 客户端只需 3 个核心 MCP 工具：`start_conversation` / `record_step` / `finalize_conversation`
+
+#### 移除 finalize 中的 MD 生成
+- `handle_conversation_finalize()` 不再调用 `vault_exporter.export_batch()`
+- MD 文件生成仅由定时总结触发（日/周/月/年 Scheduler）
+- finalize 阶段仅做：LLM 分析 + 知识提取入库 + 用户画像更新
+
+#### 消除硬编码
+- `_expand_question_with_llm()`：硬编码 Prompt → `AnalysisTask` 外部 Prompt
+- `_process_user_traits_with_llm()`：硬编码 Prompt → `AnalysisTask` 外部 Prompt
+- `get_known_domains()`：硬编码领域映射 → 从 DB 动态查询
+- `_fallback_analysis()`：优先 DB 领域，降级才用硬编码
+
+#### 增强 TASK_GROWTH_ANALYSIS
+- 新增**用户维度**分析：skill_planning / tech_trend / growth_path / learning_advice
+- 新增 **data_quality** 系统维度：缺失/不一致/噪音数据检测
+- 新增 **summary** 汇总字段：system_health / user_growth_stage / key_opportunities
+- `_run_growth_analysis()` 消费双维度结果，分别写入 growth_analysis 表
+
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
+
+---
+
+## [8.3.0] - 2026-07-16
+
+### 🔧 文档整理与工具计数修正
+
+#### 变更
+- **文档清理**：README 移除不存在的 memory_engine / iteration_engine / vault_engine（已废弃，功能合并到其他模块）
+- **文档清理**：README 移除不存在的 `git_operations.py` 引用
+- **版本号统一**：server.py / README / pyproject.toml → 8.3
+- **工具计数修正**：`_tools_count` 从虚高的 78 修正为真实 42（4 core + 17 tool layer + 21 agent engines）
+- **引擎计数精确化**：每个引擎的 `_tools_count` 从统一 10 改为各自实际数（conversation=0, knowledge=4, system=6, daily=9, optimization=2）
+- **__init__.py 更新**：17 个工具，4 大类，包含 growth_analytics
+
+### [8.0-8.2] - 2026-07-14
+
+### 🎉 Engine Pattern 架构重构 + 自迭代子系统清理
+
+#### 核心变更
+- **server.py 精简**：4240 行 → ~380 行薄壳入口（减少 91%）
+- **5 个领域引擎**：conversation / knowledge / system / daily / optimization
+- **移除废弃引擎**：memory_engine / iteration_engine / vault_engine（功能合并到其他模块）
+- **@mcp_tool_handler** 统一装饰器消除样板代码
+- **HTTP REST 路由** 提取到 `routes/rest_api.py`
+- **启动逻辑** 提取到 `core/bootstrap.py`
+- **工具层** 添加 `register_*_tools(mcp)` 注册函数
+- **删除废弃文件**：`conversation_manager.py`, `conversation_analyzer.py`, `log_service.py`
+
+#### 新增文件
+- `core/knowledge_engine.py` - 知识引擎
+- `core/system_engine.py` - 系统引擎
+- `core/daily_engine.py` - 日报引擎
+- `core/optimization_engine.py` - 优化引擎
+- `core/bootstrap.py` - 启动与初始化
+- `core/decorators.py` - 统一装饰器
+- `routes/rest_api.py` - REST API 路由
+
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
+
 ---
 
 ## [7.3.0] - 2026-07-10
@@ -22,6 +292,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `llama-cpp-python` 依赖（pyproject.toml optional-deps、requirements.txt）
 - `models/` 目录下的 GGUF 模型文件管理逻辑
 - `modelscope` 依赖（不再需要模型下载）
+
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
 
 ---
 
@@ -58,6 +371,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### 📊 版本号统一
 - 全系统版本号统一为 `7.2.0`（pyproject.toml → config.yaml → server.py → 各服务 → MEMORY.md）
 
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
+
 ---
 
 ## [7.1.0] - 2026-07-07
@@ -65,6 +421,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### ✨ 新增功能
 - **LLM 双层分析引擎**：Step 级 `analyze_step_content()` + Conversation 级 `analyze_conversation_deep()`
 - **Step→Task 链式**：record_step 自动创建 step_analysis 异步任务
+
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
 
 ---
 
@@ -84,6 +483,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 python scripts/migrate_v70.py
 ```
 
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
+
 ---
 
 ## [6.0.4] - 2026-07-05
@@ -96,6 +538,49 @@ CodeBuddy 等 MCP 客户端发起 `tools/list` 请求时**不发送 `Accept: app
 #### 修复
 - `server.py`: 在 `_run_mcp_service()` 中 monkey-patch 掉 `_validate_accept_header`，使其始终返回 True
 - 修复补丁目标类名：`StreamableHTTPSessionManager` → `StreamableHTTPServerTransport`（mcp 0.x 实际类名）
+
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
 
 ---
 
@@ -111,6 +596,49 @@ CodeBuddy 等 MCP 客户端发起 `tools/list` 请求时**不发送 `Accept: app
 - `server.py`: 移除 `mcp._app` 语法错误，改为在 `_run_mcp_service()` 中通过 `mcp.run(middleware=[CORSMiddleware(...)])` 注入
 - `start_modelscope.sh`: 新增持久化缓存目录 `/mnt/workspace/modelscope_cache` 检测，下载后优先从缓存恢复
 - `Dockerfile`: 注释掉模型构建时下载方案（可选），当前依赖启动脚本下载到持久化缓存
+
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
 
 ---
 
@@ -133,6 +661,49 @@ CodeBuddy 等 MCP 客户端发起 `tools/list` 请求时**不发送 `Accept: app
 - `server.py`: 新增 CORS 中间件 + 根路径/健康检查端点 + 请求诊断中间件
 - `scripts/healthcheck.py`: 多端点回退探测
 - `Dockerfile`: 优化健康检查参数
+
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
 
 ---
 
@@ -196,6 +767,49 @@ CodeBuddy 等 MCP 客户端发起 `tools/list` 请求时**不发送 `Accept: app
 | 分析质量评分 | 3.5/5.0 | 4.7/5.0 | **34%↑** |
 | 扩展新场景 | 2-4天 | 10分钟 | **99%↓** |
 
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
+
 ---
 
 ## [5.1.0] - 2026-06-28
@@ -221,6 +835,49 @@ CodeBuddy 等 MCP 客户端发起 `tools/list` 请求时**不发送 `Accept: app
 - 修复并发写入导致的数据库锁竞争
 - 修复长时间运行后的内存泄漏问题
 - 修复 Windows 平台路径分隔符不一致问题
+
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
 
 ---
 
@@ -257,6 +914,49 @@ python scripts/upgrade_to_v5.py --auto-backup
 - 配置文件格式调整（新增 llm 部分）
 - API 接口部分变更（详见 API 文档）
 
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
+
 ---
 
 ## [4.3.0] - 2026-06-15
@@ -276,6 +976,49 @@ python scripts/upgrade_to_v5.py --auto-backup
 - 对话存储压缩（节省 40% 存储空间）
 - 分析结果缓存（重复查询加速 10x）
 - 错误日志分级（DEBUG/INFO/WARNING/ERROR）
+
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
 
 ---
 
@@ -297,6 +1040,49 @@ python scripts/upgrade_to_v5.py --auto-backup
 - 修复特殊字符导致的分析失败
 - 修复并发访问的竞态条件
 
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
+
 ---
 
 ## [4.1.0] - 2026-06-05
@@ -316,6 +1102,49 @@ python scripts/upgrade_to_v5.py --auto-backup
 - 启动速度优化（减少 60% 初始化时间）
 - 内存占用降低（从 500MB → 300MB）
 - 日志输出规范化
+
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
 
 ---
 
@@ -356,6 +1185,49 @@ python scripts/upgrade_to_v5.py --auto-backup
 - 单元测试（覆盖率 >70%）
 - Docker 镜像和 Compose 编排
 
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
+
 ---
 
 ## 📋 版本规划路线图
@@ -370,6 +1242,49 @@ python scripts/upgrade_to_v5.py --auto-backup
 - Agent 协作模式（多个 DevPartner 实例协同）
 - 知识库向量搜索（RAG 增强）
 - 插件市场（第三方工具集成）
+
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
 
 ---
 
@@ -392,6 +1307,49 @@ python scripts/upgrade_to_v5.py --auto-backup
 - ✅ 自我进化: 90%（规则引擎 → LLM + improvement_log 流转）
 - ✅ 监控运维: 90%（数据清理服务 + 孤儿步骤回收）
 
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
+
 ---
 
 ## 🔗 相关链接
@@ -399,6 +1357,49 @@ python scripts/upgrade_to_v5.py --auto-backup
 - **GitHub Releases**: https://github.com/your-repo/devpartner/releases
 - **Issue Tracker**: https://github.com/your-repo/devpartner/issues
 - **讨论区**: https://github.com/your-repo/discussions
+
+## [9.2.0] - 2026-07-20
+
+### 🗑️ 数据库废弃字段清理
+
+#### conversations 表清理
+- 删除 6 个 v1 废弃字段：`problems`, `solutions`, `decisions`, `files_touched`, `thinking_steps`, `raw_json`
+- 这些字段是旧接口 `insert_conversation` 的产物，当前 `start_conversation` 已不使用
+- `files_touched` 改为从 `conversation_steps.input_data.files_changed` 聚合
+- `decisions`/`problems`/`solutions` 改为由 Worker 异步分析生成
+
+#### conversation_steps 表清理
+- 删除 `depends_on` 死字段（始终写入空字符串，从未实际使用）
+
+#### archived_conversations 表删除
+- 完全删除 `archived_conversations` 表
+- 数据生命周期简化为：archive_tier 标记 + 超期直接删除
+- MD 文件为唯一完整数据源
+
+#### 废弃方法清理
+- 删除 `Database.insert_conversation()`（已被 `conversation_engine.start_conversation` 替代）
+- 相关 migration 代码同步清理
+
+#### MCP 强制规则增强
+- `server.py`: instructions 改为完整强制流程说明
+- 三个工具 docstring 增加 `【必须调用】` 前缀 + 后果说明
+- 新增 `.codebuddy/rules/mcp-recording.md` AI 强制规则文件
+- `_insert_step`: step_type 不再硬编码 'analysis'，从 input_data 读取
+- `_insert_step`: conversations_id 在 INSERT 时正确写入
+
+#### 修复文件清单
+| 文件 | 修改内容 |
+|------|---------|
+| `devpartner_agent/core/database.py` | 清理 DDL + 删除 insert_conversation + 清理 migration |
+| `devpartner_agent/core/conversation_engine.py` | 清理废弃字段引用 + depends_on 删除 + step_type 修复 |
+| `devpartner_agent/skills/daily_summary.py` | 废弃字段聚合改为从 steps 读取 + archived_conversations 清理逻辑重写 |
+| `devpartner_agent/core/config.py` | 注释更新 |
+| `devpartner_agent/core/scheduler.py` | 注释更新 |
+| `devpartner_agent/core/llm_engine.py` | 无代码变更（files_touched 来自运行时数据） |
+| `server.py` | instructions + docstring 强化 |
+| `docs/workflow-diagram.md` | 归档流程更新 |
+| `.codebuddy/rules/mcp-recording.md` | 新建 AI 强制规则 |
+| `CHANGELOG.md` | 本记录 |
 
 ---
 
