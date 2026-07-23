@@ -385,6 +385,31 @@
   .tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   .tbl th, .tbl td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); }
   .tbl th { color: var(--text-muted); font-weight: 600; }
+
+  /* ── Notification center ── */
+  .notif-wrap { position: relative; }
+  .notif-btn { position: relative; font-size: 16px; }
+  .notif-badge { position: absolute; top: -2px; right: -2px; min-width: 16px; height: 16px;
+    background: var(--red); color: #fff; border-radius: 50%; font-size: 10px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; padding: 0 4px;
+    line-height: 1; }
+  .notif-badge.hidden { display: none; }
+  .notif-drop { position: absolute; top: 100%; right: 0; margin-top: 8px; width: 340px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--r);
+    box-shadow: var(--shadow); display: none; z-index: 100; max-height: 420px; overflow: hidden; }
+  .notif-drop.open { display: block; }
+  .notif-header { display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .notif-body { overflow-y: auto; max-height: 360px; }
+  .notif-item { padding: 10px 14px; border-bottom: 1px solid var(--border-soft);
+    cursor: pointer; font-size: 12.5px; transition: background var(--dur) var(--ease); }
+  .notif-item:hover { background: var(--panel-2); }
+  .notif-item .ni-title { font-weight: 600; color: var(--text); margin-bottom: 2px; }
+  .notif-item .ni-detail { color: var(--text-2); }
+  .notif-item .ni-time { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+  .notif-item.ni-error { border-left: 3px solid var(--red); }
+  .notif-item.ni-warning { border-left: 3px solid var(--yellow); }
+  .notif-item.ni-info { border-left: 3px solid var(--blue); }
 </style>
 </head>
 <body>
@@ -439,6 +464,15 @@
         <input id="globalSearch" type="text" placeholder="搜索 / 过滤（/）" aria-label="全局搜索">
         <kbd>/</kbd>
       </label>
+      <div class="notif-wrap">
+        <button class="btn ghost notif-btn" id="notifBtn" aria-label="通知中心">
+          🔔<span class="notif-badge hidden" id="notifBadge">0</span>
+        </button>
+        <div class="notif-drop" id="notifDrop">
+          <div class="notif-header"><strong>通知中心</strong><button class="btn sm ghost" id="notifClear">全部清除</button></div>
+          <div class="notif-body" id="notifBody"><div class="empty">暂无通知</div></div>
+        </div>
+      </div>
       <button class="btn" id="refreshBtn" title="刷新 (R)">⟳ 刷新</button>
       <button class="btn ghost" id="themeBtn" title="切换主题 (T)">🌓</button>
       <button class="btn ghost" id="helpBtn" title="快捷键 (?)">?</button>
@@ -909,6 +943,43 @@ function escapeHtml(s) {
     showToast({ text: '主题: ' + TITLES[theme] });
   });
 })();
+
+/* ── Notification center ── */
+let notifCount = 0;
+async function refreshNotifications() {
+  try {
+    const d = await fetchJSON('/api/notifications');
+    const items = d.data.items || [];
+    notifCount = d.data.total || 0;
+    const badge = document.getElementById('notifBadge');
+    if (notifCount > 0) { badge.textContent = notifCount; badge.classList.remove('hidden'); }
+    else badge.classList.add('hidden');
+
+    const body = document.getElementById('notifBody');
+    if (!items.length) { body.innerHTML = '<div class="empty">暂无通知</div>'; return; }
+    body.innerHTML = items.map(n => {
+      const cls = n.level === 'error' ? 'ni-error' : n.level === 'warning' ? 'ni-warning' : 'ni-info';
+      const ic = n.type === 'task' ? '❌' : n.type === 'analysis' ? '⚠️' : '💡';
+      return `<div class="notif-item ${cls}" title="${escapeHtml(n.detail)}">
+        <div class="ni-title">${ic} ${escapeHtml(n.title)}</div>
+        <div class="ni-detail">${escapeHtml(n.detail)}</div>
+        <div class="ni-time">${n.time || ''}</div>
+      </div>`;
+    }).join('');
+  } catch(e) { /* 静默——通知不是关键路径 */ }
+}
+document.getElementById('notifBtn').addEventListener('click', () => {
+  document.getElementById('notifDrop').classList.toggle('open');
+});
+document.getElementById('notifClear').addEventListener('click', () => {
+  document.getElementById('notifBody').innerHTML = '<div class="empty">暂无通知</div>';
+  const badge = document.getElementById('notifBadge');
+  badge.classList.add('hidden'); notifCount = 0;
+});
+document.addEventListener('click', e => {
+  const wrap = document.querySelector('.notif-wrap');
+  if (wrap && !wrap.contains(e.target)) document.getElementById('notifDrop').classList.remove('open');
+});
 
 /* ── UX layer: toast / confirm / skeleton ── */
 function toast(msg, type) {
@@ -1726,7 +1797,7 @@ async function applySuggestion(id) {
 
 /* ── Global refresh + events ── */
 async function refreshAll() {
-  await Promise.all([refreshOverview(), refreshTasks(), refreshTaskOps(), refreshDiagnostics(),
+  await Promise.all([refreshNotifications(), refreshOverview(), refreshTasks(), refreshTaskOps(), refreshDiagnostics(),
     refreshHandlers(), refreshMemory(), refreshCallbacks(), refreshHealth(), refreshTrends()]);
 }
 function refreshCurrent() {
@@ -1863,7 +1934,7 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'r' || e.key === 'R') refreshCurrent();
   else if (e.key === '/') { e.preventDefault(); document.getElementById('globalSearch').focus(); }
   else if (e.key === '?') document.getElementById('helpScrim').classList.add('open');
-  else if (e.key === 'Escape') { document.getElementById('confirmScrim').classList.remove('open'); document.getElementById('helpScrim').classList.remove('open'); document.getElementById('convDetailScrim').classList.remove('open'); }
+  else if (e.key === 'Escape') { document.getElementById('confirmScrim').classList.remove('open'); document.getElementById('helpScrim').classList.remove('open'); document.getElementById('convDetailScrim').classList.remove('open'); document.getElementById('notifDrop').classList.remove('open'); }
   else if (e.key === 't' || e.key === 'T') document.getElementById('themeBtn').click();
 });
 

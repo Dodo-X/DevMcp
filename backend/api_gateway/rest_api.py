@@ -292,6 +292,92 @@ def register_rest_routes(mcp):
             )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
+    @mcp.custom_route("/api/notifications", methods=["GET"])
+    async def api_notifications(request: Request) -> JSONResponse:
+        """通知中心：聚合 pending analyses / 失败任务 / 待审核建议"""
+        try:
+            from backend.core.database.base_conn import get_db
+
+            db = get_db()
+            notifications = []
+
+            # 1. Pending analyses
+            try:
+                pa = db.query_local(
+                    "SELECT analysis_type, source_date, missing_dimensions, status, created_at "
+                    "FROM pending_analyses WHERE status = 'pending' ORDER BY created_at ASC LIMIT 20"
+                )
+                for r in (pa or []):
+                    notifications.append({
+                        "id": f"pa-{r['analysis_type']}-{r['source_date']}",
+                        "type": "analysis",
+                        "level": "warning",
+                        "title": f"待分析: {r['analysis_type']} ({r['source_date']})",
+                        "detail": f"缺失维度: {r.get('missing_dimensions', 'N/A')}",
+                        "time": r.get("created_at", ""),
+                    })
+            except Exception:
+                logger.warning("api_notifications: 查询 pending_analyses 失败", exc_info=True)
+
+            # 2. Failed / stalled tasks
+            try:
+                tq_rows = db.query_local(
+                    "SELECT task_id, conversation_id, status, created_at, error_message "
+                    "FROM task_queue WHERE status IN ('failed', 'canceled') "
+                    "ORDER BY created_at DESC LIMIT 10"
+                )
+                for r in (tq_rows or []):
+                    notifications.append({
+                        "id": f"tq-{r['task_id']}",
+                        "type": "task",
+                        "level": "error",
+                        "title": f"任务异常: {r['task_id'][:12]}",
+                        "detail": r.get("error_message", f"状态: {r.get('status','')}"),
+                        "time": r.get("created_at", ""),
+                    })
+            except Exception:
+                logger.warning("api_notifications: 查询 task_queue 失败", exc_info=True)
+
+            # 3. Pending growth suggestions
+            try:
+                gs = db.query_local(
+                    "SELECT id, title, category, status, created_at "
+                    "FROM growth_items WHERE status = 'pending' ORDER BY created_at DESC LIMIT 10"
+                )
+                for r in (gs or []):
+                    notifications.append({
+                        "id": f"gs-{r['id']}",
+                        "type": "growth",
+                        "level": "info",
+                        "title": f"待审核: {r.get('title', r.get('category', '') or '建议')}",
+                        "detail": f"分类: {r.get('category', 'N/A')}",
+                        "time": r.get("created_at", ""),
+                    })
+            except Exception:
+                logger.debug("api_notifications: growth_items 表可能不存在, 跳过")
+
+            # 按时间倒序排列, 最多 30 条
+            notifications.sort(key=lambda x: x.get("time", ""), reverse=True)
+            total = len(notifications)
+            notifications = notifications[:30]
+
+            return JSONResponse(content={
+                "code": 0,
+                "message": "ok",
+                "data": {
+                    "total": total,
+                    "items": notifications,
+                    "summary": {
+                        "analysis": sum(1 for n in notifications if n["type"] == "analysis"),
+                        "task_error": sum(1 for n in notifications if n["type"] == "task"),
+                        "growth_pending": sum(1 for n in notifications if n["type"] == "growth"),
+                    },
+                },
+            })
+        except Exception as e:
+            logger.warning("api_notifications: 未预期的异常", exc_info=True)
+            return JSONResponse(content={"error": str(e)}, status_code=500)
+
     # ════════════════════════════════════════════════
     # 请求拦截调试 API (v9.5.1)
     # ════════════════════════════════════════════════
