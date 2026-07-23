@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse, Response
 
 logger = logging.getLogger(__name__)
 
@@ -921,6 +921,121 @@ def register_rest_routes(mcp):
             )
             return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
+    @mcp.custom_route("/api/reports/search", methods=["GET"])
+    async def api_reports_search(request: Request) -> JSONResponse:
+        """跨报告全文搜索（标题 + 内容包含关键词）"""
+        try:
+            q = (request.query_params.get("q", "") or "").strip()
+            if not q:
+                return JSONResponse(
+                    content={"success": False, "error": "缺少 q 参数"}, status_code=400
+                )
+
+            from backend.business.vault_export.vault_exporter import get_vault_exporter
+
+            exporter = get_vault_exporter()
+            buckets = [
+                ("daily", exporter._calendar_dir),
+                ("weekly", exporter._reports_dir / "Weekly"),
+                ("monthly", exporter._reports_dir / "Monthly"),
+                ("annual", exporter._reports_dir / "Annual"),
+            ]
+
+            results = []
+            ql = q.lower()
+            for rtype, directory in buckets:
+                if not directory.exists():
+                    continue
+                for f in sorted(directory.glob("*.md")):
+                    try:
+                        text = f.read_text(encoding="utf-8")
+                    except Exception:
+                        logger.warning(
+                            "api_reports_search: 读取报告失败（P-17 收口）", exc_info=True
+                        )
+                        continue
+                    if ql not in text.lower():
+                        continue
+                    # 提取首个匹配行作为摘要
+                    snippet = ""
+                    for line in text.splitlines():
+                        if ql in line.lower():
+                            snippet = line.strip()[:120]
+                            break
+                    title = f.stem
+                    first = text.split("\n", 1)[0]
+                    if first.startswith("# "):
+                        title = first[2:].strip()
+                    results.append(
+                        {
+                            "type": rtype,
+                            "name": f.stem,
+                            "title": title,
+                            "snippet": snippet,
+                            "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
+                        }
+                    )
+                    if len(results) >= 50:
+                        break
+                if len(results) >= 50:
+                    break
+
+            return JSONResponse(content={"success": True, "query": q, "count": len(results), "results": results})
+        except Exception as e:
+            logger.warning(
+                "register_rest_routes: /api/reports/search 未预期的异常被静默捕获（P-17 收口）",
+                exc_info=True,
+            )
+            return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
+    @mcp.custom_route("/api/export/report", methods=["GET"])
+    async def api_export_report(request: Request) -> Response:
+        """下载报告 Markdown 文件"""
+        try:
+            report_type = request.query_params.get("type", "daily")
+            name = request.query_params.get("name", "")
+            if not name:
+                return JSONResponse(
+                    content={"success": False, "error": "缺少 name 参数"}, status_code=400
+                )
+
+            from backend.business.vault_export.vault_exporter import get_vault_exporter
+
+            exporter = get_vault_exporter()
+            type_dir_map = {
+                "daily": exporter._calendar_dir,
+                "weekly": exporter._reports_dir / "Weekly",
+                "monthly": exporter._reports_dir / "Monthly",
+                "annual": exporter._reports_dir / "Annual",
+            }
+            target_dir = type_dir_map.get(report_type)
+            if not target_dir:
+                return JSONResponse(
+                    content={"success": False, "error": f"未知报告类型: {report_type}"},
+                    status_code=400,
+                )
+            # 防目录穿越：规范化后必须仍在目标目录内
+            file_path = (target_dir / f"{name}.md").resolve()
+            if not str(file_path).startswith(str(target_dir.resolve())) or not file_path.exists():
+                return JSONResponse(
+                    content={"success": False, "error": f"报告不存在: {name}.md"},
+                    status_code=404,
+                )
+
+            from starlette.responses import FileResponse
+
+            return FileResponse(
+                path=str(file_path),
+                media_type="text/markdown",
+                filename=f"{name}.md",
+            )
+        except Exception as e:
+            logger.warning(
+                "register_rest_routes: /api/export/report 未预期的异常被静默捕获（P-17 收口）",
+                exc_info=True,
+            )
+            return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
+
     # ════════════════════════════════════════════════
     # Daily Engine API（日报引擎内部服务）
     # ════════════════════════════════════════════════
@@ -1373,20 +1488,29 @@ def register_rest_routes(mcp):
 
     @mcp.custom_route("/api/trends/system", methods=["GET"])
     async def api_trends_system(request: Request) -> JSONResponse:
-        """系统趋势数据"""
+        """系统趋势数据（支持 ?days=7|30|90 时间范围，默认 30）"""
         try:
+            try:
+                days = int(request.query_params.get("days", "30"))
+            except ValueError:
+                days = 30
+            if days not in (7, 30, 90):
+                days = 30
+
             from backend.core.database.base_conn import get_db
 
             db = get_db()
             rows = db.query_local(
                 "SELECT date(timestamp) as d, COUNT(*) as cnt "
                 "FROM conversations "
-                "WHERE timestamp >= datetime('now', '-7 days') "
+                f"WHERE timestamp >= datetime('now', '-{days} days') "
                 "GROUP BY d ORDER BY d"
             )
             timestamps = [r["d"] for r in (rows or [])]
             sessions = [r["cnt"] for r in (rows or [])]
-            return JSONResponse(content={"timestamps": timestamps, "sessions": sessions})
+            return JSONResponse(
+                content={"timestamps": timestamps, "sessions": sessions, "days": days}
+            )
         except Exception as e:
             logger.warning(
                 "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
@@ -1558,3 +1682,70 @@ def register_rest_routes(mcp):
                 "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
             )
             return JSONResponse(content={"error": str(e)}, status_code=500)
+
+    @mcp.custom_route("/api/conversations", methods=["GET"])
+    async def api_conversations_list(request: Request) -> JSONResponse:
+        """分页浏览会话历史（支持状态/类型/关键词筛选）"""
+        try:
+            try:
+                limit = int(request.query_params.get("limit", "50"))
+                offset = int(request.query_params.get("offset", "0"))
+            except ValueError:
+                limit, offset = 50, 0
+            status = request.query_params.get("status", "")
+            task_type = request.query_params.get("task_type", "")
+            keyword = request.query_params.get("keyword", "")
+
+            from backend.business.conversation_mgr import get_conversation_engine
+
+            engine = get_conversation_engine()
+            result = engine.list_conversations(
+                limit=limit, offset=offset, status=status, task_type=task_type, keyword=keyword
+            )
+            return JSONResponse(
+                content={
+                    "code": 0,
+                    "message": "ok",
+                    "data": result,
+                }
+            )
+        except Exception as e:
+            logger.warning(
+                "register_rest_routes: /api/conversations 未预期的异常被静默捕获（P-17 收口）",
+                exc_info=True,
+            )
+            return JSONResponse(content={"code": 1, "message": str(e), "data": {}}, status_code=500)
+
+    @mcp.custom_route("/api/conversations/{conversation_id:path}", methods=["GET"])
+    async def api_conversation_detail(request: Request) -> JSONResponse:
+        """会话详情：会话信息 + 步骤 + 进度 + 分析"""
+        try:
+            conversation_id = request.path_params.get("conversation_id", "")
+            if not conversation_id:
+                return JSONResponse(
+                    content={"code": 1, "message": "缺少 conversation_id", "data": {}},
+                    status_code=400,
+                )
+
+            from backend.business.conversation_mgr import get_conversation_engine
+
+            engine = get_conversation_engine()
+            status = engine.get_conversation_status(conversation_id)
+            if status is None:
+                return JSONResponse(
+                    content={
+                        "code": 1,
+                        "message": f"会话不存在: {conversation_id}",
+                        "data": {},
+                    },
+                    status_code=404,
+                )
+            return JSONResponse(
+                content={"code": 0, "message": "ok", "data": status}
+            )
+        except Exception as e:
+            logger.warning(
+                "register_rest_routes: /api/conversations/{{id}} 未预期的异常被静默捕获（P-17 收口）",
+                exc_info=True,
+            )
+            return JSONResponse(content={"code": 1, "message": str(e), "data": {}}, status_code=500)

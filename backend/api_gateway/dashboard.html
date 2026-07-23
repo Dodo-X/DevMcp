@@ -205,6 +205,17 @@
   .tag.running { background: var(--blue-soft); color: var(--blue); }
   .tag.completed { background: var(--green-soft); color: var(--green); }
   .tag.failed { background: var(--red-soft); color: var(--red); }
+  .tag.blue { background: var(--blue-soft); color: var(--blue); }
+  .tag.green { background: var(--green-soft); color: var(--green); }
+  .tag.red { background: var(--red-soft); color: var(--red); }
+  .tag.muted { background: var(--panel-2); color: var(--text-muted); }
+
+  /* ── Segmented control (time range) ── */
+  .segmented { display: inline-flex; border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
+  .seg { background: transparent; border: 0; color: var(--text-2); font: inherit; font-size: 12px;
+    padding: 5px 12px; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease); }
+  .seg:hover { background: var(--panel); color: var(--text); }
+  .seg.active { background: var(--accent-soft); color: #fff; }
 
   /* ── Bars & meters ── */
   .meter { height: 7px; border-radius: 20px; background: var(--panel-2); overflow: hidden; }
@@ -312,6 +323,34 @@
     .menu-toggle { display: inline-flex !important; }
   }
   .menu-toggle { display: none; }
+
+  /* ── Conversations page ── */
+  .conv-list { display: flex; flex-direction: column; gap: 8px; }
+  .conv-row {
+    display: flex; align-items: center; gap: 14px; cursor: pointer;
+    padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r);
+    background: var(--panel); transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+  }
+  .conv-row:hover { background: var(--panel-2); border-color: var(--accent-line); }
+  .conv-main { flex: 1; min-width: 0; }
+  .conv-title { font-weight: 600; font-size: 13.5px; color: var(--text); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  .conv-sub { font-size: 12px; color: var(--text-muted); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .conv-meta { display: flex; align-items: center; gap: 10px; flex: none;
+    font-size: 12px; color: var(--text-2); }
+  .conv-meta .conv-time { font-family: var(--mono); color: var(--text-muted); }
+  .conv-meta .conv-steps { font-family: var(--mono); }
+  .pager { display: flex; align-items: center; gap: 4px; }
+  .kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; margin: 4px 0 14px; }
+  .kv-grid .k { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 2px; }
+  .kv-grid .v { font-size: 13px; color: var(--text); }
+  .conv-sec { margin-top: 14px; }
+  .conv-sec h4 { font-size: 13px; color: var(--text-2); margin: 0 0 6px; font-weight: 600; }
+  .conv-sec p { margin: 0; color: var(--text); white-space: pre-wrap; }
+  .tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .tbl th, .tbl td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); }
+  .tbl th { color: var(--text-muted); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -335,6 +374,7 @@
         <button class="nav-item" data-page="knowledge"><span class="ic">⚇</span> 知识库 <span class="kbd">3</span></button>
         <button class="nav-item" data-page="projects"><span class="ic">▤</span> 项目 <span class="kbd">4</span></button>
         <button class="nav-item" data-page="reports"><span class="ic">▦</span> 报告 <span class="kbd">5</span></button>
+        <button class="nav-item" data-page="conversations"><span class="ic">⧉</span> 会话 <span class="kbd">8</span></button>
       </div>
       <div class="nav-group">
         <div class="nav-label">管理</div>
@@ -385,8 +425,15 @@
 
         <div class="grid cols-3" style="margin-top:16px">
           <div class="card" style="grid-column: span 2;">
-            <h3>会话趋势 <span class="pill">近 14 天</span></h3>
-            <div class="trend" id="trendContent"><div class="empty">加载中...</div></div>
+            <div class="row-flex" style="justify-content:space-between;align-items:center">
+              <h3 style="margin:0">会话趋势</h3>
+              <div class="segmented" id="trendRange" role="group" aria-label="时间范围">
+                <button class="seg" data-days="7" onclick="setTrendDays(7)">近 7 天</button>
+                <button class="seg active" data-days="30" onclick="setTrendDays(30)">近 30 天</button>
+                <button class="seg" data-days="90" onclick="setTrendDays(90)">近 90 天</button>
+              </div>
+            </div>
+            <div class="trend" id="trendContent" style="margin-top:12px"><div class="empty">加载中...</div></div>
           </div>
           <div class="card">
             <h3>系统状态</h3>
@@ -546,6 +593,38 @@
           <div id="reportPreviewTitle" style="font-weight:600;margin-bottom:10px">请选择一份报告</div>
           <div id="reportPreviewContent" style="font-size:13px;line-height:1.7;max-height:520px;overflow:auto">
             <div class="empty">从上方列表点击报告查看内容</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══ Conversations ══ -->
+      <section class="page" id="page-conversations" aria-label="会话历史">
+        <div class="card">
+          <div class="row-flex" style="margin-bottom:14px;align-items:flex-end">
+            <div class="field">
+              <label>状态</label>
+              <select id="convStatus" onchange="refreshConversationsPage()">
+                <option value="">全部</option>
+                <option value="active">进行中</option>
+                <option value="completed">已完成</option>
+                <option value="failed">失败</option>
+              </select>
+            </div>
+            <div class="field" style="flex:1;min-width:200px">
+              <label>关键词</label>
+              <input type="text" id="convKeyword" placeholder="主题 / 意图 / ID..." onkeydown="if(event.key==='Enter')refreshConversationsPage()">
+            </div>
+            <div class="field">
+              <label>&nbsp;</label>
+              <button class="btn primary" onclick="refreshConversationsPage()">搜索</button>
+            </div>
+          </div>
+          <div class="row-flex" style="justify-content:space-between;align-items:center;margin-bottom:10px">
+            <div class="label" id="convTotal">共 0 条</div>
+            <div class="pager" id="convPager"></div>
+          </div>
+          <div id="convList" class="conv-list">
+            <div class="empty">加载中...</div>
           </div>
         </div>
       </section>
@@ -720,13 +799,24 @@
   <div class="modal">
     <h3>键盘快捷键</h3>
     <div class="shortcuts-grid">
-      <kbd>1–7</kbd><span>切换侧边栏页面</span>
+      <kbd>1–8</kbd><span>切换侧边栏页面</span>
       <kbd>R</kbd><span>刷新当前页面</span>
       <kbd>/</kbd><span>聚焦搜索框</span>
       <kbd>?</kbd><span>打开本帮助</span>
       <kbd>Esc</kbd><span>关闭弹窗 / 帮助</span>
     </div>
     <div class="row" style="margin-top:18px"><button class="btn primary" id="helpClose">知道了</button></div>
+  </div>
+</div>
+
+<!-- ── Conversation detail ── -->
+<div class="modal-scrim" id="convDetailScrim" role="dialog" aria-modal="true" aria-label="会话详情">
+  <div class="modal" style="max-width:760px;width:92%">
+    <div class="row-flex" style="justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+      <h3 id="convDetailTitle" style="margin:0">会话详情</h3>
+      <button class="btn ghost sm" onclick="closeConvDetail()">✕</button>
+    </div>
+    <div id="convDetailBody" style="max-height:70vh;overflow:auto;font-size:13px;line-height:1.7"></div>
   </div>
 </div>
 
@@ -757,6 +847,11 @@ async function fetchJSON(url, options) {
   const r = await fetch(url, options || {});
   if (!r.ok) throw new Error(`${url}: ${r.status}`);
   return r.json();
+}
+function escapeHtml(s) {
+  return (s == null ? '' : '' + s).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
 }
 
 /* ── UX layer: toast / confirm / skeleton ── */
@@ -806,6 +901,7 @@ const PAGES = {
   knowledge: { title: '知识库', crumb: 'AI 匹配与关键词检索', load: () => {} },
   projects:  { title: '项目',   crumb: '已对接项目与项目问答', load: refreshProjects },
   reports:   { title: '报告',   crumb: '日 / 周 / 月 / 年 报生成与预览', load: refreshReportsPage },
+  conversations:{ title: '会话', crumb: '历史会话浏览与详情回溯', load: refreshConversationsPage },
   suggestions:{ title: '优化建议', crumb: 'growth_analysis 审核工作流', load: refreshSuggestionsPage },
   ops:       { title: '系统运维', crumb: '诊断 / 完整性 / LLM / 拦截器 / 清理', load: refreshOpsPage },
 };
@@ -1015,9 +1111,17 @@ async function refreshHealth() {
 }
 
 /* ── Trends ── */
+let trendDays = 30;
+function setTrendDays(days) {
+  trendDays = days;
+  document.querySelectorAll('#trendRange .seg').forEach(b => {
+    b.classList.toggle('active', +b.dataset.days === days);
+  });
+  refreshTrends();
+}
 async function refreshTrends() {
   try {
-    const d = await fetchJSON('/api/trends/system');
+    const d = await fetchJSON('/api/trends/system?days=' + trendDays);
     const ts = d.timestamps || [], ss = d.sessions || [];
     const maxVal = Math.max(...ss, 1);
     let html = '';
@@ -1574,6 +1678,120 @@ function refreshCurrent() {
   if (cur) switchPage(cur.dataset.page);
 }
 
+/* ── Conversations (history browse) ── */
+let convOffset = 0;
+const CONV_LIMIT = 30;
+
+function convStatusBadge(status) {
+  const map = { active: ['进行中','blue'], completed: ['已完成','green'], failed: ['失败','red'] };
+  const [label, color] = map[status] || [status || '未知', 'muted'];
+  return '<span class="tag ' + color + '">' + escapeHtml(label) + '</span>';
+}
+function convFmtTime(ts) {
+  if (!ts) return '-';
+  const s = (ts + '').replace('T', ' ');
+  return s.length > 16 ? s.slice(0, 16) : s;
+}
+
+async function refreshConversationsPage() {
+  convOffset = 0;
+  await loadConvPage();
+}
+async function loadConvPage() {
+  const status = document.getElementById('convStatus').value;
+  const keyword = document.getElementById('convKeyword').value.trim();
+  const listEl = document.getElementById('convList');
+  const params = new URLSearchParams({ limit: CONV_LIMIT, offset: convOffset });
+  if (status) params.set('status', status);
+  if (keyword) params.set('keyword', keyword);
+  listEl.innerHTML = '<div class="empty">加载中...</div>';
+  try {
+    const d = await fetchJSON('/api/conversations?' + params.toString());
+    const data = d.data || {};
+    const items = data.items || [];
+    document.getElementById('convTotal').textContent = '共 ' + (data.total || 0) + ' 条';
+    if (!items.length) {
+      listEl.innerHTML = '<div class="empty">暂无会话记录</div>';
+      document.getElementById('convPager').innerHTML = '';
+      return;
+    }
+    listEl.innerHTML = items.map(c => (
+      '<div class="conv-row" onclick="viewConversation(\'' + encodeURIComponent(c.conversation_id) + '\')">' +
+        '<div class="conv-main">' +
+          '<div class="conv-title">' + escapeHtml(c.topic || c.conversation_id) + '</div>' +
+          '<div class="conv-sub">' + escapeHtml((c.user_intent || '').slice(0, 90)) + '</div>' +
+        '</div>' +
+        '<div class="conv-meta">' +
+          convStatusBadge(c.status) +
+          '<span class="conv-client">' + escapeHtml(c.client || '') + '</span>' +
+          '<span class="conv-time">' + convFmtTime(c.created_at) + '</span>' +
+          '<span class="conv-steps">' + (c.completed_steps || 0) + '/' + (c.total_steps || 0) + ' 步</span>' +
+        '</div>' +
+      '</div>'
+    )).join('');
+    renderConvPager(data.total || 0);
+  } catch (e) {
+    listEl.innerHTML = '<div class="empty">加载失败: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+function renderConvPager(total) {
+  const pager = document.getElementById('convPager');
+  const pages = Math.max(1, Math.ceil(total / CONV_LIMIT));
+  const cur = Math.floor(convOffset / CONV_LIMIT) + 1;
+  let html = '<button class="btn ghost sm" ' + (cur <= 1 ? 'disabled' : '') + ' onclick="convGo(' + (convOffset - CONV_LIMIT) + ')">上一页</button>';
+  html += '<span style="margin:0 8px;color:var(--text-2);font-size:12px">' + cur + ' / ' + pages + '</span>';
+  html += '<button class="btn ghost sm" ' + (cur >= pages ? 'disabled' : '') + ' onclick="convGo(' + (convOffset + CONV_LIMIT) + ')">下一页</button>';
+  pager.innerHTML = html;
+}
+function convGo(off) {
+  convOffset = Math.max(0, off);
+  loadConvPage();
+}
+async function viewConversation(id) {
+  const cid = decodeURIComponent(id);
+  try {
+    const d = await fetchJSON('/api/conversations/' + encodeURIComponent(cid));
+    if (d.code !== 0) { toast(d.message || '加载失败', 'err'); return; }
+    const data = d.data || {};
+    const conv = data.conversation || {};
+    const steps = data.steps || [];
+    const prog = data.progress || {};
+    const rows = steps.map((s, i) => (
+      '<tr>' +
+        '<td>' + (i + 1) + '</td>' +
+        '<td>' + escapeHtml(s.step_name || '') + '</td>' +
+        '<td>' + escapeHtml(s.step_type || '') + '</td>' +
+        '<td>' + convStatusBadge(s.status) + '</td>' +
+      '</tr>'
+    )).join('');
+    document.getElementById('convDetailTitle').textContent = conv.topic || cid;
+    document.getElementById('convDetailBody').innerHTML = (
+      '<div class="kv-grid">' +
+        '<div><span class="k">会话 ID</span><span class="v mono">' + escapeHtml(cid) + '</span></div>' +
+        '<div><span class="k">状态</span><span class="v">' + convStatusBadge(conv.status) + '</span></div>' +
+        '<div><span class="k">客户端</span><span class="v">' + escapeHtml(conv.client || '-') + '</span></div>' +
+        '<div><span class="k">任务类型</span><span class="v">' + escapeHtml(conv.task_type || '-') + '</span></div>' +
+        '<div><span class="k">复杂度</span><span class="v">' + escapeHtml(conv.complexity || '-') + '</span></div>' +
+        '<div><span class="k">进度</span><span class="v">' + (prog.completed || 0) + '/' + (prog.total || 0) + ' (' + (prog.percentage || 0) + '%)</span></div>' +
+        '<div><span class="k">创建时间</span><span class="v">' + escapeHtml(conv.created_at || '-') + '</span></div>' +
+        '<div><span class="k">更新时间</span><span class="v">' + escapeHtml(conv.updated_at || '-') + '</span></div>' +
+      '</div>' +
+      (conv.user_intent ? '<div class="conv-sec"><h4>用户意图</h4><p>' + escapeHtml(conv.user_intent) + '</p></div>' : '') +
+      (conv.ai_analysis ? '<div class="conv-sec"><h4>AI 分析</h4><p>' + escapeHtml(conv.ai_analysis) + '</p></div>' : '') +
+      (conv.self_reflection ? '<div class="conv-sec"><h4>自我反思</h4><p>' + escapeHtml(conv.self_reflection) + '</p></div>' : '') +
+      '<div class="conv-sec"><h4>步骤 (' + steps.length + ')</h4>' +
+        (rows ? '<table class="tbl"><thead><tr><th>#</th><th>名称</th><th>类型</th><th>状态</th></tr></thead><tbody>' + rows + '</tbody></table>' : '<div class="empty">无步骤记录</div>') +
+      '</div>'
+    );
+    document.getElementById('convDetailScrim').classList.add('open');
+  } catch (e) {
+    toast('请求失败: ' + e.message, 'err');
+  }
+}
+function closeConvDetail() {
+  document.getElementById('convDetailScrim').classList.remove('open');
+}
+
 // nav
 document.querySelectorAll('.nav-item').forEach(n => n.addEventListener('click', () => switchPage(n.dataset.page)));
 document.getElementById('refreshBtn').addEventListener('click', refreshCurrent);
@@ -1585,11 +1803,11 @@ document.getElementById('globalSearch').addEventListener('keydown', e => { if(e.
 // keyboard shortcuts
 document.addEventListener('keydown', e => {
   if (e.target.matches('input, textarea, select')) return;
-  if (e.key >= '1' && e.key <= '7') { const p = Object.keys(PAGES)[+e.key-1]; if(p) switchPage(p); }
+  if (e.key >= '1' && e.key <= '9') { const p = Object.keys(PAGES)[+e.key-1]; if(p) switchPage(p); }
   else if (e.key === 'r' || e.key === 'R') refreshCurrent();
   else if (e.key === '/') { e.preventDefault(); document.getElementById('globalSearch').focus(); }
   else if (e.key === '?') document.getElementById('helpScrim').classList.add('open');
-  else if (e.key === 'Escape') { document.getElementById('confirmScrim').classList.remove('open'); document.getElementById('helpScrim').classList.remove('open'); }
+  else if (e.key === 'Escape') { document.getElementById('confirmScrim').classList.remove('open'); document.getElementById('helpScrim').classList.remove('open'); document.getElementById('convDetailScrim').classList.remove('open'); }
 });
 
 // boot

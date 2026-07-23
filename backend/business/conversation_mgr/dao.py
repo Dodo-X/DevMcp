@@ -99,6 +99,47 @@ class ConversationDAO:
         )
         return dict(rows[0]) if rows else {}
 
+    def list_conversations(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        status: str = "",
+        task_type: str = "",
+        keyword: str = "",
+    ) -> tuple[list[dict[str, Any]], int]:
+        """分页列出会话历史（支持状态/类型/关键词筛选）
+
+        返回 (rows, total_count)
+        """
+        where = ["1 = 1"]
+        params: list = []
+        if status:
+            where.append("status = ?")
+            params.append(status)
+        if task_type:
+            where.append("task_type = ?")
+            params.append(task_type)
+        if keyword:
+            where.append("(topic LIKE ? OR user_intent LIKE ? OR conversation_id LIKE ?)")
+            params.extend([f"%{keyword}%", f"%{keyword}%", f"%{keyword}%"])
+        where_sql = " AND ".join(where)
+
+        total_row = self.db.query_local(
+            f"SELECT COUNT(*) as cnt FROM {TABLE_CONVERSATIONS} WHERE {where_sql}",
+            tuple(params),
+        )[0]
+        total = total_row["cnt"] or 0
+
+        rows = self.db.query_local(
+            f"SELECT conversation_id, timestamp, client, topic, task_type, "
+            f"user_intent, status, total_steps, completed_steps, created_at, "
+            f"updated_at, complexity, system_id "
+            f"FROM {TABLE_CONVERSATIONS} WHERE {where_sql} "
+            f"ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            tuple(params + [limit, offset]),
+        )
+        return rows or [], total
+
     def check_conversation_exists(self, conversation_id: str) -> bool:
         """检查会话是否存在"""
         rows = self.db.query_local(

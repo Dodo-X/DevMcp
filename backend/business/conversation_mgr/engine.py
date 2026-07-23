@@ -409,6 +409,29 @@ class ConversationEngine:
         """获取系统健康状态"""
         return self.dao.get_system_health()
 
+    def list_conversations(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        status: str = "",
+        task_type: str = "",
+        keyword: str = "",
+    ) -> dict:
+        """分页列出会话历史"""
+        rows, total = self.dao.list_conversations(
+            limit=limit,
+            offset=offset,
+            status=status,
+            task_type=task_type,
+            keyword=keyword,
+        )
+        return {
+            "items": [dict(r) for r in rows],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
     def get_known_domains(self) -> dict:
         """获取已知的技能领域映射"""
         try:
