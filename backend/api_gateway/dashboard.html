@@ -2038,8 +2038,31 @@ async function saveSettings() {
   } catch(e) { showToast({ text: '保存请求失败', type: 'error' }); }
 }
 
+/* ── Task progress SSE ── */
+let _sseConn = null;
+function connectTaskSSE() {
+  if (_sseConn) _sseConn.close();
+  _sseConn = new EventSource('/api/tasks/progress/stream');
+  _sseConn.onmessage = e => {
+    try {
+      const d = JSON.parse(e.data);
+      const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val ?? '-'; };
+      setVal('pendingTasks', d.pending_tasks);
+      setVal('runningTasks', d.running_tasks);
+      setVal('taskTotal', (d.pending_tasks||0)+(d.running_tasks||0)+(d.completed_tasks||0)+(d.failed_tasks||0));
+    } catch(ignored) {}
+  };
+  _sseConn.onerror = () => {
+    _sseConn && _sseConn.close();
+    _sseConn = null;
+    // 5 秒后重连
+    setTimeout(connectTaskSSE, 5000);
+  };
+}
+
 // boot
 refreshAll();
+connectTaskSSE();
 window._refreshTimer = setInterval(refreshAll, 30000);
 </script>
 </body>

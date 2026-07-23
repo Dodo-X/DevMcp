@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 logger = logging.getLogger(__name__)
 
@@ -1469,6 +1469,51 @@ def register_rest_routes(mcp):
                 "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
             )
             return JSONResponse(content={"error": str(e)}, status_code=500)
+
+    @mcp.custom_route("/api/tasks/progress/stream", methods=["GET"])
+    async def api_tasks_progress_stream(request: Request) -> StreamingResponse:
+        """SSE 推送任务队列进度（替代轮询）"""
+        import asyncio
+
+        async def event_stream():
+            from backend.core.database.base_conn import get_db
+            from backend.core.task_queue_kernel.queue_client import get_task_queue
+
+            tq = get_task_queue()
+            db = get_db()
+            while True:
+                try:
+                    # 收集任务状态
+                    stats = tq.get_stats()
+                    # 收集 pending analyses
+                    pa = db.query_local(
+                        "SELECT COUNT(*) as cnt FROM pending_analyses WHERE status = 'pending'"
+                    )
+                    pending_analysis = (pa[0]["cnt"] if pa else 0) if pa else 0
+
+                    data = {
+                        "pending_tasks": stats.get("pending_tasks", 0),
+                        "running_tasks": stats.get("running_tasks", 0),
+                        "completed_tasks": stats.get("completed_tasks", 0),
+                        "failed_tasks": stats.get("failed_tasks", 0),
+                        "pending_analysis": pending_analysis,
+                    }
+                    import json as _json
+
+                    yield f"data: {_json.dumps(data)}\n\n"
+                except Exception:
+                    yield f"data: {_json.dumps({})}\n\n"
+                await asyncio.sleep(5)  # 每 5 秒推送
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @mcp.custom_route("/api/tasks/cleanup-pending", methods=["POST"])
     async def api_tasks_cleanup_pending(request: Request) -> JSONResponse:
