@@ -54,7 +54,6 @@ DEDUP_KEYS: dict[str, str] = {
     "profile_update": "conversation_id",
     "knowledge_extraction": "conversation_id",
     "system_optimization": "conversation_id",
-    "behavior_signals_extraction": "conversation_id",
     "daily_summary": "target_date",
     "daily_export": "target_date",
     # vault_export 系列：各自按唯一标识去重
@@ -76,7 +75,6 @@ DEPENDENCY_LEVEL: dict[str, int] = {
     "profile_update": 2,
     "knowledge_extraction": 2,
     "system_optimization": 2,
-    "behavior_signals_extraction": 2,
     "daily_summary": 3,
     "daily_export": 3,
     "vault_export_daily": 4,

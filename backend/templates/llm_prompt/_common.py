@@ -128,27 +128,232 @@ def parse_json(raw: str, fallback: dict = None):
     return fallback or {"raw_response": raw[:500], "parse_error": True}
 
 
-def normalize_analysis(parsed: dict) -> dict:
-    """标准化对话分析结果（含 user_traits 9 维度完整传递）"""
-    raw_traits = parsed.get("user_traits", {})
+def extract_behavior_signals(
+    user_raw_input: str,
+    ai_analysis: str = "",
+    topic: str = "",
+    task_type: str = "",
+) -> dict:
+    """Python 代码替代 TASK_BEHAVIOR_SIGNALS LLM 调用。
+
+    原来 LLM 做的所有事情都是简单的关键词/正则匹配，
+    不需要浪费一次 LLM round-trip。直接在 Python 中完成，
+    确定性 100%、延迟 0ms、token 消耗 0。
+
+    Returns:
+        dict: 与原 TASK_BEHAVIOR_SIGNALS 输出格式完全一致
+    """
+    from datetime import datetime
+
+    raw = user_raw_input or ""
+    ai = ai_analysis or ""
+
+    # ── 关键词检测（从用户原始输入中检测） ──
+    _ERROR_KEYWORDS = [
+        "error",
+        "错误",
+        "exception",
+        "异常",
+        "bug",
+        "崩溃",
+        "crash",
+        "failed",
+        "失败",
+        "traceback",
+        "stacktrace",
+        "报错",
+    ]
+    _DEBUG_KEYWORDS = [
+        "debug",
+        "调试",
+        "排查",
+        "定位",
+        "log",
+        "日志",
+        "断点",
+        "breakpoint",
+        "调试器",
+        "debugger",
+        "print",
+        "console.log",
+    ]
+    _DESIGN_KEYWORDS = [
+        "设计",
+        "架构",
+        "design",
+        "architecture",
+        "模式",
+        "pattern",
+        "重构",
+        "refactor",
+        "规划",
+        "方案",
+    ]
+    _OPTIMIZE_KEYWORDS = [
+        "优化",
+        "optimize",
+        "性能",
+        "performance",
+        "提速",
+        "加速",
+        "瓶颈",
+        "bottleneck",
+        "慢",
+        "slow",
+    ]
+    _LEARN_KEYWORDS = [
+        "学习",
+        "learn",
+        "教程",
+        "tutorial",
+        "入门",
+        "入门",
+        "了解",
+        "理解",
+        "原理",
+        "概念",
+        "讲解",
+    ]
+
+    def _has_kw(text: str, keywords: list[str]) -> bool:
+        lower = text.lower()
+        return any(kw in lower for kw in keywords)
+
+    has_code_block = bool(re.search(r"```|`[^`]+`", raw))
+    has_question_mark = "?" in raw or "？" in raw or "怎么" in raw or "如何" in raw
+    has_error_keyword = _has_kw(raw, _ERROR_KEYWORDS)
+    has_debug_keyword = _has_kw(raw, _DEBUG_KEYWORDS)
+    has_design_keyword = _has_kw(raw, _DESIGN_KEYWORDS)
+    has_optimize_keyword = _has_kw(raw, _OPTIMIZE_KEYWORDS)
+    has_learn_keyword = _has_kw(raw, _LEARN_KEYWORDS)
+
+    # ── 语言推断（从 AI 分析中推断） ──
+    _LANG_MAP = {
+        "python": "python",
+        "django": "python",
+        "flask": "python",
+        "fastapi": "python",
+        "pytest": "python",
+        "pip": "python",
+        "conda": "python",
+        "javascript": "javascript",
+        "js": "javascript",
+        "typescript": "javascript",
+        "ts": "javascript",
+        "react": "javascript",
+        "vue": "javascript",
+        "angular": "javascript",
+        "node": "javascript",
+        "npm": "javascript",
+        "java": "java",
+        "spring": "java",
+        "maven": "java",
+        "gradle": "java",
+        "kotlin": "java",
+        "rust": "rust",
+        "cargo": "rust",
+        "go": "go",
+        "golang": "go",
+        "sql": "sql",
+        "sqlite": "sql",
+        "mysql": "sql",
+        "postgres": "sql",
+        "docker": "devops",
+        "kubernetes": "devops",
+        "k8s": "devops",
+        "nginx": "devops",
+        "linux": "devops",
+        "git": "devops",
+    }
+    language_hints = []
+    combined = (raw + " " + ai).lower()
+    seen = set()
+    for keyword, lang in _LANG_MAP.items():
+        if keyword in combined and lang not in seen:
+            language_hints.append(lang)
+            seen.add(lang)
+    if not language_hints:
+        language_hints = ["unknown"]
+
+    # ── 技术领域 ──
+    _DOMAIN_KEYWORDS = {
+        "Python": ["python", "django", "fastapi", "flask", "pytest", "pip", "conda"],
+        "前端": [
+            "react",
+            "vue",
+            "angular",
+            "javascript",
+            "typescript",
+            "html",
+            "css",
+            "webpack",
+            "vite",
+        ],
+        "AI/LLM": ["llm", "gpt", "ollama", "mcp", "prompt", "rag", "agent", "model", "transformer"],
+        "DevOps": ["docker", "kubernetes", "nginx", "linux", "deploy", "ci/cd", "github actions"],
+        "数据库": ["sql", "sqlite", "mysql", "postgres", "redis", "mongodb", "wal", "index"],
+        "架构设计": [
+            "architecture",
+            "design",
+            "pattern",
+            "refactor",
+            "microservice",
+            "async",
+            "concurrent",
+        ],
+        "通用工程": ["test", "debug", "security", "logging", "refactor", "review", "lint"],
+    }
+    tech_domain = "通用工程"
+    for domain, kws in _DOMAIN_KEYWORDS.items():
+        if any(kw in combined for kw in kws):
+            tech_domain = domain
+            break
+
+    # ── 技能等级推断 ──
+    skill_level = "intermediate"
+    if any(w in combined for w in ["基础", "入门", "beginner", "新手", "简单", "hello world"]):
+        skill_level = "beginner"
+    elif any(w in combined for w in ["架构", "高级", "expert", "精通", "深入", "底层原理", "优化"]):
+        skill_level = "advanced"
+
+    # ── 紧迫度推断 ──
+    urgency = "normal"
+    if any(
+        w in raw.lower()
+        for w in ["紧急", "urgent", "尽快", "马上", "立刻", "急", "critical", "asap"]
+    ):
+        urgency = "urgent"
+
     return {
+        "input_length": len(raw),
+        "has_code_block": has_code_block,
+        "has_question_mark": has_question_mark,
+        "has_error_keyword": has_error_keyword,
+        "has_debug_keyword": has_debug_keyword,
+        "has_design_keyword": has_design_keyword,
+        "has_optimize_keyword": has_optimize_keyword,
+        "has_learn_keyword": has_learn_keyword,
+        "language_hints": language_hints[:5],
+        "tech_domain": tech_domain,
+        "user_skill_level_hint": skill_level,
+        "user_urgency": urgency,
+        "generated_at": datetime.now().isoformat(),
+        "source": "python_behavior_signals",
+    }
+
+
+def normalize_analysis(parsed: dict) -> dict:
+    """标准化对话分析结果（v9.11 简化版：4 核心字段）
+
+    user_traits 和 tool_gaps 已从 TASK_CONVERSATION_ANALYSIS 输出中移除
+    （分别由 TASK_CONV_USER_PROFILE 和确定性 Python 逻辑处理）。
+    此函数现仅处理 conversation_analysis 的简化输出 schema。
+    """
+    return {
+        "summary": parsed.get("summary", ""),
         "skill_domains": parsed.get("skill_domains", []),
         "complexity": parsed.get("complexity", "medium"),
-        "feedback_type": parsed.get("feedback_type", "none"),
-        "user_traits": {
-            "skills_observed": raw_traits.get("skills_observed", []),
-            "behavior_notes": raw_traits.get("behavior_notes", ""),
-            "mistakes": raw_traits.get("mistakes", []),
-            "strengths": raw_traits.get("strengths", []),
-            "communication_style": raw_traits.get("communication_style", ""),
-            "decision_pattern": raw_traits.get("decision_pattern", ""),
-            "tech_interests": raw_traits.get("tech_interests", []),
-            "areas_for_growth": raw_traits.get("areas_for_growth", []),
-            "emotional_state": raw_traits.get("emotional_state", "平静"),
-            "learning_progress": raw_traits.get("learning_progress", ""),
-        },
-        "tool_gaps": parsed.get("tool_gaps", []),
-        "summary": parsed.get("summary", ""),
+        "user_feedback": parsed.get("user_feedback", {}),
     }
 
 

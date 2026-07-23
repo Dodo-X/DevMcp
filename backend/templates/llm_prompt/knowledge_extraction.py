@@ -13,30 +13,17 @@ def _parse_knowledge_extraction(raw: str) -> list:
 TASK_KNOWLEDGE_EXTRACTION = AnalysisTask(
     name="knowledge_extraction",
     description="从对话中提取技能知识点和业务知识点",
-    prompt_template="""你是一个知识提取专家。请从以下对话中提取**技能知识点**和**业务知识点**。
+    prompt_template="""从以下对话中提取**技能知识点**和**业务知识点**。
 
 项目名称：{project_name}
 
-## domain 字段归类规则（v9.3 强化）
+## domain 归类规则
+- type=skill 时，domain 必须从标准领域选择：Python | 前端 | AI/LLM | DevOps | 数据库 | 架构设计 | 通用工程
+- type=business 时，domain 必须填写 "{project_name}"
+- 技能知识：通用编程技巧、框架、工具使用方法
+- 业务知识：与项目 {project_name} 直接相关的业务规则、决策、流程、配置
 
-### type=skill 时，domain 必须从以下标准领域中选择一个，不要自创领域名：
-- **Python**：Python语法、包管理、Django/FastAPI/Flask、pytest、Python调试
-- **前端**：HTML/CSS/JavaScript/TypeScript、React/Vue、前端调试、前后端联调
-- **AI/LLM**：LLM应用、Prompt Engineering、RAG、Agent、MCP协议、Ollama、AI/ML框架
-- **DevOps**：Docker/Kubernetes、CI/CD、Linux运维、Git/GitHub
-- **数据库**：SQL/SQLite/MySQL/PostgreSQL/Redis、WAL模式、索引优化
-- **架构设计**：系统架构、设计模式、微服务、并发编程、异步设计、重构
-- **通用工程**：代码质量、安全、调试、测试、文档、问题定位
-
-### type=business 时，domain **必须**填写项目名 "{project_name}"
-
-### 其他要求
-- 技能知识：通用的编程技巧、框架、工具使用方法等。
-- 业务知识：与项目 {project_name} 直接相关的业务规则、决策、流程、配置等。
-- 每个知识点输出 JSON 格式，包含 title, content, category, tags (数组), difficulty, aliases (别名数组)。
-- 分析每个新知识点与以下**已有知识标题**的关联，在 related_titles 中列出你认为相关的已有标题（最多5个）。
-
-已有知识标题列表：
+## 已有知识标题（最多 200 条，超出已截断）
 {existing_titles_list}
 
 ## 对话内容
@@ -46,7 +33,7 @@ TASK_KNOWLEDGE_EXTRACTION = AnalysisTask(
 [
   {{
     "type": "skill/business",
-    "domain": "标准技术领域名 或 项目名 {project_name}",
+    "domain": "标准技术领域名 或 {project_name}",
     "title": "...",
     "content": "...",
     "category": "...",

@@ -661,7 +661,6 @@ class LLMEngine:
         symptom: str = "",
         root_cause: str = "",
         solution: str = "",
-        ai_reasoning: str = "",
         user_requirement: str = "",
         commands_executed: str = "",
         on_progress: callable = None,
@@ -681,7 +680,6 @@ class LLMEngine:
             symptom=symptom or "none",
             root_cause=root_cause or "none",
             solution=solution or "none",
-            ai_reasoning=ai_reasoning or "none",
             user_requirement=user_requirement or "none",
             commands_executed=commands_executed or "none",
             content=content[: TASK_STEP_ANALYSIS.input_truncate],
@@ -694,26 +692,31 @@ class LLMEngine:
     def _prepare_business_tech_kwargs(
         self, topic, system_id, project_context, user_raw_input, summary, key_decisions, ai_analysis
     ):
-        """v9.8.1: 模块一专用参数 — 项目上下文 + 用户原始输入 + 对话摘要 + 关键决策 + AI意图分析"""
+        """v9.11: 模块一专用参数 — 精简版（合并 summary+key_decisions 为 compact_context，
+        各字段截断收紧：project_context[:1500], user_raw_input[:3000], ai_analysis[:5000])"""
         from backend.templates.llm_prompt._common import compact_json
+
+        # summary 和 key_decisions 合并为 compact_context，减少重复输入
+        summary_part = (summary or "")[:500]
+        decisions_part = compact_json(key_decisions or [], max_chars=1000)
+        compact_context = f"摘要: {summary_part}\n关键决策: {decisions_part}"
 
         return {
             "topic": topic or "未知主题",
             "system_id": system_id or "default",
-            "project_context": project_context[:2000]
+            "project_context": project_context[:1500]
             if project_context
             else "（无项目上下文信息）",
-            "user_raw_input": user_raw_input[:5000] if user_raw_input else "（无用户原始输入）",
-            "summary": summary or "（无对话摘要）",
-            "key_decisions": compact_json(key_decisions or [], max_chars=2000),
-            "ai_analysis": ai_analysis[:10000] if ai_analysis else "（无AI意图分析）",
+            "user_raw_input": user_raw_input[:3000] if user_raw_input else "（无用户原始输入）",
+            "compact_context": compact_context,
+            "ai_analysis": ai_analysis[:5000] if ai_analysis else "（无AI意图分析）",
         }
 
     def _prepare_user_profile_kwargs(self, user_raw_input, ai_analysis):
-        """v9.8.1: 模块二专用参数 — 用户原始输入 + AI意图分析"""
+        """v9.11: 模块二专用参数 — 截断收紧（user_raw_input[:3000], ai_analysis[:5000])"""
         return {
-            "user_raw_input": user_raw_input[:5000] if user_raw_input else "（无用户原始输入）",
-            "ai_analysis": ai_analysis[:10000] if ai_analysis else "（无AI意图分析）",
+            "user_raw_input": user_raw_input[:3000] if user_raw_input else "（无用户原始输入）",
+            "ai_analysis": ai_analysis[:5000] if ai_analysis else "（无AI意图分析）",
         }
 
     def analyze_business_tech(
@@ -920,6 +923,12 @@ class LLMEngine:
 
                 skill_domain = normalize_domain(skill_domain)
 
+                # v9.11: estimated_hours 和 growth_trend 改为 Python 确定性计算，不再依赖 LLM
+                # estimated_hours = 已出现次数 × 0.3h（每出现一次估 0.3h 学习时间）
+                # growth_trend = 最近出现次数 > 1 → growing，否则 stable
+                estimated_hours = 0.3  # 首次出现默认值
+                growth_trend = "growing"  # 首次出现默认 growing
+
                 # ★ 增量合并逻辑
                 merge_result = self._merge_skill_incremental(
                     db=db,
@@ -932,8 +941,8 @@ class LLMEngine:
                         "evidence_text": processed.get(
                             "evidence_text", f"从对话中观察到 {skill_name} 技能"
                         ),
-                        "estimated_hours": processed.get("estimated_hours", 0.3),
-                        "growth_trend": processed.get("growth_trend", "growing"),
+                        "estimated_hours": estimated_hours,
+                        "growth_trend": growth_trend,
                         "source_conversation_id": conversations_id,
                         "source_timestamp": datetime.now().isoformat(),
                         "extraction_method": source,

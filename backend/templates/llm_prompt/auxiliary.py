@@ -51,7 +51,7 @@ AI 复盘总结：{ai_summary}
 TASK_USER_TRAITS_ENRICH = AnalysisTask(
     name="user_traits_enrich",
     description="用户特征智能拆分和丰富",
-    prompt_template="""请处理以下用户特征数据，进行智能拆分和丰富：
+    prompt_template="""处理以下用户特征数据，进行智能拆分和丰富：
 
 原始特征数据：
 ```json
@@ -59,15 +59,18 @@ TASK_USER_TRAITS_ENRICH = AnalysisTask(
 ```
 
 请输出处理后的 JSON，在原始结构基础上补充以下字段：
-- skill_level: 用户综合技能等级（beginner/intermediate/advanced/expert）
+- skill_level: 用户综合技能等级（beginner/intermediate/advanced/expert），基于已观察技能的数量和深度推断
 - related_skills: 与已观察技能相关的子技能列表
 - evidence_text: 自然语言证据描述
-- estimated_hours: 估算该技能已投入的学习时间（小时）
-- growth_trend: 成长趋势（growing/stable/declining）
+
+注意：
+- skill_level 基于对话中实际展现的能力推断，不要猜测
+- related_skills 列出与已观察技能直接相关的子技能（有依据的）
+- evidence_text 用自然语言描述用户在对话中展现的具体能力证据
 
 只输出 JSON。""",
     parser=parse_json,
-    max_tokens=1024,
+    max_tokens=512,
     input_truncate=4000,
 )
 

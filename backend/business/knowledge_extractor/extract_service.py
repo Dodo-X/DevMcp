@@ -78,13 +78,19 @@ class KnowledgeExtractor:
 
                 existing_titles = self._get_all_titles()
 
+                # v9.11: 限制 existing_titles_list 最多 200 条，防止 token bomb
+                titles_for_prompt = existing_titles[:200]
+                existing_titles_str = "\n".join(f"- {t}" for t in titles_for_prompt)
+                if len(existing_titles) > 200:
+                    existing_titles_str += f"\n... (共 {len(existing_titles)} 条，仅展示前 200 条)"
+
                 from backend.templates.llm_prompt import TASK_KNOWLEDGE_EXTRACTION, run_analysis
 
                 parsed = run_analysis(
                     TASK_KNOWLEDGE_EXTRACTION,
                     project_name=project_name,
-                    existing_titles_list="\n".join(f"- {t}" for t in existing_titles)
-                    if existing_titles
+                    existing_titles_list=existing_titles_str
+                    if existing_titles_str
                     else "（暂无已有知识）",
                     conversation_text=conversation_text,
                 )

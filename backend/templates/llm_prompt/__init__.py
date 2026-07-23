@@ -1,5 +1,6 @@
 from backend.templates.llm_prompt._common import (
     AnalysisTask,
+    extract_behavior_signals,
     normalize_analysis,
     parse_json,
     run_analysis,
@@ -37,13 +38,7 @@ from backend.templates.llm_prompt.schema import TASK_SCHEMA_ANALYSIS
 # 周/月/年/成长报告从未真正生成。现已在 reports_prompts.py 补回并注册。
 from backend.templates.llm_prompt.self_improvement import TASK_SELF_IMPROVEMENT
 from backend.templates.llm_prompt.step import TASK_STEP_ANALYSIS
-from backend.templates.llm_prompt.user_profile import (
-    ANALYSIS_GUIDELINES,
-    FEW_SHOT_EXAMPLES,
-    PROJECT_STRATEGY,
-    TASK_USER_PROFILE_ANALYSIS,
-    USER_TRAITS_SCHEMA,
-)
+from backend.templates.llm_prompt.user_profile import TASK_USER_PROFILE_ANALYSIS
 
 TASK_REGISTRY = {
     "conversation_analysis": TASK_CONVERSATION_ANALYSIS,
