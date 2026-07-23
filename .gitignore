@@ -171,3 +171,5 @@ scripts/_fix_engine*.py
 scripts/_gen_prompts.py
 scripts/_rebuild_engine*.py
 scripts/_restore_engine.py
+scripts/_probe_*.py
+scripts/_verify_*.py
