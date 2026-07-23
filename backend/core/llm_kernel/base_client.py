@@ -563,9 +563,10 @@ class LLMEngine:
         _heartbeat_stop = threading.Event()
         _heartbeat_last_full = [""]
         _heartbeat_last_count = [0]
+        _heartbeat_warn_count = [0]  # 连续无 token 检测次数
 
         def _heartbeat():
-            """心跳线程：每 60s 确认 Ollama 仍在活跃生成，防止误判为卡死"""
+            """心跳线程：分级告警，区分 prefill 阶段 vs 真正卡死"""
             while not _heartbeat_stop.is_set():
                 _heartbeat_stop.wait(60)
                 if _heartbeat_stop.is_set():
@@ -574,6 +575,7 @@ class LLMEngine:
                 if partial != _heartbeat_last_full[0] or token_count > _heartbeat_last_count[0]:
                     _heartbeat_last_full[0] = partial
                     _heartbeat_last_count[0] = token_count
+                    _heartbeat_warn_count[0] = 0  # 有产出，重置
                     progress = min(token_count / max(1, max_tokens), 0.99)
                     try:
                         if on_progress:
@@ -581,9 +583,20 @@ class LLMEngine:
                     except Exception:
                         pass
                 else:
-                    logger.warning(
-                        f"⚠️ Ollama 心跳: 过去 60s 无新 token (已产出 {token_count} tokens)"
-                    )
+                    _heartbeat_warn_count[0] += 1
+                    wc = _heartbeat_warn_count[0]
+                    if token_count == 0 and wc <= 3:
+                        logger.info(
+                            f"⏳ Ollama prefill 中: 已等待 {wc * 60}s, prompt 较大概率需更多时间"
+                        )
+                    elif token_count == 0 and wc > 3:
+                        logger.warning(
+                            f"⚠️ Ollama 可能卡死: {wc * 60}s 无任何 token 产出, 请检查 Ollama 进程"
+                        )
+                    elif token_count > 0:
+                        logger.info(
+                            f"💭 Ollama 正在处理: 已产出 {token_count} tokens, 过去 60s 无新 token (可能大型推理)"
+                        )
 
         _heartbeat_thread = threading.Thread(target=_heartbeat, daemon=True, name="ollama_heartbeat")
         _heartbeat_thread.start()
