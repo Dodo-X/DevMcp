@@ -3,8 +3,6 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/devpartner.iml" filepath="$PROJECT_DIR$/.idea/devpartner.iml" />
-      <module fileurl="file://$PROJECT_DIR$/.idea/devpartner-agent.iml" filepath="$PROJECT_DIR$/.idea/devpartner-agent.iml" />
-      <module fileurl="file://$PROJECT_DIR$/.idea/devpartner-tools.iml" filepath="$PROJECT_DIR$/.idea/devpartner-tools.iml" />
     </modules>
   </component>
 </project>

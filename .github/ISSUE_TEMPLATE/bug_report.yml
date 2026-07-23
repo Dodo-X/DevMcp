@@ -1,0 +1,46 @@
+name: Bug Report / 缺陷报告
+description: 报告一个可复现的缺陷
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: symptom
+    attributes:
+      label: 现象 (Symptom)
+      description: 用户可见的异常行为
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现步骤 (Steps to reproduce)
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为 (Expected)
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: 环境 (Environment)
+      placeholder: |
+        OS / Python 版本 / 提交哈希 / 部署方式
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志与堆栈 (Logs)
+      render: shell
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 已搜索历史 Issue，确认不是重复问题
+        - label: 已脱敏，不含密钥/个人信息

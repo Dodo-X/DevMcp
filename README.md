@@ -1,7 +1,7 @@
-﻿# DevPartner v9.5 - AI 驱动的开发者智能伴侣
+﻿# DevPartner - AI 驱动的开发者智能伴侣
 
 <p align="center">
-  <strong>基于本地 Ollama (Qwen3 等) 的全栈开发辅助系统</strong><br>
+  <strong>基于本地 Ollama (Qwen) 的全栈开发辅助系统</strong><br>
   <em>对话管理 · 知识沉淀 · 自我进化 · MCP 工具集成</em>
 </p>
 
@@ -9,34 +9,33 @@
 
 ## ✨ 核心特性
 
-### 🏗️ Engine Pattern 架构 (v8.3)
-- **领域引擎模式**: 5 个独立 Engine 按业务域封装，server.py 仅 ~380 行薄壳入口
-- **统一装饰器**: `@mcp_tool_handler` 消除样板代码
-- **关注点分离**: core/ 有状态引擎 vs services/ 无状态工具 vs routes/ HTTP 端点
-- **可插拔注册**: 每个 Engine 自带 `register_*_tools(mcp)` 函数，按需加载
+### 🏗️ 分层架构 (v9.5.5)
+- **`foundation/`**: 全局基础框架（配置 / 日志 / 埋点 / 异常 / 统一返回体 / 通用工具），与业务解耦，可独立复用。
+- **`backend/`**: 后端业务层，分 `core`（底层引擎）/ `business`（业务服务）/ `api_gateway`（HTTP 网关）/ `templates`（Prompt 与 MD 模板）。
+- **`mcp_service/`**: MCP 薄壳模块，通过注解暴露工具，**与 Web 网关互不冲突**，共用 `foundation/` + `backend/` 底层。
+- **`frontend/`**: 前后端分离预留位置（尚未构建）。
 
-### 🤖 LLM 驱动架构 (v7.3.0+)
-- **零硬编码**: 所有数据分析由本地 Ollama 模型智能推理
-- **统一提示词工程**: 结构化 Prompt 确保输出精准可控
-- **双模式运行**: LLM 可用时智能分析，不可用时优雅降级
-- **代码精简 93%**: 从 3600+ 行硬编码 → ~150 行 LLM 调用
-- **引擎切换**: v7.3.0 起推理引擎由 llama-cpp-python 迁移至本地 Ollama HTTP API
+### 🤖 LLM 驱动架构
+- **零硬编码**: 所有数据分析由本地 Ollama 模型智能推理。
+- **统一提示词工程**: Prompt 集中在 `backend/templates/llm_prompt/`，支持热重载。
+- **双模式运行**: LLM 可用时智能分析，不可用时优雅降级。
+- **引擎切换**: 推理引擎基于本地 Ollama HTTP API。
 
 ### 🎯 核心能力
 1. **对话智能分析** - 自动识别技能领域、复杂度、用户反馈
 2. **每日工作总结** - LLM 生成专业日报（非模板化）
 3. **自我迭代优化** - 基于数据驱动的系统改进建议
 4. **用户画像融合** - 动态构建开发者能力模型
-5. **MCP 工具集成** - 42 个开发工具无缝调用
+5. **MCP 工具集成** - 对话记录三件套工具无缝调用
 6. **知识图谱** - 自动沉淀和关联知识点
 
 ### 🏗️ 技术栈
 | 组件 | 技术选型 | 说明 |
 |------|---------|------|
 | 推理引擎 | Ollama (本地 HTTP API) | 统一模型管理，无需 GGUF 文件 |
-| LLM 模型 | Qwen3 (ollama pull) | 由 Ollama 管理，推荐 qwen3 / qwen2.5 |
+| LLM 模型 | Qwen (ollama pull) | 由 Ollama 管理，推荐 qwen2.5 / qwen3 |
 | 数据库 | SQLite 3.x (WAL) | 轻量级，零配置 |
-| Web Dashboard | HTML + JavaScript | 运维监控面板（系统/任务队列） |
+| Web Dashboard | HTML + JavaScript | 运维监控面板（系统 / 任务队列） |
 | 部署方案 | Docker / 本地运行 | 支持容器化和裸机部署 |
 
 ---
@@ -51,59 +50,51 @@
 ### Step 1: 安装依赖与模型
 
 ```bash
-# 克隆项目
-git clone https://github.com/your-repo/devpartner.git
-cd devpartner
-
-# 创建虚拟环境（推荐）
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# 或 venv\Scripts\activate  # Windows
-
 # 安装项目依赖（Ollama 推理通过标准库 urllib，无需额外推理库）
 pip install -r requirements.txt
 
 # 安装并启动 Ollama（单独进程），拉取推理模型
-ollama pull qwen3        # 推荐；可在 config.yaml 的 llm.ollama_model 调整
+ollama pull qwen2.5        # 推荐；可在 foundation/config/config.yaml 的 llm.ollama_model 调整
 ```
 
 ### Step 2: 配置系统
 
-编辑 `devpartner_agent/config.yaml`:
+编辑 `foundation/config/config.yaml`:
 
 ```yaml
 llm:
   enabled: true
-  ollama_model: "qwen3"   # Ollama 中已拉取的模型名（ollama list 查看）
-  ollama_timeout: 120     # 推理超时（秒）
-  max_tokens: 2048        # 最大生成长度
-  temperature: 0.3        # 生成温度（低值更确定）
-  fallback_to_rules: true # Ollama 不可用时降级到规则引擎
+  ollama_model: "qwen2.5"  # Ollama 中已拉取的模型名（ollama list 查看）
+  ollama_timeout: 120      # 推理超时（秒）
+  max_tokens: 2048         # 最大生成长度
+  temperature: 0.3         # 生成温度（低值更确定）
+  fallback_to_rules: true  # Ollama 不可用时降级到规则引擎
 ```
 
-### Step 4: 启动服务
+### Step 3: 启动服务
 
 ```bash
-# 方式 A: 直接启动（开发模式）
-python server.py
+# 方式 A: 统一入口（推荐，开发模式）
+python main.py 7860
 
-# 方式 B: Docker 部署（生产模式）
+# 方式 B: 直接启动 MCP 模块
+python -m mcp_service.mcp_server 7860
+
+# 方式 C: Docker 部署（生产模式）
 docker-compose up -d
-
-# 方式 C: 仅启动 Agent（无 Web UI）
-cd devpartner_agent
-python -m server
 ```
 
 **预期输出**:
 ```
 ============================================================
-  DevPartner v8.3 (Engine Pattern)
-  架构: server.py(薄壳) → core/*_engine.py(业务)
+  DevPartner v9.5.5 (Engine Pattern)
+  架构: mcp_service/mcp_server.py(薄壳) → backend/*(业务)
 ============================================================
 
-  工具层: 42 个工具已注册
+  MCP工具: 3 个 (3核心 + 0通用)
+  Prompts: 5 个 Prompt 已注册
   管家层: 已加载
+  LLM并行: OLLAMA_NUM_PARALLEL=1
 
   启动模式: MCP 服务 (Streamable HTTP)
   运行环境: 本地开发
@@ -114,16 +105,12 @@ python -m server
 ============================================================
 ```
 
-### Step 5: 验证安装
+### Step 4: 验证安装
 
 访问 http://localhost:7860/dashboard 查看 Dashboard，或运行测试：
 
 ```bash
-# 运行核心功能测试
-python tests/test_basic_functionality.py
-
-# 测试 LLM 分析引擎
-python tests/test_llm_analyzer.py
+pytest tests/ -v
 ```
 
 ---
@@ -131,123 +118,129 @@ python tests/test_llm_analyzer.py
 ## 📁 项目结构
 
 ```
-devPartner/
-├── README.md                          # ← 你在这里（主文档）
-├── CHANGELOG.md                       # 版本迭代记录
+devPartner/                              # 根目录（包名不变）
+├── README.md                            # ← 主文档
+├── PROJECT_STRUCTURE.md                 # 项目导航指南
+├── CHANGELOG.md                         # 版本迭代记录
 │
-├── server.py                          # 🚀 MCP 薄壳入口 (~380行)
-│                                      #    4 个核心 @mcp.tool + 引擎注册
+├── main.py                              # 🚀 统一启动入口（runpy 代理到 mcp_service）
+├── mcp_service/                         # 🔌 MCP 薄壳模块（注解暴露工具）
+│   ├── mcp_server.py                    #    FastMCP 入口：3 个核心 @mcp.tool + 注册
+│   └── __init__.py
 │
-├── devpartner_agent/                  # 🎯 核心 Agent 系统
-│   ├── core/                          #    ├─ 核心引擎层 (有状态, 单例)
-│   │   ├── conversation_engine.py     #    │  ⭐ 对话引擎 (总分三步走)
-│   │   ├── knowledge_engine.py        #    │  📚 知识引擎 (图谱+检索, 4工具)
-│   │   ├── system_engine.py           #    │  🔧 系统引擎 (诊断+清理, 6工具)
-│   │   ├── daily_engine.py            #    │  📋 日报引擎 (总结+日志, 9工具)
-│   │   ├── optimization_engine.py     #    │  🔄 优化引擎 (反馈+闭环, 2工具)
-│   │   ├── llm_engine.py              #    │  🤖 LLM 推理引擎 (Ollama)
-│   │   ├── bootstrap.py               #    │  🏗️ 启动与初始化
-│   │   ├── decorators.py              #    │  🎯 @mcp_tool_handler 统一装饰器
-│   │   ├── database.py                #    │  💾 数据库操作
-│   │   └── config.py                  #    │  ⚙️ 配置管理
-│   │
-│   ├── routes/                        #    ├─ HTTP 路由层
-│   │   └── rest_api.py                #    │  REST API 端点 (/dashboard, /health, /api/*)
-│   │
-│   ├── services/                      #    ├─ 无状态服务层
-│   │   ├── task_queue.py              #    │  异步任务队列
-│   │   ├── knowledge_graph.py         #    │  知识图谱服务
-│   │   ├── callback_registry.py       #    │  回调注册表
-│   │   ├── cleanup_service.py         #    │  清理调度器
-│   │   ├── vault_exporter.py          #    │  Obsidian 导出
-│   │   └── ...                        #    └─ 其他无状态服务
-│   │
-│   ├── skills/                        #    ├─ 技能模块
-│   │   └── daily_summary.py           #    │  日报生成技能
-│   │
-│   └── config.yaml                    #    Agent 配置文件
+├── foundation/                          # 🏗️ 全局基础框架（与业务无关，可独立复用）
+│   ├── config/                          #    配置（app_settings / error_code / path_settings）
+│   │   └── config.yaml                  #    运行时配置
+│   ├── logger_framework/                #    日志框架（setup_logging / get_logger）
+│   ├── trace_tracker/                   #    埋点追踪（contextvars + span + 计数器）
+│   ├── exception_framework/             #    异常框架（BizException / 全局捕获 / 渲染）
+│   ├── api_response/                    #    统一返回体（BaseResponse / PageResponse / 工厂）
+│   └── common_utils/                    #    通用工具（json/text/time/file/schema/decorators）
 │
-├── devpartner_tools/                  # 🔧 MCP 工具集 (无状态, 17个纯工具)
-│   └── tools/
-│       ├── filesystem.py              #    文件系统操作 (5个工具)
-│       ├── web_requests.py            #    HTTP 请求 (3个工具)
-│       ├── system_utils.py            #    系统工具 (4个工具)
-│       └── growth_analytics.py        #    成长分析 (5个工具)
+├── backend/                             # 🎯 后端业务层（核心大脑）
+│   ├── core/                            #    ├─ 核心底层能力（有状态, 单例）
+│   │   ├── conversation_mgr/            #    │  ⭐ 对话引擎（总分三步走，分层子包）
+│   │   ├── llm_kernel/                  #    │  🤖 LLM 推理内核（Ollama HTTP）
+│   │   ├── task_queue_kernel/           #    │  📨 异步任务队列内核
+│   │   ├── database/                    #    │  💾 数据库连接与 DAO
+│   │   ├── bootstrap.py                 #    │  🏗️ 启动与初始化
+│   │   ├── scheduler.py                 #    │  ⏰ 定时调度器
+│   │   ├── task_recovery.py             #    │  🔁 任务恢复流水线
+│   │   └── data_types/                  #    │  📐 数据契约（dataclass schema）
+│   │
+│   ├── business/                        #    ├─ 业务层（无状态服务 + 技能）
+│   │   ├── system_ops/                  #    │  🔧 系统引擎（诊断+清理+热重载）
+│   │   ├── knowledge_extractor/         #    │  📚 知识引擎（图谱+检索）
+│   │   ├── data_cleanup/                #    │  🧹 数据清理调度
+│   │   ├── vault_export/                #    │  📦 Obsidian Vault 导出
+│   │   ├── analytics/                   #    │  📈 成长分析
+│   │   └── task_handlers/               #    │  📋 日报/周报/月报/年报 + 技能
+│   │
+│   ├── api_gateway/                     #    ├─ HTTP 网关层
+│   │   ├── rest_api.py                  #    │  REST 路由（/dashboard, /health, /api/*）
+│   │   ├── server.py / lifespan.py      #    │  网关装配 + 生命周期
+│   │   ├── dashboard.html               #    │  运维监控面板
+│   │   └── middlewares/routes/dependencies/  # 预留扩展点
+│   │
+│   └── templates/                       #    └─ 模板层
+│       ├── llm_prompt/                  #       LLM 提示词模板
+│       └── md_render/                   #       Markdown 渲染模板（预留）
 │
-├── tests/                             # 🧪 测试套件
-├── scripts/                           # 📜 运维脚本
-├── docs/                              # 📚 技术文档
-├── data/                              # 💾 运行时数据 (gitignore)
-├── deploy/                            # 🐳 部署配置
-├── pyproject.toml                     # 项目元数据
-└── requirements.txt                   # 全局依赖
+├── frontend/                            # 🖥️ 前端（预留，前后端分离，尚未构建）
+├── tests/                               # 🧪 测试套件
+├── scripts/                             # 📜 运维脚本
+├── docs/                                # 📚 技术文档
+├── data/                                # 💾 运行时数据（数据库 / 日志 / 知识库，gitignore）
+├── models/                              # 🧠 LLM 模型文件（gitignore）
+├── docker-compose.yml / Dockerfile      # 🐳 部署配置（根目录）
+├── pyproject.toml                       # 项目元数据
+└── requirements.txt                     # 全局依赖
 ```
+
+### 分层原则
+
+```
+MCP 客户端 ──→ mcp_service/（注解暴露）──┐
+                                         ├──→ backend/business/（业务编排）
+Web 客户端 ──→ backend/api_gateway/ ─────┘            │
+                                                      ↓
+                                         backend/core/（底层能力：引擎/队列/DB/LLM）
+                                                      ↓
+                                         foundation/（配置/日志/埋点/异常/返回体/工具）
+```
+
+- **MCP 与 Web 不冲突**：MCP 工具通过注解暴露，仅被 MCP 客户端调用；两者共用 `foundation/` + `backend/` 底层。
+- **绝对导入**：所有模块使用 `from backend.xxx` / `from foundation.xxx` 绝对导入，禁止跨包相对导入。
 
 ### 📂 模块职责说明
 
-#### `server.py` - 薄壳入口 🚀
-**定位**: MCP 服务入口，仅负责注册工具和启动服务  
-**核心原则**: 不包含任何业务逻辑，所有调用委托给 Engine  
+#### `main.py` + `mcp_service/` - 入口与 MCP 薄壳 🚀
+`main.py` 仅做 `runpy.run_module("mcp_service.mcp_server")` 代理；真正的 MCP 入口是 `mcp_service/mcp_server.py`。
 **包含**:
-- 4 个核心 `@mcp.tool`: `start_conversation`, `record_step`, `finalize_conversation`, `question_with_context`
-- `_register_tool_layer()`: 注册工具层 17 个纯工具
-- `_register_agent_engines()`: 注册 4 个领域引擎
+- 3 个核心 `@mcp.tool`: `start_conversation`, `record_step`, `finalize_conversation`
 - `_register_rest_routes()`: 注册 HTTP REST 路由
+- `_register_task_handlers()`: 注册各模块任务处理器到 `task_queue`
 
-#### `devpartner_agent/core/` - 核心引擎层 🧠
-**定位**: 有状态的业务引擎，单例模式，线程安全  
-**设计原则**: 每个 Engine 对应一个业务域，自带 `register_*_tools(mcp)` 函数
+#### `backend/core/` - 核心底层能力 🧠
+| 模块 | 职责 |
+|------|------|
+| `conversation_mgr/` | 对话生命周期（start→record→finalize 总分三步走） |
+| `llm_kernel/` | LLM 推理内核（Ollama HTTP API） |
+| `task_queue_kernel/` | 异步任务队列（FIFO + 对话级互斥 + 回调） |
+| `database/` | SQLite 连接（WAL）与 DAO |
+| `bootstrap.py` | 启动与初始化（`ensure_ready` / `apply_patches`） |
+| `scheduler.py` | 定时调度器（日报 / 恢复流水线） |
+| `task_recovery.py` | 任务恢复流水线（启动 + 定时双入口） |
+| `data_types/` | 数据契约（dataclass Schema） |
 
-| Engine | 职责 | MCP 工具数 |
-|--------|------|-----------|
-| ConversationEngine | 对话生命周期 (start→record→finalize) | 4 (在 server.py 直接注册) |
-| KnowledgeEngine | 知识点 + 图谱 + 检索 | 4 |
-| SystemEngine | 诊断 + 清理 + LLM状态 + 热重载 | 6 |
-| DailyEngine | 日报 + 日志 + 工作数据 | 9 |
+#### `backend/business/` - 业务层 ⚙️
+无状态业务服务，被核心引擎或任务队列调用。
+- `system_ops/`：系统诊断 + 清理 + 热重载
+- `knowledge_extractor/`：知识点提取 + 知识图谱
+- `data_cleanup/`：数据清理调度
+- `vault_export/`：Obsidian Vault 导出（MD 引擎 + 导出器）
+- `analytics/`：成长分析（用户成长概览 / 技能雷达）
+- `task_handlers/`：日报/周报/月报/年报 + 每日总结技能
 
-#### `devpartner_agent/services/` - 无状态服务层 ⚙️
-**定位**: 无状态的辅助工具，被 Engine 调用  
-**关键组件**:
-- `task_queue.py`: 异步任务队列 (FIFO + 对话级互斥)
-- `knowledge_graph.py`: 知识图谱构建与查询
-- `callback_registry.py`: 回调通知注册表
-- `cleanup_service.py`: 数据清理调度
-- `vault_exporter.py`: Obsidian Vault 导出
-
-#### `devpartner_agent/routes/` - HTTP 路由层 🌐
-**定位**: REST API 端点，从 server.py 提取  
-**端点**:
-- `/dashboard` - 运维面板
+#### `backend/api_gateway/` - HTTP 网关层 🌐
+REST API 端点，供 Web 前端 / 运维面板使用。
+- `/dashboard` - 运维面板（系统 / 任务队列监控）
 - `/health` - 健康检查
 - `/api/growth/*` - 成长分析 API
 - `/api/system/*` - 系统状态 API
 - `/api/projects/*` - 项目知识 API
 
-#### `devpartner_tools/` - 工具层 🔧
-**定位**: 无状态纯工具，不依赖 Agent 层  
-**设计原则**: 每个工具文件自带 `register_*_tools(mcp)` 函数
+#### `backend/templates/llm_prompt/` - 提示词模板层 ✍️
+所有 LLM Prompt 集中管理，与代码解耦，支持热重载。
 
-#### `scripts/` - 运维工具 🛠️
-**定位**: 一次性运维任务，非核心业务  
-**典型用途**:
-- 数据库升级/迁移
-- 数据回填/修复
-- 批量数据处理
-
-**何时使用**:
-- 版本升级时运行 `upgrade_to_v5.py`
-- 数据异常时运行 `backfill_conversation.py`
-
-#### `tests/` - 质量保障 ✅
-**定位**: 确保系统稳定性和正确性  
-**分类**:
-- 单元测试 (`test_*.py`)
-- 集成测试 (`test_integration.py`)
-- 性能测试 (`test_performance.py`)
-
-**何时运行**:
-- 提交代码前: `pytest tests/`
-- CI/CD 流水线自动执行
+#### `foundation/` - 全局基础框架 🏗️
+与业务无关的通用能力，可独立复用于其他项目。
+- `config/`：配置加载（`app_settings.py`）+ `config.yaml`
+- `logger_framework/`：统一日志
+- `trace_tracker/`：埋点追踪（基于 `contextvars`）
+- `exception_framework/`：统一异常（`BizException` / 全局捕获 / 错误渲染）
+- `api_response/`：统一返回体（`ok` / `fail` / `page`）
+- `common_utils/`：通用工具（json / text / time / file / schema / decorators）
 
 ---
 
@@ -255,10 +248,10 @@ devPartner/
 
 ### 基础用法
 
-#### 1️⃣ 对话记录与分析 (总分三步走)
+#### 1️⃣ 对话记录与分析（总分三步走）
 
 ```python
-from devpartner_agent.core.conversation_engine import get_conversation_engine
+from backend.business.conversation_mgr import get_conversation_engine
 
 engine = get_conversation_engine()
 
@@ -270,12 +263,11 @@ conv_id = result["conversation_id"]
 
 # 第二步: 记录步骤
 engine.record_step(
-    conversation_id=conv_id, step_number=1,
-    step_name="创建组件", step_type="implementation",
-    step_input='{"file": "src/App.tsx", "action": "create"}'
+    conversation_id=conv_id, step_name="创建组件", step_type="implementation",
+    content='{"file": "src/App.tsx", "action": "create"}'
 )
 
-# 第三步: 结束对话 (自动触发 LLM 分析)
+# 第三步: 结束对话（自动触发 LLM 分析）
 summary = engine.finalize_conversation(conversation_id=conv_id)
 print(f"总结: {summary['summary']}")
 ```
@@ -283,16 +275,16 @@ print(f"总结: {summary['summary']}")
 #### 2️⃣ 生成每日总结
 
 ```python
-from devpartner_agent.core.daily_engine import get_daily_engine
+from backend.business.task_handlers.daily_engine import get_daily_engine
 
 engine = get_daily_engine()
-report = engine.get_daily_summary(date="2026-07-13")
+report = engine.get_daily_summary(date="2026-07-23")
 print(f"📊 今日摘要: {report.get('summary', '')}")
 ```
 
 #### 3️⃣ 使用 MCP 工具
 
-通过 MCP 协议调用工具（已集成到 Cursor/Windsurf/Trae 等 IDE）：
+通过 MCP 协议调用工具（已集成到 Cursor / Windsurf / Trae 等 IDE）：
 
 ```json
 {
@@ -305,23 +297,10 @@ print(f"📊 今日摘要: {report.get('summary', '')}")
 }
 ```
 
-**核心 MCP 工具 (4个)**:
-- `start_conversation` - 开始对话
-- `record_step` - 记录步骤
-- `finalize_conversation` - 结束对话
-- `question_with_context` - 基于上下文提问
-
-**领域 MCP 工具 (21个)**:
-- 知识域: `list_knowledge_points`, `search_knowledge`, `build_knowledge_graph` 等
-- 系统域: `get_system_health`, `system_diagnose`, `hot_reload` 等
-- 日报域: `get_daily_summary`, `read_daily_log`, `list_logs` 等
-- 优化域: `process_user_feedback`, `check_optimization_needed` 等
-
-**工具层 MCP 工具 (17个)**:
-- 文件系统: `read_file`, `write_file`, `list_directory` 等
-- 网络请求: `fetch_url`, `github_search_code` 等
-- 系统工具: `execute_system_command`, `environment_scan` 等
-- 成长分析: `get_user_growth_overview`, `get_user_skill_radar` 等
+**核心 MCP 工具 (3个)**:
+- `start_conversation` - 开启会话（总分总·总）
+- `record_step` - 记录步骤（总分总·分，每完成一个子任务立即调用）
+- `finalize_conversation` - 结束会话（总分总·总，触发全局分析）
 
 ---
 
@@ -329,31 +308,17 @@ print(f"📊 今日摘要: {report.get('summary', '')}")
 
 ### LLM 引擎调优
 
-编辑 `devpartner_agent/config.yaml`:
+编辑 `foundation/config/config.yaml`:
 
 ```yaml
 llm:
-  # Ollama 连接
-  ollama_model: "qwen3"     # Ollama 模型名（ollama list 查看可用模型）
+  ollama_model: "qwen2.5"   # Ollama 模型名（ollama list 查看可用模型）
   ollama_timeout: 120       # 推理超时（秒）
-
-  # 生成参数
   max_tokens: 2048          # 最大输出长度
   max_input_chars: 8000     # 最大输入字符数
   temperature: 0.3          # 创造性（0=确定性, 1=随机）
-  top_p: 0.9               # 核采样
-  top_k: 40                # Top-K 采样
-  repeat_penalty: 1.1       # 重复惩罚
-
-  # 启动行为
   preload: true             # 启动时验证 Ollama 连接并测试推理
-
-  # 功能开关
-  enhance_analysis: true     # 对话分析增强 ⭐ 推荐
-  enhance_file_parsing: true  # 文件解析增强
-  enhance_daily_summary: true  # LLM 日报生成 ⭐ 强烈推荐
-  enhance_self_improvement: true  # 自我改进建议 ⭐ 推荐
-  fallback_to_rules: true    # LLM 失败时降级到规则
+  fallback_to_rules: true   # LLM 失败时降级到规则
 ```
 
 ### 性能优化建议
@@ -362,10 +327,10 @@ llm:
 
 | 场景 | 推荐模型 | 预期效果 |
 |------|---------|---------|
-| **内存有限** (< 8GB) | `qwen3:1.7b` / `qwen2.5:3b` | 内存占用低，响应快 |
+| **内存有限** (< 8GB) | `qwen2.5:3b` | 内存占用低，响应快 |
 | **追求速度** | 启用 Ollama GPU 加速 | 推理速度提升 3-5 倍 |
-| **质量优先** | `qwen3:14b` / `qwen3:32b` | 输出更精准 |
-| **中文场景** | `qwen3` 系列 | 中文能力优异 |
+| **质量优先** | `qwen2.5:14b` / `qwen2.5:32b` | 输出更精准 |
+| **中文场景** | `qwen2.5` 系列 | 中文能力优异 |
 
 ---
 
@@ -384,14 +349,8 @@ llm:
 ### 日志查看
 
 ```bash
-# 实时日志
 tail -f data/logs/agent.log
-
-# 错误日志
 grep ERROR data/logs/agent.log
-
-# 性能指标
-grep "inference_time" data/logs/agent.log
 ```
 
 ### 数据库维护
@@ -399,9 +358,6 @@ grep "inference_time" data/logs/agent.log
 ```bash
 # 备份数据库
 cp data/databases/devpartner.db backups/devpartner_$(date +%Y%m%d).db
-
-# 清理旧日志（保留最近 90 天）
-python scripts/cleanup_old_logs.py
 
 # 数据库完整性检查
 python scripts/check_db_integrity.py
@@ -411,100 +367,19 @@ python scripts/check_db_integrity.py
 
 ## 🔄 版本迭代记录
 
-### v8.3.0 (2026-07-16) - 文档整理与工具计数修正
-**变更**:
-- ✅ 移除 README 中不存在的 3 个引擎文档（memory/iteration/vault 已废弃或合并）
-- ✅ 移除不存在的 `git_operations.py` 文档引用
-- ✅ 修正 `_tools_count` 为真实数字（server.py 中 5+3+4+5 替代硬编码的 6+3+4+10）
-- ✅ 统一版本号（server.py / README / pyproject.toml → 8.3）
-- ✅ 引擎注册计数精确化（4+6+9+2 替代统一 10）
-- ✅ `__init__.py` 注释更新（17 个工具，包含 growth_analytics）
-
-### v8.0-v8.2 (2026-07-14) - 清理自迭代子系统
+### v9.5.5 (2026-07-23) - 分层架构重构 ⭐
 **重大变更**:
-- ✅ server.py 从 4240 行 → ~380 行薄壳入口
-- ✅ 5 个领域引擎按业务域封装 (core/*_engine.py)
-- ✅ `@mcp_tool_handler` 统一装饰器消除样板代码
-- ✅ HTTP REST 路由提取到 `routes/rest_api.py`
-- ✅ 启动逻辑提取到 `core/bootstrap.py`
-- ✅ 工具层添加 `register_*_tools(mcp)` 注册函数
-- ✅ 移除废弃的 memory_engine / iteration_engine / vault_engine（功能已合并到其他模块）
-
-**架构对比**:
-| 维度 | v7.3 | v8.3 |
-|------|------|------|
-| server.py 行数 | 4240 | ~380 |
-| 引擎数 | 8 (含3个空壳) | 5 (实际运作) |
-| 业务逻辑位置 | 散落在 server.py | 集中在 core/*_engine.py |
-| MCP 工具注册 | 内联在 server.py | 每个 Engine 自带 register 函数 |
-| HTTP 路由 | 混在 server.py | 独立 routes/rest_api.py |
+- ✅ 按模板重构为四层架构：`foundation/`（基础框架）+ `backend/`（core/business/api_gateway/templates）+ `mcp_service/`（MCP 薄壳）+ `frontend/`（预留）
+- ✅ 原 `server.py` → `mcp_service/mcp_server.py`，新增 `main.py` 统一入口
+- ✅ 原 `devpartner_agent/` → `backend/core` + `backend/business` + `backend/api_gateway`
+- ✅ 原 `devpartner_tools/tools/growth_analytics.py` → `backend/business/analytics/`
+- ✅ 原 `prompts/` → `backend/templates/llm_prompt/`
+- ✅ 全部改为绝对导入（`from backend.xxx` / `from foundation.xxx`）
+- ✅ 修复 `backend/templates/llm_prompt/__init__.py` 中 4 个从未定义的 Prompt 名称导致的包导入失败
+- ✅ `config.yaml` 迁移至 `foundation/config/config.yaml`
+- ✅ 保留 MCP 形态（注解暴露工具，与 Web 不冲突，共用底层）
 
 详见 [CHANGELOG.md](./CHANGELOG.md)
-
-### v7.3.0 (2026-07-10) - LLM 引擎迁移至 Ollama ⭐
-**重大变更**:
-- ✅ 推理引擎由 llama-cpp-python 迁移至本地 Ollama HTTP API
-- ✅ `LLMService` 重写：通过 `POST /api/chat` 调用 Ollama，零 GGUF 文件管理
-- ✅ 配置精简：移除 `model_path`/`n_ctx`/`n_gpu_layers` 等，新增 `ollama_model`/`ollama_timeout`
-- ✅ 移除 `llama-cpp-python` / `modelscope` 依赖，`requirements.txt` 仅保留 `ollama`（可选）
-- ✅ 新增 `record_version_upgrade` MCP 工具手动触发版本记录
-
-**同期能力（v7.3.0/7.3.1/7.3.2）**:
-- 🗂️ 业务知识提取器（通用 Prompt 模板，从对话提取业务规则/架构决策）
-- 📚 Obsidian Vault 导出器（业务知识卡片 → `data/vault/`）
-- 🔍 `question_with_context` 支持 `project_name` + `category`（business/skill 数据层隔离）
-- 🖥️ 运维面板保留（`/api/system/*`、`/api/tasks/*`、`/api/health/*`、`/api/trends/*`）
-
-### v7.2.0 (2026-07-09) - 四阶段优化 ⭐
-**重大变更**:
-- ✅ conversation_steps 数据回写修复（knowledge_point_ids/duration_ms/started_at）
-- ✅ 生命周期兜底清理（孤儿步骤自动回收）
-- ✅ 数据库表文档规范（11 张表结构化注释）
-- ✅ 新增技能复习提醒 + 遗忘曲线 + 知识关联同步
-- ✅ Schema 收敛（conversation_id 双FK策略）
-- ✅ 全系统版本号统一为 7.2.0
-
-**新增功能**:
-- `get_stale_skills()` - 技能复习提醒
-- `get_forgetting_curve()` - 遗忘曲线可视化
-- `sync_knowledge_relations()` - 知识关联同步
-- `_auto_cleanup_orphan_steps()` - 孤儿步骤自动清理
-
-### v7.1.0 (2026-07-07) - LLM 双层分析
-- ✅ Step 级 + Conversation 级双层 LLM 分析引擎
-- ✅ Step→Task 链式异步任务
-
-### v7.0.0 (2026-07-07) - 总分总对话架构
-- ✅ 总分总三步走模式（create→record_step×N→finalize）
-- ✅ conversation_archive 标记 @deprecated
-- ✅ 数据清理服务 + 会话管理器
-
-### v6.0.4 (2026-07-05) - CodeBuddy 兼容修复
-- 修复 CodeBuddy Accept header 兼容问题
-
-### v6.0.3 (2026-07-04) - ModelScope 容器修复
-- 修复容器崩溃重启循环
-
-### v6.0.0 (2026-07-03) - LLM 驱动架构重构 ⭐
-- ✅ 新增 `LLMUnifiedAnalyzer` 统一分析引擎
-- ✅ 废弃 3600+ 行硬编码规则，代码精简 93%
-- ✅ 对话分析、日报生成、自我改进全面 LLM 化
-- ✅ 项目结构标准化重组
-
-### v5.2.0 (2026-07-03) - 异步任务队列
-- 异步后台任务队列 + 代码清理
-
-### v5.1.0 (2026-06-28) - 性能优化
-- LLM 服务预加载和缓存机制
-- 数据库连接池优化
-- 异步任务队列改进
-
-### v5.0.0 (2026-06-20) - 架构升级
-- Schema 升级到 v5.0
-- 新增 knowledge_points 表
-- 任务队列系统引入
-
-[查看完整历史 →](./CHANGELOG.md)
 
 ---
 
@@ -513,38 +388,24 @@ python scripts/check_db_integrity.py
 ### 常见问题
 
 #### Q1: LLM 服务启动失败？
-
 **症状**: `❌ Ollama 服务不可达` 或分析功能不可用
-
 **解决方案**:
-1. 确认 Ollama 已安装并运行: `ollama list`（应列出已拉取的模型）
-2. 确认模型已拉取: `ollama pull qwen3`
-3. 确认 `config.yaml` 的 `llm.ollama_model` 与 `ollama list` 中的名称一致
+1. 确认 Ollama 已安装并运行: `ollama list`
+2. 确认模型已拉取: `ollama pull qwen2.5`
+3. 确认 `foundation/config/config.yaml` 的 `llm.ollama_model` 与 `ollama list` 名称一致
 4. 如 Ollama 不在本机，设置环境变量 `OLLAMA_BASE_URL=http://<host>:11434`
-5. 查看详细错误: `cat data/logs/agent.log | grep -i error`
-6. Ollama 不可用时系统自动降级到规则引擎，核心功能不受影响
+5. Ollama 不可用时系统自动降级到规则引擎，核心功能不受影响
 
 #### Q2: 内存不足（OOM）？
-
-**症状**: Ollama 进程被系统杀死
-
-**解决方案**:
-- 改用更小模型: `ollama pull qwen3:1.7b`，并在 `config.yaml` 设置 `llm.ollama_model: "qwen3:1.7b"`
-- 推理由 Ollama 独立进程负责，本项目自身内存占用很低
+改用更小模型: `ollama pull qwen2.5:3b`
 
 #### Q3: 推理速度太慢？
-
-**症状**: 单次分析 > 30 秒
-
-**优化方案**:
-1. 启用 Ollama GPU 加速（安装对应 CUDA 版本的 Ollama）
+1. 启用 Ollama GPU 加速
 2. 减少 token 数: `max_tokens: 1024`
 3. 相同输入会命中缓存，重复分析更快
 
 #### Q4: 数据库锁定？
-
 **症状**: `database is locked`
-
 **解决方案**:
 1. 检查是否有其他进程占用: `lsof data/databases/devpartner.db`
 2. 重启服务释放锁
@@ -555,27 +416,19 @@ python scripts/check_db_integrity.py
 ## 🤝 贡献指南
 
 ### 开发流程
-
 1. Fork 并克隆仓库
 2. 创建特性分支: `git checkout -b feature/new-feature`
 3. 编写代码并添加测试
 4. 运行测试: `pytest tests/`
 5. 提交变更: `git commit -m "feat: add new feature"`
-6. 推送分支: `git push origin feature/new-feature`
-7. 创建 Pull Request
+6. 推送分支并创建 Pull Request
 
 ### 代码规范
-
 - 遵循 PEP 8 风格指南
 - 类型注解（Python 3.10+）
 - 中文注释（面向中文开发者）
 - 所有公开函数必须有 docstring
-
-### 测试要求
-
-- 新功能必须包含单元测试
-- 测试覆盖率 > 80%
-- 集成测试覆盖主要流程
+- 跨包使用绝对导入
 
 ---
 
@@ -588,22 +441,6 @@ Copyright (c) 2026 DevPartner Team
 ---
 
 ## 🙏 致谢
-
 - [Qwen](https://qwenlm.github.io/) - 强大的开源大语言模型
 - [Ollama](https://ollama.com/) - 简单的本地大模型运行与管理框架
 - [Model Context Protocol](https://modelcontextprotocol.io/) - 标准化的工具调用协议
-
----
-
-## 📞 联系我们
-
-- 📧 Email: devpartner@example.com
-- 💬 Issues: [GitHub Issues](https://github.com/your-repo/devpartner/issues)
-- 💬 Discussions: [GitHub Discussions](https://github.com/your-repo/discussions)
-
----
-
-<p align="center">
-  <strong>⭐ 如果这个项目对你有帮助，请给一个 Star！⭐</strong><br>
-  <em>Made with ❤️ by DevPartner Team</em>
-</p>

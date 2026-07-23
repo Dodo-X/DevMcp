@@ -1,0 +1,34 @@
+# DevPartner 预提交钩子
+# 安装: pre-commit install  (CI 中也通过 make/lint 步骤复用同一套规则)
+# 说明: 与 pyproject.toml 中的 [tool.ruff] 配置保持一致
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+        # 安全退出：首次接入存量代码时，仅报告不阻断；待存量收敛后改为阻断
+        # stages: [pre-commit]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+
+  # 本地守护：禁止将大模型权重文件纳入版本库（应由 ModelScope/Docker 卷挂载管理）
+  - repo: local
+    hooks:
+      - id: forbid-large-model-artifacts
+        name: 禁止提交大模型权重文件
+        description: 阻断 *.gguf/*.bin/*.safetensors/*.pth/*.onnx 等大模型文件被 git add
+        entry: "大模型权重文件禁止进入 Git（请用 ModelScope 挂载或 Docker 镜像管理）"
+        language: fail
+        files: '\.(gguf|bin|safetensors|pth|onnx|ggml)$'

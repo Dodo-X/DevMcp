@@ -1,0 +1,32 @@
+# CODEOWNERS — DevPartner 代码评审负责人
+# 语法: <路径模式> @owner1 @owner2
+# 文档: https://docs.github.com/en/repositories/managing-your-repositories-settings-and-features/customizing-your-repository/about-code-owners
+
+# 默认负责人（兜底）
+*                                       @devpartner/maintainers
+
+# 基础设施与全局配置
+/foundation/                            @devpartner/core
+/pyproject.toml                         @devpartner/core
+/.editorconfig                          @devpartner/core
+/.pre-commit-config.yaml                @devpartner/core
+/.github/                               @devpartner/maintainers
+
+# 核心引擎、调度、数据库、LLM 内核
+/backend/core/                          @devpartner/core
+
+# 业务服务
+/backend/business/                      @devpartner/backend
+
+# API 网关与 MCP 服务
+/backend/api_gateway/                   @devpartner/backend
+/mcp_service/                           @devpartner/backend
+
+# 文档与规范
+/docs/                                  @devpartner/maintainers
+
+# 脚本（谨慎改动，需核心组评审）
+/scripts/                               @devpartner/core
+
+# 测试
+/tests/                                 @devpartner/backend
