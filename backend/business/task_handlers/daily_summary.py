@@ -116,11 +116,215 @@ def get_daily_work_data(date_str: str = None, fallback_to_log: bool = False) -> 
 
         result["stats"] = db.get_daily_stats(date_str)
 
+        # ── v9.12: 注入分析数据到日报 context ──
+        _enrich_daily_data_with_analytics(db, result, date_str)
+
     except Exception as e:
         logger.warning("get_daily_work_data: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
         result["db_error"] = str(e)
 
     return result
+
+
+def _enrich_daily_data_with_analytics(db, result: dict, date_str: str):
+    """v9.12: 将分析数据注入日报 data dict，供 LLM prompt 和 MD 模板使用。
+
+    查询：用户画像快照、技能树统计、知识库增长、近7日指标趋势、
+    重复阻塞点频率。数据以 {analytics: {...}} 字段附加到 result dict。
+    """
+    analytics = {}
+
+    try:
+        # ── 1. 用户画像快照（真实 DB 数据，非空占位符）──
+        profile_rows = db.query_local(
+            "SELECT dimension, value, confidence, trend FROM user_profile ORDER BY dimension"
+        )
+        if profile_rows:
+            analytics["user_profile_snapshot"] = [
+                {
+                    "dimension": r["dimension"],
+                    "value": r["value"],
+                    "confidence": r.get("confidence", 0.5),
+                    "trend": r.get("trend", "stable"),
+                }
+                for r in profile_rows
+            ]
+
+        # ── 2. 技能树统计 ──
+        skill_rows = db.query_local(
+            "SELECT skill_domain, skill_name, skill_level, growth_trend FROM user_skills ORDER BY skill_domain, skill_name"
+        )
+        if skill_rows:
+            domain_skills = {}
+            for r in skill_rows:
+                d = r.get("skill_domain", "通用工程")
+                domain_skills.setdefault(d, []).append(
+                    {
+                        "name": r["skill_name"],
+                        "level": r.get("skill_level", "intermediate"),
+                        "trend": r.get("growth_trend", "stable"),
+                    }
+                )
+            analytics["skill_summary"] = {
+                "total_skills": len(skill_rows),
+                "domains": list(domain_skills.keys()),
+                "by_domain": {k: len(v) for k, v in domain_skills.items()},
+                "detail": domain_skills,
+            }
+
+        # ── 3. 学习计划 ──
+        plan_rows = db.query_local(
+            "SELECT skill_domain, goal, target_level, status, current_progress FROM user_skill_plan ORDER BY created_at DESC"
+        )
+        if plan_rows:
+            planning = [r for r in plan_rows if r.get("status") in ("active", "in_progress")]
+            completed = [r for r in plan_rows if r.get("status") == "completed"]
+            analytics["learning_plan"] = {
+                "total": len(plan_rows),
+                "active": len(planning),
+                "completed": len(completed),
+                "active_items": [
+                    {
+                        "domain": p["skill_domain"],
+                        "goal": p["goal"],
+                        "target": p.get("target_level", ""),
+                        "progress": p.get("current_progress", ""),
+                    }
+                    for p in planning[:5]
+                ],
+            }
+
+        # ── 4. 知识库增长（总量 + 今日新增） ──
+        kp_total = db.query_local("SELECT COUNT(*) as cnt FROM knowledge_points")
+        total = kp_total[0]["cnt"] if kp_total else 0
+
+        kp_today = db.query_local(
+            "SELECT COUNT(*) as cnt FROM knowledge_points WHERE date(created_at) = ?",
+            (date_str,),
+        )
+        today_new = kp_today[0]["cnt"] if kp_today else 0
+
+        kp_domains = db.query_local(
+            "SELECT domain, COUNT(*) as cnt FROM knowledge_points GROUP BY domain ORDER BY cnt DESC"
+        )
+        domain_dist = {r["domain"]: r["cnt"] for r in (kp_domains or [])}
+
+        # usage_count 非零的数量
+        kp_used = db.query_local("SELECT COUNT(*) as cnt FROM knowledge_points WHERE usage_count > 0")
+        used = kp_used[0]["cnt"] if kp_used else 0
+
+        analytics["knowledge_stats"] = {
+            "total": total,
+            "new_today": today_new,
+            "used": used,
+            "domains": list(domain_dist.keys()),
+            "by_domain": domain_dist,
+        }
+
+        # ── 5. 近7日指标趋势（daily_report_metrics）──
+        from datetime import datetime as _dt, timedelta as _td
+
+        today_dt = _dt.strptime(date_str, "%Y-%m-%d")
+        seven_days_ago = (today_dt - _td(days=6)).strftime("%Y-%m-%d")
+
+        trend_rows = db.query_local(
+            """SELECT date, productivity_score, learning_score, collaboration_score, focus_score,
+                      frustration_level
+               FROM daily_report_metrics
+               WHERE date >= ? AND date < ?
+               ORDER BY date ASC""",
+            (seven_days_ago, date_str),
+        )
+        if trend_rows:
+            trends = []
+            for r in trend_rows:
+                trends.append(
+                    {
+                        "date": r["date"],
+                        "productivity": r.get("productivity_score"),
+                        "learning": r.get("learning_score"),
+                        "collaboration": r.get("collaboration_score"),
+                        "focus": r.get("focus_score"),
+                        "frustration": r.get("frustration_level"),
+                    }
+                )
+            analytics["metrics_trends"] = trends
+
+            # 计算今日 vs 昨日对比
+            today_row = None
+            yesterday_row = None
+            for t in reversed(trends):
+                if not today_row and t["date"] == date_str:
+                    today_row = t
+                elif not yesterday_row and t["date"] != date_str:
+                    yesterday_row = t
+                if today_row and yesterday_row:
+                    break
+
+            if today_row and yesterday_row:
+                analytics["metrics_today_vs_yesterday"] = {
+                    "productivity": _compare_scores(
+                        today_row["productivity"], yesterday_row["productivity"]
+                    ),
+                    "learning": _compare_scores(
+                        today_row["learning"], yesterday_row["learning"]
+                    ),
+                    "collaboration": _compare_scores(
+                        today_row["collaboration"], yesterday_row["collaboration"]
+                    ),
+                    "focus": _compare_scores(
+                        today_row["focus"], yesterday_row["focus"]
+                    ),
+                }
+
+        # ── 6. 近期反复阻塞点 ──
+        blocker_rows = db.query_local(
+            """SELECT recurring_blockers FROM daily_report_metrics
+               WHERE date >= ? AND recurring_blockers IS NOT NULL AND recurring_blockers != '[]'
+               ORDER BY date DESC LIMIT 7""",
+            (seven_days_ago,),
+        )
+        if blocker_rows:
+            import json as _json
+
+            all_blockers = []
+            for r in blocker_rows:
+                try:
+                    b = _json.loads(r["recurring_blockers"])
+                    if isinstance(b, list):
+                        all_blockers.extend(b)
+                except (_json.JSONDecodeError, TypeError):
+                    pass
+            if all_blockers:
+                from collections import Counter
+
+                freq = Counter(all_blockers).most_common(5)
+                analytics["recurring_blockers_freq"] = [
+                    {"blocker": b, "count": c} for b, c in freq
+                ]
+
+    except Exception:
+        logger.warning(
+            "_enrich_daily_data_with_analytics: 未预期的异常被静默捕获（P-17 收口）",
+            exc_info=True,
+        )
+
+    result["analytics"] = analytics
+
+
+def _compare_scores(today, yesterday):
+    """对比两天分数，返回 {current, previous, change, direction}"""
+    t = today if today is not None else 0
+    y = yesterday if yesterday is not None else 0
+    if y == 0:
+        return {"current": t, "previous": y, "change": 0, "direction": "new"}
+    delta = t - y
+    return {
+        "current": t,
+        "previous": y,
+        "change": delta,
+        "direction": "up" if delta > 0 else ("down" if delta < 0 else "flat"),
+    }
 
 
 def get_weekly_work_data() -> dict:

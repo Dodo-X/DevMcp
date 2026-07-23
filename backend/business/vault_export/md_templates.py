@@ -370,6 +370,31 @@ def register_all(assembler: MdAssembler = None):
                         ((d.get("report_data") or {}).get("project_analysis") or {}).get("projects")
                     ),
                 ),
+                # ── v9.12: 分析数据渲染段 ──
+                MdSection(
+                    "report_data",
+                    "## 📈 指标趋势",
+                    _render_metrics_trend_table,
+                    condition=lambda d: bool(
+                        (d.get("report_data") or {}).get("analytics", {}).get("metrics_trends")
+                    ),
+                ),
+                MdSection(
+                    "report_data",
+                    "## 📚 知识库增长",
+                    _render_knowledge_stats,
+                    condition=lambda d: bool(
+                        (d.get("report_data") or {}).get("analytics", {}).get("knowledge_stats")
+                    ),
+                ),
+                MdSection(
+                    "report_data",
+                    "## 🛠️ 技能与学习进度",
+                    _render_skill_progress,
+                    condition=lambda d: bool(
+                        (d.get("report_data") or {}).get("analytics", {}).get("skill_summary")
+                    ),
+                ),
             ],
             frontmatter_builder=_daily_fm,
             footer_lines=_build_daily_footer,
@@ -739,6 +764,91 @@ def register_all(assembler: MdAssembler = None):
     # 保留在 VaultExporter._write_project_dashboard 中
 
     logger.info(f"📝 所有 MD 模板已注册 ({len(assembler.list_templates())} 个)")
+
+
+# ══════════════════════════════════════════════════════════
+# v9.12: 分析数据渲染函数
+# ══════════════════════════════════════════════════════════
+
+
+def _render_metrics_trend_table(data: dict) -> str:
+    """渲染近7日指标趋势表格"""
+    trends = data.get("metrics_trends", [])
+    if not trends:
+        return "*暂无趋势数据*"
+
+    lines = [
+        "| 日期 | 生产力 | 学习 | 协作 | 专注 | 挫败 |",
+        "|------|--------|------|------|------|------|",
+    ]
+    for t in trends:
+        p = t.get("productivity", "-") or "-"
+        l = t.get("learning", "-") or "-"
+        c = t.get("collaboration", "-") or "-"
+        f = t.get("focus", "-") or "-"
+        fr = t.get("frustration", "-") or "-"
+        lines.append(f"| {t['date']} | {p} | {l} | {c} | {f} | {fr} |")
+
+    vs = data.get("metrics_today_vs_yesterday")
+    if vs:
+        lines.append("")
+        lines.append("**与昨日对比:**")
+        direction_map = {"up": "\u2191", "down": "\u2193", "flat": "\u2192", "new": "\uD83C\uDD95"}
+        for dim, comp in vs.items():
+            dirc = direction_map.get(comp.get("direction", "flat"), "\u2192")
+            lines.append(
+                f"- {dim}: {comp['current']}/10 {dirc} "
+                f"(昨日 {comp['previous']}/10, 变化 {comp['change']:+d})"
+            )
+
+    return "\n".join(lines)
+
+
+def _render_knowledge_stats(data: dict) -> str:
+    """渲染知识库增长统计"""
+    ks = data.get("knowledge_stats", {})
+    if not ks:
+        return "*暂无知识库数据*"
+
+    lines = [
+        f"- **知识库总量**: {ks.get('total', 0)} 条知识点",
+        f"- **今日新增**: {ks.get('new_today', 0)} 条",
+        f"- **已被使用**: {ks.get('used', 0)} 条",
+        f"- **覆盖领域**: {len(ks.get('domains', []))} 个",
+        "",
+        "**领域分布:**",
+    ]
+    for domain, cnt in ks.get("by_domain", {}).items():
+        lines.append(f"- {domain}: {cnt} 条")
+
+    return "\n".join(lines)
+
+
+def _render_skill_progress(data: dict) -> str:
+    """渲染技能与学习进度"""
+    ss = data.get("skill_summary", {})
+    lp = data.get("learning_plan", {})
+    lines = []
+
+    if ss:
+        lines.append(f"**技能树**: {ss.get('total_skills', 0)} 项技能, 覆盖 {len(ss.get('domains', []))} 个领域")
+        lines.append("")
+        for domain, items in ss.get("detail", {}).items():
+            skills_str = ", ".join(f"{s['name']}({s['level']})" for s in items[:5])
+            lines.append(f"- **{domain}**: {skills_str}")
+            if len(items) > 5:
+                lines[-1] += f" ... +{len(items) - 5}"
+
+    if lp:
+        lines.append("")
+        lines.append(
+            f"**学习计划**: {lp.get('total', 0)} 项, "
+            f"进行中 {lp.get('active', 0)}, 已完成 {lp.get('completed', 0)}"
+        )
+        for item in lp.get("active_items", [])[:3]:
+            lines.append(f"- [{item['domain']}] {item['goal']} -> {item['target']}")
+
+    return "\n".join(lines) if lines else "*暂无技能数据*"
 
 
 # ══════════════════════════════════════════════════════════

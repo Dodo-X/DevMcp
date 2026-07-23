@@ -837,8 +837,97 @@ class LLMEngine:
             ai_summary=(ai_summary or "")[:1000],
         )
 
+    # ═══════════════════════════════════════════════════════════
+    # v9.12: analytics 上下文格式化（供日报 prompt 使用）
+    # ═══════════════════════════════════════════════════════════
+
+    @staticmethod
+    def _format_profile_for_prompt(profile: list) -> str:
+        if not profile:
+            return "暂无用户画像数据"
+        lines = []
+        for p in profile:
+            lines.append(
+                f"- {p['dimension']}: {p['value']} "
+                f"(置信度={p['confidence']:.0%}, 趋势={p['trend']})"
+            )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_knowledge_for_prompt(knowledge: dict) -> str:
+        if not knowledge:
+            return ""
+        parts = [f"知识库总量: {knowledge.get('total', 0)} 条知识点"]
+        parts.append(f"今日新增: {knowledge.get('new_today', 0)} 条")
+        parts.append(f"已被使用: {knowledge.get('used', 0)} 条 (usage_count > 0)")
+        if knowledge.get("domains"):
+            domain_lines = []
+            for d, cnt in knowledge.get("by_domain", {}).items():
+                domain_lines.append(f"  {d}: {cnt}")
+            parts.append("领域分布:\n" + "\n".join(domain_lines))
+        return "\n".join(parts)
+
+    @staticmethod
+    def _format_metrics_trend_for_prompt(trends: list) -> str:
+        if not trends:
+            return ""
+        lines = ["近7日指标趋势:"]
+        for t in trends:
+            p = t.get("productivity") or "-"
+            l = t.get("learning") or "-"
+            f = t.get("focus") or "-"
+            fr = t.get("frustration") or "-"
+            lines.append(
+                f"  {t['date']}: 生产力={p}/10, 学习={l}/10, 专注={f}/10, 挫败={fr}/5"
+            )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_skills_for_prompt(skills: dict) -> str:
+        if not skills:
+            return ""
+        parts = [f"技能树: {skills.get('total_skills', 0)} 项技能, 覆盖 {len(skills.get('domains', []))} 个领域"]
+        for domain, items in skills.get("detail", {}).items():
+            names = [f"{s['name']}({s['level']})" for s in items[:5]]
+            parts.append(f"  {domain}: {', '.join(names)}")
+        return "\n".join(parts)
+
+    @staticmethod
+    def _format_learning_plan_for_prompt(plan: dict) -> str:
+        if not plan:
+            return ""
+        parts = [
+            f"学习计划: {plan.get('total', 0)} 项, 进行中 {plan.get('active', 0)}, 已完成 {plan.get('completed', 0)}"
+        ]
+        for item in plan.get("active_items", [])[:3]:
+            parts.append(f"  [{item['domain']}] {item['goal']} → 目标: {item['target']}")
+        return "\n".join(parts)
+
+    @staticmethod
+    def _build_analytics_context(
+        knowledge_ctx: str,
+        metrics_ctx: str,
+        skill_ctx: str,
+        plan_ctx: str,
+    ) -> str:
+        """组装 analytics context 文本，注入 prompt。"""
+        parts = []
+        if knowledge_ctx:
+            parts.append(f"## 知识库统计\n{knowledge_ctx}")
+        if skill_ctx:
+            parts.append(f"## 技能树\n{skill_ctx}")
+        if plan_ctx:
+            parts.append(f"## 学习计划\n{plan_ctx}")
+        if metrics_ctx:
+            parts.append(f"## 历史指标趋势\n{metrics_ctx}")
+        if not parts:
+            return "暂无历史分析数据"
+        return "\n\n".join(parts)
+
+    # ═══════════════════════════════════════════════════════════
+
     def generate_daily_summary(self, target_date: str, data: dict) -> dict | None:
-        """v9.8.3: 适配新数据格式 — conversation 为单位，step 仅含 output_data"""
+        """v9.12: 增强版 — 注入 analytics 数据到 prompt context"""
         from backend.templates.llm_prompt import TASK_DAILY_SUMMARY, run_analysis
         from backend.templates.llm_prompt._common import compact_json
 
@@ -851,15 +940,21 @@ class LLMEngine:
             data.get("conversations", [])[:15], max_chars=TASK_DAILY_SUMMARY.input_truncate
         )
 
-        # v9.8.3: system_id 来自 conversation entry
         systems = data.get("systems", [])
         project_hint = ", ".join(systems) if systems else "（无系统标识，按对话主题分组）"
 
-        # task_type 从 stats 获取
         stats = data.get("stats", {})
         task_types_str = (
             ", ".join(list(stats.get("by_type", {}).keys())[:5]) if stats.get("by_type") else ""
         )
+
+        # v9.12: 真实画像快照（来自 DB，不再是空占位符）
+        analytics = data.get("analytics", {})
+        profile_snapshot = _format_profile_for_prompt(analytics.get("user_profile_snapshot"))
+        knowledge_context = _format_knowledge_for_prompt(analytics.get("knowledge_stats"))
+        metrics_context = _format_metrics_trend_for_prompt(analytics.get("metrics_trends"))
+        skill_context = _format_skills_for_prompt(analytics.get("skill_summary"))
+        plan_context = _format_learning_plan_for_prompt(analytics.get("learning_plan"))
 
         result = run_analysis(
             TASK_DAILY_SUMMARY,
@@ -868,11 +963,16 @@ class LLMEngine:
             systems_active=project_hint,
             task_types=task_types_str,
             conversations=conversations_json,
-            user_profile_snapshot=data.get("user_profile_snapshot", "暂无用户画像数据"),
+            user_profile_snapshot=profile_snapshot,
             project_profile_snapshot=data.get("project_profile_snapshot", "暂无项目画像数据"),
+            analytics_context=_build_analytics_context(
+                knowledge_context, metrics_context, skill_context, plan_context
+            ),
         )
         if result:
             result["data_source"] = data.get("data_source", "db")
+            # v9.12: 注入结构化分析数据到日报输出，供 MD 模板渲染
+            result["analytics"] = analytics
         return result
 
     def generate_self_improvement_suggestions(

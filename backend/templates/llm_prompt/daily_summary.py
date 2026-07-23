@@ -42,9 +42,18 @@ TASK_DAILY_SUMMARY = AnalysisTask(
 ## 当前项目画像快照
 {project_profile_snapshot}
 
+## 历史分析数据（供趋势对比，来自 DB 结构化数据）
+{analytics_context}
+
 ## 输出要求
 请生成完整的 JSON 格式日报。这份日报将被保存为 Markdown 文件，作为独立于数据库的持久化记录。
 日报的核心价值是**对人的发展进行复盘和成长指导**，而非简单罗列操作细节。
+
+**v9.12 增强**：
+- 历史分析数据提供了真实的用户画像、技能树、知识库统计和指标趋势
+- metrics.score 需参考历史指标趋势（如生产力昨天 7/10，今天应在此基 上评估）
+- self_analysis.growthSuggestions 应结合学习计划中的目标给出建议
+- facts 中应包含知识库增长数据（如'知识库已积累 N 条知识点，覆盖 M 个领域'）
 
 **v9.8.3 设计原则**：
 - 知识点、文件变更等精细数据由 step_analysis 独立处理并存入数据库，不需要在日报中重复
