@@ -28,15 +28,20 @@ _DONE_RE = re.compile(r'"done":(true|false)')
 
 
 def _parse_ollama_response(line: str):
-    """零依赖解析 Ollama 响应行，只提取 response 和 done 字段。
-    跳过 context 大数组，不调用 json.loads()，节省内存和 CPU。
+    """解析 Ollama 流式响应行，提取 response 和 done 字段。
+    优先使用 json.loads 正确解码转义序列（如 \\\"→\"），
+    失败时 fallback 到零依赖正则。
     Returns: (token: str, is_done: bool)
     """
-    resp_match = _RESPONSE_RE.search(line)
-    done_match = _DONE_RE.search(line)
-    token = resp_match.group(1) if resp_match else ""
-    is_done = done_match and done_match.group(1) == "true"
-    return token, is_done
+    try:
+        obj = json.loads(line)
+        return obj.get("response", ""), obj.get("done", False)
+    except (json.JSONDecodeError, Exception):
+        resp_match = _RESPONSE_RE.search(line)
+        done_match = _DONE_RE.search(line)
+        token = resp_match.group(1) if resp_match else ""
+        is_done = done_match and done_match.group(1) == "true"
+        return token, is_done
 
 
 # ── v9.5.2 模型内存预估（GB）──
