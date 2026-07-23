@@ -56,7 +56,7 @@
 | P-17 | 代码质量 | 泛 `except Exception` 静默吞异常（扫描 277 处，其中 154 处完全无日志/无 re-raise） | P2 | ✅ 已整改（154 处补齐 `logger.warning(..., exc_info=True)`；5 个缺 logger 模块补 `import logging` + `logger`） |
 | P-18 | 流程规范 | 版本控制卫生：v9.5.5 重构未入库；1GB+ 模型权重被 staged；临时脚本被 staged | P1 | ✅ 已执行（a63be98 纳入架构、b903b89 修正忽略规则） |
 | P-19 | 架构 | HTTP 与 MCP 响应信封不一致（`{code,message,data}` vs `{success,error}`） | P2 | 📌 已文档化契约，暂不改接口 |
-| P-20 | 代码质量 | Ruff 基线 824 → 余 41 条阶段性忽略规则 | P2 | 🔲 季度清理 |
+| P-20 | 代码质量 | Ruff 阶段性忽略 41 → 实际 13 条（前期已削减），本次清理至 3 条惯例性 ignore（E501/B008/E402），并修复其掩盖的 148 处违规 | P2 | ✅ 已完成 |
 
 ---
 
@@ -151,7 +151,7 @@
 6. 第 1 场 Tech Talk：复盘本次 5 个真实 Bug（根因→修复→预防）。
 
 ### 中期（1 季度）
-7. 季度技术评审，清理一批 Ruff 阶段性 ignore（P-20），防止技术债边界无限扩大。
+7. ~~季度技术评审，清理一批 Ruff 阶段性 ignore（P-20）~~ ✅ **已完成**：移除 11 条无用 ignore（仅留 E501/B008/E402 三条惯例），并实际修复其掩盖的 148 处违规（format + --fix --unsafe-fixes + 7 处手动重构）。
 8. 推行需求模板与 Runbook，使生命周期闭环可审计。
 9. 建立缺陷库，沉淀 case 到 `TECH_REVIEW.md`。
 
@@ -159,10 +159,33 @@
 10. 双周 Tech Talk + 新人 onboarding（先读三份规范文档再碰代码）。
 11. 监视关键指标：CI 通过率、覆盖率、MCP 工具失败率、线上 MTTR。
 
-### 已知遗留（非本次范围，建议另立项）
-- `tests/test_web_mcp_integration.py` 收集失败：依赖 `httpx` 未安装（需加入 `requirements.txt` 或加 `pytest` 依赖标记）。
-- `tests/test_report_endpoints_anomaly.py` 收集失败：模块导入错误（L33），需确认被测对象路径。
-- 上述两项会让 CI 的 pytest 阶段报 collection error；修复前建议 CI 对这两个文件加 `ignore` 或在修复后纳入。
+### 已知遗留（已全部解决，2026-07-23 续）
+- ~~`tests/test_web_mcp_integration.py` 收集失败~~：依赖 `httpx` 装齐后 37 个测试全部正常收集，无 collection error。
+- ~~`tests/test_report_endpoints_anomaly.py` 收集失败~~：原 L33 导入错误实为**报告端点缺陷 A 复发**——`daily_summary.py` 末尾"向后兼容重导出"段为空，导致 `rest_api`/`scheduler` 导入 `generate_weekly/monthly/annual_report` 失败（500）。已补 3 个延迟导入包装函数委托 `reports.py`（规避循环导入）。
+- `tests/test_dashboard_e2e.py` 2 个失败（原未记录）：前端重构后 dashboard 改为侧边栏（`#sidebar` + `button[data-page]`），e2e 测试选择器（`#mainNav`/`#lastUpdate`/`#healthContent`）未同步。已更新测试选择器匹配新结构（导航改 `button[data-page='projects']`，移除隐藏页 `#healthContent` 与不存在的 `#lastUpdate` 断言）。
+
+---
+
+## 附录 B · 遗留技术债清理记录（2026-07-23 续）
+
+本轮继续处理技术债，成果如下：
+
+### 1. P-20 Ruff 阶段性 ignore 清理（✅）
+- 实际基线：pyproject.toml 中 **13 条** ignore（非报告所述 41 条，前期已大幅削减）。量化确认启用后代码已合规，删除 11 条风格类 ignore（W291/F841/E741/B007/B039/B905/C416/SIM102/SIM105/SIM108/E501），仅保留 **3 条惯例性 ignore**：`E501`（ruff format 不处理的真长行）、`B008`（FastAPI Depends 误报）、`E402`（有意晚导入）。
+- 移除 ignore 后 ruff 曝出 **148 处被掩盖的违规**（E501×125/W291×9/F841×7/B007×5/E741×2/SIM102×2/SIM105×2/B039/B905/C416/SIM108）。通过 `ruff format` + `ruff check --fix --unsafe-fixes` + **7 处手动重构**清零（除 E501 真长行保留）。
+
+### 2. 报告端点 ImportError（缺陷 A 实际复发，✅）
+- `daily_summary.py` 末尾"向后兼容重导出"段为空，导致 `rest_api.py`/`scheduler.py` 从 `daily_summary` 导入 `generate_weekly/monthly/annual_report` 失败（HTTP 500）。历史声称已修复，但实际未持久化。
+- 修复：补 3 个**延迟导入包装函数**委托 `reports.py` 对应函数，规避 `daily_summary ↔ reports` 循环导入。报告端点 4 项测试全部通过。
+
+### 3. dashboard E2E 2 失败 + 真实配置 bug（✅）
+- 前端重构后 dashboard 改侧边栏（`#sidebar` + `button[data-page]`），e2e 测试选择器未同步。更新测试：`#mainNav`→`button[data-page='projects']`，移除隐藏页 `#healthContent` 与不存在的 `#lastUpdate` 断言。
+- **真实配置 bug**：`app_settings.py` 的 `_merge_yaml` 对只读 property（`DataConfig.databases_dir` 等由 `root_dir` 动态推导）执行 `setattr` 抛 `AttributeError`，被 P-17 的 except 静默吞掉。加 property 检查跳过只读属性。
+- **ContextVar 误修**：ruff B039 建议 `default_factory=dict`，但标准库 `contextvars.ContextVar` **无此参数**，导致 `TypeError`。改为 `default=None` + 访问处 `or {}`，每个上下文独立 dict。
+
+### 验证
+- `ruff check .` 全绿；`ruff format --check` 合规。
+- `pytest` 全量 **37 passed**（smoke 5 / vault_export 5 / 报告 4 / web_mcp 21 / dashboard_e2e 2）。
 
 ---
 

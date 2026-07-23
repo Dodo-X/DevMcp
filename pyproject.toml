@@ -63,22 +63,14 @@ exclude = ["scripts", ".venv", "__pycache__"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
-# 已修复: E722(bare-except)/F821(undefined-name)/UP006/UP045/I001/F541 等 707 处
-# 以下为第二阶段待清理的风格类债务（已在技术审查报告中登记，清理后逐步移出 ignore）:
+# 第一阶段修复: E722(bare-except)/F821(undefined-name)/UP006/UP045/I001/F541 等 707 处
+# 第二阶段债务(P-20)已还清: 原 13 条阶段性 ignore 中，11 条风格类债务经 print→logger(P-16)、
+#   静默 except 收口(P-17)、分析模块修复后代码已合规（启用后实测 0 违规），故移除；
+#   仅保留以下 3 条（均为社区惯例性 / 格式器不处理的合理 ignore，非技术债）：
 ignore = [
-    "E501",   # 行过长（优先用 ruff format 处理）
-    "B008",   # FastAPI/FastMCP 依赖注入装饰器误报
-    "SIM105", # 不必要的 try/except 上下文
-    "W291",   # 行尾空白（ruff format 已能处理大部分）
+    "E501",   # 行过长：ruff format 不折长字符串/URL/注释等真长行，保留（优先 format）
+    "B008",   # FastAPI/FastMCP 依赖注入装饰器误报（@app.get(..., dependencies=[Depends(...)]））
     "E402",   # 模块级 import 未置顶（mcp_server 等有意为之）
-    "F841",   # 未使用变量（多为遗留死代码，需逐处确认后删除）
-    "E741",   # 歧义变量名（l/i/o 等）
-    "B007",   # 循环变量未使用
-    "B039",   # ContextVar 可变默认值
-    "B905",   # zip 未指定 strict=
-    "C416",   # 不必要的推导式
-    "SIM102", # 可合并的嵌套 if
-    "SIM108", # 可用三元表达式替代
 ]
 
 [tool.ruff.lint.per-file-ignores]

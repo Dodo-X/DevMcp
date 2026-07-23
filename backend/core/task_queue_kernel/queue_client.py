@@ -26,6 +26,7 @@ v9.5.3 变更（相比 v9.5.1）：
 """
 
 import collections
+import contextlib
 import json
 import logging
 import threading
@@ -469,10 +470,8 @@ class TaskQueue:
 
         elif task_type in self.PHASE_SEQUENTIAL:
             phase_lock = self._get_phase_lock(conversation_id)
-            try:
+            with contextlib.suppress(RuntimeError):
                 phase_lock.release()
-            except RuntimeError:
-                pass
 
     def _get_phase_lock(self, conversation_id: str) -> threading.Lock:
         with self._conv_phase_locks_guard:
@@ -835,7 +834,7 @@ class TaskQueue:
             conversation_id = payload.get("conversation_id", "")
 
             if conversation_id:
-                triggered = registry.trigger_complete(
+                registry.trigger_complete(
                     conversation_id=conversation_id,
                     result=result or {},
                     task_id=task_id,
@@ -932,9 +931,11 @@ class TaskQueue:
             conv_id = payload.get("conversation_id", "")
             if conv_id == conversation_id:
                 status = meta.get("status", "")
-                if status in [TaskStatus.PENDING.value, TaskStatus.QUEUED.value]:
-                    if self.cancel_task(tid):
-                        cancelled.append(tid)
+                if status in [
+                    TaskStatus.PENDING.value,
+                    TaskStatus.QUEUED.value,
+                ] and self.cancel_task(tid):
+                    cancelled.append(tid)
 
         logger.info(f"🔗 级联取消 conversation={conversation_id}: {len(cancelled)} 个任务")
         return {
@@ -1250,7 +1251,9 @@ class TaskQueue:
             "pending_in_queue": pending_count,
             "pending_preview": pending_tasks,
             "total_tracked": len(self._task_map),
-            "active_phase_locks": len([l for l in self._conv_phase_locks.values() if l.locked()]),
+            "active_phase_locks": len(
+                [lock for lock in self._conv_phase_locks.values() if lock.locked()]
+            ),
             "total_phase_locks": len(self._conv_phase_locks),
             "conv_step_counters": step_counter_snapshot,
             "conv_phase_locks": conv_phase_status,
@@ -1619,7 +1622,7 @@ class TaskQueue:
             1 for meta in self._task_map.values() if meta.get("status") == TaskStatus.RUNNING.value
         )
 
-        expected_value = max(0, 2 - actual_running)
+        max(0, 2 - actual_running)
         current_value = 0
         if hasattr(self._semaphore, "_value"):
             current_value = self._semaphore._value

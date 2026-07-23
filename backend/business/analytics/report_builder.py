@@ -172,7 +172,7 @@ def build_report(
     top = _pick_top_insights(metrics)
     if top:
         L.append("")
-        for i, (score, did, dname, m) in enumerate(top, 1):
+        for i, (_score, _did, dname, m) in enumerate(top, 1):
             cur = _fmt(m["current"], m["unit"])
             dp = _delta_str(m)
             conf = m.get("confidence", "low")
@@ -222,7 +222,7 @@ def build_report(
     L.append("")
     L.append("| 维度 | 指标 | 当期 | 环比 | 基准 | 状态 | 置信度 |")
     L.append("|---|---|---|---|---|---|---|")
-    for did, block in metrics.items():
+    for _did, block in metrics.items():
         for m in block["metrics"]:
             L.append(
                 f"| {block['name']} | {m['id']} | {_fmt(m['current'], m['unit'])} | "

@@ -4,17 +4,22 @@ import contextvars
 import uuid
 from typing import Any
 
-_ctx: "contextvars.ContextVar[dict[str, Any]]" = contextvars.ContextVar("dp_ctx", default={})
+# NOTE: 标准库 ContextVar 不支持 default_factory 参数（那是 dataclass.Field 的）。
+# 用 default=None 避免可变默认值在多个上下文间共享（B039 规则），
+# 所有访问处统一用 `or {}` 保证每个上下文拿到独立 dict。
+_ctx: "contextvars.ContextVar[dict[str, Any] | None]" = contextvars.ContextVar(
+    "dp_ctx", default=None
+)
 
 
 def set_context(**kwargs: Any) -> None:
-    data = dict(_ctx.get())
+    data = dict(_ctx.get() or {})
     data.update({k: v for k, v in kwargs.items() if v is not None})
     _ctx.set(data)
 
 
 def get_context() -> dict[str, Any]:
-    return dict(_ctx.get())
+    return _ctx.get() or {}
 
 
 def clear_context() -> None:
@@ -28,4 +33,4 @@ def set_trace_id(trace_id: str | None = None) -> str:
 
 
 def get_trace_id() -> str | None:
-    return _ctx.get().get("trace_id")
+    return (_ctx.get() or {}).get("trace_id")

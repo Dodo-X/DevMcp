@@ -12,6 +12,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+import contextlib
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -262,6 +263,9 @@ class ConfigManager:
                 "temp_dir",
             ]:
                 if k in d:
+                    # 跳过只读 property（databases_dir 等由 root_dir 动态推导），避免 AttributeError
+                    if isinstance(getattr(type(config.data), k, None), property):
+                        continue
                     setattr(config.data, k, d[k])
 
         # data_lifecycle
@@ -273,10 +277,10 @@ class ConfigManager:
 
         # logging
         if "logging" in data:
-            l = data["logging"]
+            lg = data["logging"]
             for k in ["level", "format", "file"]:
-                if k in l:
-                    setattr(config.logging, k, l[k])
+                if k in lg:
+                    setattr(config.logging, k, lg[k])
 
         # llm
         if "llm" in data:
@@ -307,10 +311,8 @@ class ConfigManager:
             value = os.environ.get(env_key)
             if value:
                 parent_attr, child_attr, typ = target
-                try:
+                with contextlib.suppress(ValueError, AttributeError):
                     setattr(getattr(config, parent_attr), child_attr, typ(value))
-                except (ValueError, AttributeError):
-                    pass
 
         return config
 

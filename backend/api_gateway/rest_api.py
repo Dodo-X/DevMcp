@@ -32,7 +32,7 @@ def _cascade_cancel_finalize_tasks(tq, dry_run: bool = False) -> dict:
     """
     # 收集有失败 step 的 conversation_id
     failed_convs = set()
-    for tid, meta in list(tq._task_map.items()):
+    for _, meta in list(tq._task_map.items()):
         task_type = meta.get("task_type", "")
         status = meta.get("status", "")
         if task_type == "step_analysis" and status in ["failed", "dead"]:
@@ -50,15 +50,14 @@ def _cascade_cancel_finalize_tasks(tq, dry_run: bool = False) -> dict:
                 task_type == "conversation_finalize"
                 and payload_conv == conv_id
                 and status in ["pending", "queued"]
-            ):
-                if dry_run or tq.cancel_task(tid):
-                    cascade_cancelled.setdefault(conv_id, []).append(tid)
+            ) and (dry_run or tq.cancel_task(tid)):
+                cascade_cancelled.setdefault(conv_id, []).append(tid)
 
     total = sum(len(v) for v in cascade_cancelled.values())
     return {
         "failed_conversations": len(failed_convs),
         "cancelled_finalize_tasks": total,
-        "details": {k: v for k, v in cascade_cancelled.items()} if cascade_cancelled else {},
+        "details": dict(cascade_cancelled.items()) if cascade_cancelled else {},
         "dry_run": dry_run,
     }
 

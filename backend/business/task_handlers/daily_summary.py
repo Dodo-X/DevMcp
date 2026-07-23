@@ -350,7 +350,7 @@ def process_pending_analyses() -> dict:
 
                 analysis_type = row["analysis_type"]
                 source_date = row["source_date"]
-                system_id = row.get("system_id", "default")
+                row.get("system_id", "default")
 
                 # v9.8.2: daily_profile_merge / daily_system_merge 已废弃
                 # 用户画像/业务知识由 finalize 子任务实时处理，pending 中的旧数据直接标记为 deprecated
@@ -777,5 +777,28 @@ def _read_md_reports(
 
 # ══════════════════════════════════════════════════════════
 # v9.10.0: 多级报告（周报/月报/年报）已拆分到 reports.py
-# 以下为向后兼容的重导出
+# 以下为向后兼容的重导出（延迟导入，规避 daily_summary ↔ reports 循环导入）
+
+
+def generate_weekly_report(*args, **kwargs):
+    """向后兼容重导出：委托 reports.generate_weekly_report（延迟导入规避循环导入）。"""
+    from backend.business.task_handlers.reports import generate_weekly_report as _impl
+
+    return _impl(*args, **kwargs)
+
+
+def generate_monthly_report(*args, **kwargs):
+    """向后兼容重导出：委托 reports.generate_monthly_report（延迟导入规避循环导入）。"""
+    from backend.business.task_handlers.reports import generate_monthly_report as _impl
+
+    return _impl(*args, **kwargs)
+
+
+def generate_annual_report(*args, **kwargs):
+    """向后兼容重导出：委托 reports.generate_annual_report（延迟导入规避循环导入）。"""
+    from backend.business.task_handlers.reports import generate_annual_report as _impl
+
+    return _impl(*args, **kwargs)
+
+
 # ══════════════════════════════════════════════════════════
