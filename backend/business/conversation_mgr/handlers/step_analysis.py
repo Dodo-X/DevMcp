@@ -32,7 +32,6 @@ def handle_step_analysis(engine, payload: dict) -> dict:
     symptom = payload.get("symptom", "")
     root_cause = payload.get("root_cause", "")
     solution = payload.get("solution", "")
-    ai_reasoning = payload.get("ai_reasoning", "")
     user_requirement = payload.get("user_requirement", "")
     commands_executed = payload.get("commands_executed", "")
 
@@ -56,7 +55,6 @@ def handle_step_analysis(engine, payload: dict) -> dict:
                 symptom=symptom,
                 root_cause=root_cause,
                 solution=solution,
-                ai_reasoning=ai_reasoning,
                 user_requirement=user_requirement,
                 commands_executed=commands_executed,
                 on_progress=wrap_llm_stream_progress(on_progress, step_name),
@@ -69,12 +67,9 @@ def handle_step_analysis(engine, payload: dict) -> dict:
                 results["skill_domains"] = llm_result.get("skill_domains", [])
                 results["difficulty"] = llm_result.get("difficulty", "medium")
                 results["problem_solving_pattern"] = llm_result.get("problem_solving_pattern", {})
-                results["thinking_patterns"] = llm_result.get("thinking_patterns", [])
                 results["commands_used"] = llm_result.get("commands_used", [])
-                results["complexity_level"] = llm_result.get("complexity_level", "simple")
                 results["key_insights"] = llm_result.get("key_insights", [])
                 results["improvement_suggestions"] = llm_result.get("improvement_suggestions", [])
-                results["related_tools"] = llm_result.get("related_tools", [])
 
                 extracted_kp = llm_result.get("knowledge_points", [])
                 if extracted_kp:
