@@ -324,9 +324,9 @@ def register_rest_routes(mcp):
             # 2. Failed / stalled tasks
             try:
                 tq_rows = db.query_local(
-                    "SELECT task_id, conversation_id, status, created_at, error_message "
-                    "FROM task_queue WHERE status IN ('failed', 'canceled') "
-                    "ORDER BY created_at DESC LIMIT 10"
+                    "SELECT task_id, status, queued_at, error_message "
+                    "FROM task_queue WHERE status IN ('failed', 'cancelled') "
+                    "ORDER BY queued_at DESC LIMIT 10"
                 )
                 for r in tq_rows or []:
                     notifications.append(
@@ -336,31 +336,11 @@ def register_rest_routes(mcp):
                             "level": "error",
                             "title": f"任务异常: {r['task_id'][:12]}",
                             "detail": r.get("error_message", f"状态: {r.get('status', '')}"),
-                            "time": r.get("created_at", ""),
+                            "time": r.get("queued_at", ""),
                         }
                     )
             except Exception:
                 logger.warning("api_notifications: 查询 task_queue 失败", exc_info=True)
-
-            # 3. Pending growth suggestions
-            try:
-                gs = db.query_local(
-                    "SELECT id, title, category, status, created_at "
-                    "FROM growth_items WHERE status = 'pending' ORDER BY created_at DESC LIMIT 10"
-                )
-                for r in gs or []:
-                    notifications.append(
-                        {
-                            "id": f"gs-{r['id']}",
-                            "type": "growth",
-                            "level": "info",
-                            "title": f"待审核: {r.get('title', r.get('category', '') or '建议')}",
-                            "detail": f"分类: {r.get('category', 'N/A')}",
-                            "time": r.get("created_at", ""),
-                        }
-                    )
-            except Exception:
-                logger.debug("api_notifications: growth_items 表可能不存在, 跳过")
 
             # 按时间倒序排列, 最多 30 条
             notifications.sort(key=lambda x: x.get("time", ""), reverse=True)

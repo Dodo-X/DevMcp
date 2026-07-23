@@ -564,7 +564,7 @@ class ConversationDAO:
             "architecture = COALESCE(NULLIF(?, ''), architecture), "
             "tech_stack = CASE WHEN ? != '' THEN ? ELSE tech_stack END, "
             "business_domains = CASE WHEN ? != '' THEN ? ELSE business_domains END, "
-            "updated_at = ? WHERE system_id = ?",
+            "last_seen_at = ? WHERE system_id = ?",
             (architecture, ts_json, ts_json, bd_json, bd_json, now, system_id),
         )
 

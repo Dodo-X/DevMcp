@@ -434,7 +434,6 @@ def _cascade_scan_daily_summary(db) -> int:
                 COUNT(*) as total,
                 SUM(CASE WHEN analyzed = 1 THEN 1 ELSE 0 END) as analyzed
             FROM conversations
-            WHERE is_deleted = 0
             GROUP BY DATE(created_at)
             HAVING analyzed = total AND total > 0
         """)

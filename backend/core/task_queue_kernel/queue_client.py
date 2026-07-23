@@ -997,7 +997,7 @@ class TaskQueue:
                 continue
 
             # 时间过滤
-            created_at_str = meta.get("created_at", "")
+            created_at_str = meta.get("queued_at", "")
             if created_at_str:
                 try:
                     created_at = datetime.fromisoformat(created_at_str)
