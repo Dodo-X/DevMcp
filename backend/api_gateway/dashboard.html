@@ -386,6 +386,12 @@
   .tbl th, .tbl td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); }
   .tbl th { color: var(--text-muted); font-weight: 600; }
 
+  /* ── Report comparison ── */
+  .cmp-pane { border: 1px solid var(--border); border-radius: var(--r); padding: 12px; background: var(--panel); }
+  .cmp-pane h4 { margin: 0 0 8px; font-size: 13px; color: var(--accent-2); }
+  .cmp-body { font-size: 12px; line-height: 1.65; color: var(--text); max-height: 480px; overflow: auto; }
+  .cmp-diff-highlight { background: var(--yellow-soft); border-radius: 2px; padding: 0 2px; }
+
   /* ── Notification center ── */
   .notif-wrap { position: relative; }
   .notif-btn { position: relative; font-size: 16px; }
@@ -593,7 +599,14 @@
                background:var(--accent-soft);border-radius:var(--r-sm);font-size:13px"></div>
           <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">
             匹配结果 <b id="kbListTotal">0</b> 条</div>
-          <div id="kbSearchResults" style="margin-top:12px"><div class="empty">输入问题描述，点击“AI 匹配”开始分析...</div></div>
+          <div id="kbSearchResults" style="margin-top:12px"><div class="empty">输入问题描述，点击"AI 匹配"开始分析...</div></div>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <h3>知识领域图 <span class="pill" id="kgNodeCount">0 节点</span></h3>
+          <svg id="kgCanvas" viewBox="0 0 680 400" style="width:100%;height:400px;background:var(--bg);border-radius:var(--r-sm)">
+            <text x="340" y="200" text-anchor="middle" fill="var(--text-muted)" font-size="13">加载中...</text>
+          </svg>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px">节点 = 领域·分类 | 连线 = 同一领域内关联</div>
         </div>
       </section>
 
@@ -671,6 +684,25 @@
           <div id="reportPreviewContent" style="font-size:13px;line-height:1.7;max-height:520px;overflow:auto">
             <div class="empty">从上方列表点击报告查看内容</div>
           </div>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <h3>报告对比 <span class="pill">交叉对比两期报告</span></h3>
+          <div class="row-flex" style="gap:14px;margin-bottom:12px">
+            <div class="field">
+              <label>报告 A（基准）</label>
+              <select id="cmpReportA" style="min-width:200px" onchange="onCmpSelect()"><option value="">-- 选择 --</option></select>
+            </div>
+            <div class="field">
+              <label>报告 B（对比）</label>
+              <select id="cmpReportB" style="min-width:200px" onchange="onCmpSelect()"><option value="">-- 选择 --</option></select>
+            </div>
+            <div class="field"><label>&nbsp;</label><button class="btn primary" id="cmpBtn" onclick="compareReports()" disabled>开始对比</button></div>
+          </div>
+          <div class="grid cols-2" id="cmpResult" style="display:none;gap:16px;max-height:600px;overflow:auto">
+            <div class="cmp-pane" id="cmpPaneA"><h4>基准</h4><div class="cmp-body"></div></div>
+            <div class="cmp-pane" id="cmpPaneB"><h4>对比</h4><div class="cmp-body"></div></div>
+          </div>
+          <div id="cmpDiff" style="display:none;margin-top:10px;font-size:12px;color:var(--text-2)"></div>
         </div>
       </section>
 
@@ -1051,7 +1083,7 @@ async function genDailyNow() {
 const PAGES = {
   overview:  { title: '概览',   crumb: '系统实时状态与关键指标', load: refreshOverview },
   growth:    { title: '成长',   crumb: '技能掌握度、活跃度与成长轨迹', load: refreshGrowthPage },
-  knowledge: { title: '知识库', crumb: 'AI 匹配与关键词检索', load: () => {} },
+  knowledge: { title: '知识库', crumb: 'AI 匹配与关键词检索', load: refreshKnowledgeGraph },
   projects:  { title: '项目',   crumb: '已对接项目与项目问答', load: refreshProjects },
   reports:   { title: '报告',   crumb: '日 / 周 / 月 / 年 报生成与预览', load: refreshReportsPage },
   conversations:{ title: '会话', crumb: '历史会话浏览与详情回溯', load: refreshConversationsPage },
@@ -1453,6 +1485,52 @@ async function searchKnowledge() {
   } catch(e) { document.getElementById('kbSearchResults').innerHTML = '<div class="empty">搜索失败: '+e.message+'</div>'; }
 }
 
+/* ── Knowledge graph ── */
+async function refreshKnowledgeGraph() {
+  try {
+    const d = await fetchJSON('/api/knowledge/graph');
+    const nodes = d.data.nodes || [], edges = d.data.edges || [];
+    document.getElementById('kgNodeCount').textContent = nodes.length + ' 节点';
+
+    const svg = document.getElementById('kgCanvas');
+    const W = 680, H = 400;
+    // 简单的圆形布局
+    const cx = W / 2, cy = H / 2, R = Math.min(W, H) / 2 - 40;
+    const colors = ['#6366f1','#a855f7','#22d3ee','#34d399','#fbbf24','#f87171','#60a5fa'];
+    let html = '';
+    // 画边
+    edges.forEach(e => {
+      const si = nodes.findIndex(n => n.id === e.source);
+      const ti = nodes.findIndex(n => n.id === e.target);
+      if (si < 0 || ti < 0) return;
+      const angS = (si / nodes.length) * Math.PI * 2 - Math.PI / 2;
+      const angT = (ti / nodes.length) * Math.PI * 2 - Math.PI / 2;
+      const x1 = cx + R * Math.cos(angS), y1 = cy + R * Math.sin(angS);
+      const x2 = cx + R * Math.cos(angT), y2 = cy + R * Math.sin(angT);
+      html += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="var(--border)" stroke-width="0.5" opacity="0.4"/>`;
+    });
+    // 画节点
+    nodes.forEach((n, i) => {
+      const ang = (i / nodes.length) * Math.PI * 2 - Math.PI / 2;
+      const x = cx + R * Math.cos(ang), y = cy + R * Math.sin(ang);
+      const r = Math.max(6, Math.min(24, Math.sqrt(n.count) * 5));
+      const colorIdx = n.domain ? n.domain.charCodeAt(0) % colors.length : 0;
+      html += `<g class="kg-node" style="cursor:pointer">
+        <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}" fill="${colors[colorIdx]}" opacity="0.7" stroke="var(--bg)" stroke-width="2"/>
+        <text x="${x.toFixed(1)}" y="${(y+4).toFixed(1)}" text-anchor="middle" fill="var(--text)" font-size="10">${escHtml(n.count)}</text>
+        <title>${escHtml(n.domain)} · ${escHtml(n.category)} (${n.count} 项 | 置信度 ${(n.confidence*100).toFixed(0)}%)</title>
+      </g>`;
+    });
+    // 图例
+    const domains = [...new Set(nodes.map(n => n.domain))];
+    html += domains.map((d, i) => {
+      const ci = d.charCodeAt(0) % colors.length;
+      return `<text x="12" y="${12+i*18}" fill="${colors[ci]}" font-size="11" font-weight="600">● ${escHtml(d)}</text>`;
+    }).join('');
+    svg.innerHTML = html;
+  } catch(e) { document.getElementById('kgCanvas').innerHTML = '<text x="340" y="200" text-anchor="middle" fill="var(--red)" font-size="13">图谱加载失败</text>'; }
+}
+
 /* ── Projects ── */
 async function refreshProjects() {
   try {
@@ -1752,6 +1830,15 @@ async function loadReportList() {
     document.getElementById('weeklyList').innerHTML = render(d.weekly,'weekly');
     document.getElementById('monthlyList').innerHTML = render(d.monthly,'monthly');
     document.getElementById('annualList').innerHTML = render(d.annual,'annual');
+
+    // 填充对比下拉框
+    const opts = [];
+    ['daily','weekly','monthly','annual'].forEach(t => {
+      (d[t]||[]).forEach(it => opts.push({ type: t, name: it.name }));
+    });
+    const optHtml = '<option value="">-- 选择 --</option>'+opts.map(o => '<option value="'+o.type+'|'+escHtml(o.name)+'">'+o.type+' — '+escHtml(o.name)+'</option>').join('');
+    document.getElementById('cmpReportA').innerHTML = optHtml;
+    document.getElementById('cmpReportB').innerHTML = optHtml;
   } catch(e) {
     ['dailyList','weeklyList','monthlyList','annualList'].forEach(id => document.getElementById(id).innerHTML = '<div class="empty" style="color:var(--red)">加载失败: '+escHtml(e.message)+'</div>');
   }
@@ -1775,6 +1862,47 @@ async function previewReport(type, name) {
     } else document.getElementById('reportPreviewContent').innerHTML = '<div class="empty" style="color:var(--red)">'+escHtml(d.error)+'</div>';
   } catch(e) { document.getElementById('reportPreviewContent').innerHTML = '<div class="empty" style="color:var(--red)">加载失败: '+escHtml(e.message)+'</div>'; }
 }
+
+/* ── Report comparison ── */
+function onCmpSelect() {
+  const a = document.getElementById('cmpReportA').value, b = document.getElementById('cmpReportB').value;
+  document.getElementById('cmpBtn').disabled = !(a && b && a !== b);
+}
+async function compareReports() {
+  const aVal = document.getElementById('cmpReportA').value, bVal = document.getElementById('cmpReportB').value;
+  if (!aVal || !bVal) return;
+  const [aType, aName] = aVal.split('|'), [bType, bName] = bVal.split('|');
+  document.getElementById('cmpResult').style.display = '';
+  document.getElementById('cmpPaneA').querySelector('.cmp-body').innerHTML = '<div class="empty">加载中...</div>';
+  document.getElementById('cmpPaneB').querySelector('.cmp-body').innerHTML = '<div class="empty">加载中...</div>';
+  document.getElementById('cmpDiff').style.display = 'none';
+  try {
+    const [dataA, dataB] = await Promise.all([
+      fetchJSON('/api/reports/read?type='+aType+'&name='+encodeURIComponent(aName)),
+      fetchJSON('/api/reports/read?type='+bType+'&name='+encodeURIComponent(bName)),
+    ]);
+    const renderCmp = (d, label) => {
+      if (!d.success) return '<div class="empty" style="color:var(--red)">'+escHtml(d.error||'加载失败')+'</div>';
+      return '<div style="font-weight:600;margin-bottom:6px;color:var(--accent-2)">'+escHtml(label)+'</div>' +
+        escHtml(d.content||'').replace(/^- (.+)$/gm, '<li style="margin-left:16px">$1</li>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n\n/g, '<br><br>').replace(/\n/g, '<br>');
+    };
+    document.getElementById('cmpPaneA').querySelector('h4').textContent = aName;
+    document.getElementById('cmpPaneA').querySelector('.cmp-body').innerHTML = renderCmp(dataA, aName);
+    document.getElementById('cmpPaneB').querySelector('h4').textContent = bName;
+    document.getElementById('cmpPaneB').querySelector('.cmp-body').innerHTML = renderCmp(dataB, bName);
+    // 简单差异统计
+    const lenA = (dataA.content||'').length, lenB = (dataB.content||'').length;
+    const diff = Math.abs(lenA - lenB);
+    document.getElementById('cmpDiff').style.display = '';
+    document.getElementById('cmpDiff').innerHTML = 'A: ' + lenA + ' 字符 | B: ' + lenB + ' 字符 | 差异: ' + diff + ' 字符';
+  } catch(e) {
+    document.getElementById('cmpDiff').style.display = '';
+    document.getElementById('cmpDiff').innerHTML = '<span style="color:var(--red)">对比失败: '+escHtml(e.message)+'</span>';
+  }
+}
+
 async function generateReport() {
   const type = document.getElementById('reportType').value;
   const forceOverwrite = document.getElementById('reportForceOverwrite').checked;

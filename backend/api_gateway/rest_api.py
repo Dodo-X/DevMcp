@@ -673,6 +673,56 @@ def register_rest_routes(mcp):
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     # ════════════════════════════════════════════════
+    # 知识图谱 API
+    # ════════════════════════════════════════════════
+    @mcp.custom_route("/api/knowledge/graph", methods=["GET"])
+    async def api_knowledge_graph(request: Request) -> JSONResponse:
+        """知识图谱数据（节点 + 边）"""
+        try:
+
+            from backend.core.database.base_conn import get_db
+
+            db = get_db()
+            rows = db.query_local(
+                "SELECT domain, category, COUNT(*) as cnt, "
+                "AVG(confidence) as avg_conf, SUM(usage_count) as total_use "
+                "FROM knowledge_points GROUP BY domain, category ORDER BY cnt DESC LIMIT 80"
+            )
+
+            nodes = []
+            edges = []
+            node_map = {}
+            for r in (rows or []):
+                node_id = f"{r['domain']}|{r['category']}"
+                node_map[node_id] = len(nodes)
+                nodes.append({
+                    "id": node_id,
+                    "domain": r["domain"],
+                    "category": r["category"],
+                    "count": r["cnt"],
+                    "confidence": round(r["avg_conf"] or 0, 2),
+                    "usage": r["total_use"] or 0,
+                })
+
+            # 同一 domain 下的 category 之间建边
+            domain_groups = {}
+            for n in nodes:
+                domain_groups.setdefault(n["domain"], []).append(n["id"])
+            for ids in domain_groups.values():
+                for i in range(len(ids)):
+                    for j in range(i + 1, len(ids)):
+                        edges.append({"source": ids[i], "target": ids[j], "weight": 1})
+
+            return JSONResponse(
+                content={"code": 0, "message": "ok", "data": {"nodes": nodes, "edges": edges}}
+            )
+        except Exception as e:
+            logger.warning("api_knowledge_graph 失败", exc_info=True)
+            return JSONResponse(
+                content={"code": -1, "message": str(e), "data": {}}, status_code=500
+            )
+
+    # ════════════════════════════════════════════════
     # Projects Knowledge API
     # ════════════════════════════════════════════════
     @mcp.custom_route("/api/projects/list", methods=["GET"])
