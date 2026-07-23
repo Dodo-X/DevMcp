@@ -631,6 +631,8 @@ class LLMEngine:
 
                 # 逐行读取流式响应
                 for line in resp:
+                    if line is None:
+                        break  # 连接已关闭
                     line = line.decode("utf-8").strip()
                     if not line:
                         continue
