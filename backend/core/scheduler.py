@@ -349,9 +349,11 @@ class ProfileScheduler:
         logger.info(f"📊 提交每日工作总结任务 [{target_date}]")
 
         try:
+            from backend.core.database.base_conn import get_db
             from backend.core.task_queue_kernel.queue_client import get_task_queue
 
             queue = get_task_queue()
+            db = get_db()
 
             # v9.6.3: 先做日报兜底扫描 — 检查是否有历史遗漏的日报
             cascade_count = self._cascade_scan_daily_summary()
@@ -504,7 +506,7 @@ class ProfileScheduler:
                 payload={"trigger_time": trigger_time.isoformat()},
                 priority=3,
                 estimated_memory_mb=200,
-                timeout=1800,
+                timeout_seconds=1800,
             )
             logger.info(f"✅ 周报任务已提交: {task_id}")
         except Exception as e:
@@ -628,7 +630,7 @@ class ProfileScheduler:
                 payload={"trigger_time": trigger_time.isoformat()},
                 priority=3,
                 estimated_memory_mb=200,
-                timeout=1800,
+                timeout_seconds=1800,
             )
             logger.info(f"✅ 月报任务已提交: {task_id}")
         except Exception as e:
@@ -647,7 +649,7 @@ class ProfileScheduler:
                 payload={"trigger_time": trigger_time.isoformat()},
                 priority=3,
                 estimated_memory_mb=200,
-                timeout=3600,
+                timeout_seconds=3600,
             )
             logger.info(f"✅ 年报任务已提交: {task_id}")
         except Exception as e:

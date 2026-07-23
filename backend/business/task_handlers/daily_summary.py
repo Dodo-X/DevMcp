@@ -222,7 +222,8 @@ def _enrich_daily_data_with_analytics(db, result: dict, date_str: str):
         }
 
         # ── 5. 近7日指标趋势（daily_report_metrics）──
-        from datetime import datetime as _dt, timedelta as _td
+        from datetime import datetime as _dt
+        from datetime import timedelta as _td
 
         today_dt = _dt.strptime(date_str, "%Y-%m-%d")
         seven_days_ago = (today_dt - _td(days=6)).strftime("%Y-%m-%d")

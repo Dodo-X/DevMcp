@@ -950,11 +950,11 @@ class LLMEngine:
 
         # v9.12: 真实画像快照（来自 DB，不再是空占位符）
         analytics = data.get("analytics", {})
-        profile_snapshot = _format_profile_for_prompt(analytics.get("user_profile_snapshot"))
-        knowledge_context = _format_knowledge_for_prompt(analytics.get("knowledge_stats"))
-        metrics_context = _format_metrics_trend_for_prompt(analytics.get("metrics_trends"))
-        skill_context = _format_skills_for_prompt(analytics.get("skill_summary"))
-        plan_context = _format_learning_plan_for_prompt(analytics.get("learning_plan"))
+        profile_snapshot = self._format_profile_for_prompt(analytics.get("user_profile_snapshot"))
+        knowledge_context = self._format_knowledge_for_prompt(analytics.get("knowledge_stats"))
+        metrics_context = self._format_metrics_trend_for_prompt(analytics.get("metrics_trends"))
+        skill_context = self._format_skills_for_prompt(analytics.get("skill_summary"))
+        plan_context = self._format_learning_plan_for_prompt(analytics.get("learning_plan"))
 
         result = run_analysis(
             TASK_DAILY_SUMMARY,
@@ -965,7 +965,7 @@ class LLMEngine:
             conversations=conversations_json,
             user_profile_snapshot=profile_snapshot,
             project_profile_snapshot=data.get("project_profile_snapshot", "暂无项目画像数据"),
-            analytics_context=_build_analytics_context(
+            analytics_context=self._build_analytics_context(
                 knowledge_context, metrics_context, skill_context, plan_context
             ),
         )
