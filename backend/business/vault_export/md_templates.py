@@ -310,6 +310,7 @@ def register_all(assembler: MdAssembler = None):
                         ("insights", "洞察"),
                         ("decisions", "技术决策"),
                         ("solutions", "问题解决"),
+                        ("bugs", "Bug 修复"),
                     ],
                     condition=lambda d: bool((d.get("report_data") or {}).get("knowledge")),
                 ),
@@ -319,6 +320,13 @@ def register_all(assembler: MdAssembler = None):
                     render_kv,
                     kv_map=[("repeated_mistakes", "重复错误"), ("tech_debt", "技术债务")],
                     condition=lambda d: bool((d.get("report_data") or {}).get("danger_signals")),
+                ),
+                MdSection(
+                    "report_data",
+                    "## 🌱 成长规划",
+                    render_kv,
+                    kv_map=[("growth_plan", "成长建议")],
+                    condition=lambda d: bool((d.get("report_data") or {}).get("growth_plan")),
                 ),
                 MdSection(
                     "report_data",
@@ -361,6 +369,17 @@ def register_all(assembler: MdAssembler = None):
                         ("recurring_blockers", "反复阻塞"),
                     ],
                     condition=lambda d: bool((d.get("report_data") or {}).get("psychology")),
+                ),
+                MdSection(
+                    "report_data",
+                    "## 🔍 自我反思",
+                    render_kv,
+                    kv_map=[
+                        ("strengths", "优势"),
+                        ("weaknesses", "待改进"),
+                        ("growthSuggestions", "成长建议"),
+                    ],
+                    condition=lambda d: bool((d.get("report_data") or {}).get("self_analysis")),
                 ),
                 MdSection(
                     "report_data",

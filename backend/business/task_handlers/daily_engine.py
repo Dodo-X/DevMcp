@@ -16,6 +16,90 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _normalize_daily_report_json(summary: dict):
+    """v9.12: 将 LLM 输出 JSON 扁平化到 MD 模板期望的结构。
+
+    LLM 经常把 skills/knowledge/danger_signals/projects 嵌套到 experience 里面、
+    把 metrics/psychology 嵌套到 self_analysis 里面，导致 MD 模板的 flat key 查找
+    返回 None。此函数集中处理所有已知嵌套模式，提取到顶层。
+    """
+    exp = summary.get("experience", {})
+    sa = summary.get("self_analysis", {})
+
+    # ── experience 内的嵌套字段 ──
+    if isinstance(exp, dict):
+        # skills.patterns
+        if "skills" in exp and "skills" not in summary:
+            summary["skills"] = exp.pop("skills")
+
+        # knowledge.{insights, decisions, solutions, bugs}
+        if "knowledge" in exp and "knowledge" not in summary:
+            summary["knowledge"] = exp.pop("knowledge")
+
+        # danger_signals → 可能是数组或 dict
+        if "danger_signals" in exp and "danger_signals" not in summary:
+            raw = exp.pop("danger_signals")
+            if isinstance(raw, list):
+                summary["danger_signals"] = {"repeated_mistakes": raw, "tech_debt": []}
+            else:
+                summary["danger_signals"] = raw
+
+        # tech_debt
+        if "tech_debt" in exp:
+            ds = summary.setdefault("danger_signals", {})
+            ds["tech_debt"] = exp.pop("tech_debt")
+
+        # growth_plan → 提升到顶层
+        if "growth_plan" in exp:
+            summary["growth_plan"] = exp.pop("growth_plan")
+
+        # projects → project_analysis
+        if "projects" in exp:
+            pj = exp.pop("projects")
+            if isinstance(pj, list):
+                summary["project_analysis"] = {"projects": pj}
+            else:
+                summary["project_analysis"] = pj
+
+    # knowledge 内的 bugs → 提升
+    knowledge = summary.get("knowledge", {})
+    if isinstance(knowledge, dict) and "bugs" in knowledge:
+        # bugs 保留在 knowledge 中供渲染
+        pass
+
+    # knowledge 内的 projects → project_analysis
+    if isinstance(knowledge, dict) and "projects" in knowledge:
+        pj = knowledge.pop("projects")
+        if isinstance(pj, list):
+            summary["project_analysis"] = {"projects": pj}
+
+    # ── self_analysis 内的嵌套字段 ──
+    if isinstance(sa, dict):
+        # metrics
+        if "metrics" in sa and "metrics" not in summary:
+            summary["metrics"] = sa.pop("metrics")
+
+        # psychology
+        if "psychology" in sa and "psychology" not in summary:
+            summary["psychology"] = sa.pop("psychology")
+
+        # strengths/weaknesses/growth_suggestions → 保留在 self_analysis
+        # （模板新增 self_analysis 段来渲染）
+
+    # ── danger_signals 格式统一 ──
+    ds = summary.get("danger_signals", {})
+    if isinstance(ds, dict):
+        # 确保 repeated_mistakes 是数组
+        if "repeated_mistakes" in ds and not isinstance(ds["repeated_mistakes"], list):
+            ds["repeated_mistakes"] = [ds["repeated_mistakes"]]
+
+    # ── experience 清理：移除空键 ──
+    if isinstance(exp, dict):
+        for key in list(exp.keys()):
+            if isinstance(exp[key], (dict, list)) and not exp[key]:
+                del exp[key]
+
+
 def handle_daily_summary(payload: dict) -> dict:
     """
     v9.8.2: 日报生成 — 纯日历日记，不写业务知识/用户画像。
@@ -45,6 +129,9 @@ def handle_daily_summary(payload: dict) -> dict:
             f"日报 [{target_date}] LLM 分析未成功 (method={summary.get('analysis_method')})，跳过导出"
         )
         return summary
+
+    # v9.12: 归一化 LLM 输出的 JSON 结构，确保 MD 模板能正确读取所有数据
+    _normalize_daily_report_json(summary)
 
     # Step 2: 导出 Calendar/{date}.md（唯一持久化）
     _progress(0.75, "", "正在导出 Markdown 报告...")
@@ -94,7 +181,7 @@ def register_task_handlers():
 
         ts = payload.get("trigger_time", "")
         trigger_time = _dt.fromisoformat(ts) if ts else None
-        return generate_weekly_report(trigger_time)
+        return generate_weekly_report(trigger_time, on_progress=payload.get("_progress_callback"))
 
     def _monthly_wrapper(payload: dict) -> dict:
         from datetime import datetime as _dt
@@ -103,7 +190,7 @@ def register_task_handlers():
 
         ts = payload.get("trigger_time", "")
         trigger_time = _dt.fromisoformat(ts) if ts else None
-        return generate_monthly_report(trigger_time=trigger_time)
+        return generate_monthly_report(trigger_time=trigger_time, on_progress=payload.get("_progress_callback"))
 
     def _annual_wrapper(payload: dict) -> dict:
         from datetime import datetime as _dt
@@ -112,7 +199,7 @@ def register_task_handlers():
 
         ts = payload.get("trigger_time", "")
         trigger_time = _dt.fromisoformat(ts) if ts else None
-        return generate_annual_report(trigger_time=trigger_time)
+        return generate_annual_report(trigger_time=trigger_time, on_progress=payload.get("_progress_callback"))
 
     queue.register_handler("weekly_report", _weekly_wrapper)
     queue.register_handler("monthly_report", _monthly_wrapper)

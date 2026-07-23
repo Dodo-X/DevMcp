@@ -119,6 +119,26 @@ def render_kv(value: Any, data: dict, kv_map=None, **kwargs) -> list[str]:
         if isinstance(items, list):
             if not items:
                 continue
+            # v9.12: 列表元素为 dict 时按子字段渲染（如 bugs 的 {category,description,solution}）
+            if items and isinstance(items[0], dict):
+                lines.append(f"**{label}**:")
+                for item in items:
+                    for sub_key in ("description", "target", "goal", "title"):
+                        if sub_key in item:
+                            desc = item.get(sub_key, "")
+                            extra = ""
+                            if "category" in item:
+                                extra = f" [{item['category']}]"
+                            if "solution" in item:
+                                extra += f" → {item['solution']}"
+                            lines.append(f"- {desc}{extra}")
+                            break
+                    else:
+                        # fallback: join all values
+                        parts = [str(v) for v in item.values() if v]
+                        if parts:
+                            lines.append(f"- {': '.join(parts)}")
+                continue
             lines.append(f"**{label}**:")
             for item in items:
                 lines.append(f"- {item}")
