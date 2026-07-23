@@ -468,7 +468,7 @@ class VaultExporter:
                     if safe_project in content[:1000]:
                         skill_count += 1
                         rel_path = card_file.relative_to(self._vault_root)
-                        skill_links.append(str(rel_path.with_suffix("")))
+                        skill_links.append(str(rel_path.with_suffix("")).replace("\\", "/"))
                 except Exception:
                     logger.warning(
                         "VaultExporter._write_project_dashboard: 未预期的异常被静默捕获（P-17 收口）",
