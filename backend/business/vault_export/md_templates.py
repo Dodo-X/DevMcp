@@ -73,6 +73,7 @@ def _safe_json(val, default):
 
         return json.loads(val)
     except Exception:
+        logger.warning("_safe_json: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
         return default
 
 

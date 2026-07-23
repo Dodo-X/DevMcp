@@ -80,6 +80,10 @@ class MdExporter:
                     tuple(source_ids),
                 )
             except Exception:
+                logger.warning(
+                    "MdExporter.export_knowledge_summary: 未预期的异常被静默捕获（P-17 收口）",
+                    exc_info=True,
+                )
                 kp_rows = []
 
             if not kp_rows:
@@ -100,6 +104,10 @@ class MdExporter:
                     try:
                         tags = json.loads(tags_raw)
                     except Exception:
+                        logger.warning(
+                            "MdExporter.export_knowledge_summary: 未预期的异常被静默捕获（P-17 收口）",
+                            exc_info=True,
+                        )
                         tags = [tags_raw] if tags_raw else []
                 elif isinstance(tags_raw, list):
                     tags = tags_raw

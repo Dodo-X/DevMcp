@@ -153,6 +153,9 @@ class VaultExporter:
                     if path:
                         result["skills_exported"] += 1
             except Exception as e:
+                logger.warning(
+                    "VaultExporter.export_batch: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+                )
                 result["errors"].append(f"知识导出失败 [{kid}]: {e}")
 
         # 生成/更新项目仪表盘（SQL 驱动）
@@ -160,6 +163,9 @@ class VaultExporter:
             self._write_project_dashboard(project)
             logger.info(f"📊 项目仪表盘已更新: {project}")
         except Exception as e:
+            logger.warning(
+                "VaultExporter.export_batch: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             result["errors"].append(f"仪表盘生成失败: {e}")
 
         logger.info(
@@ -199,8 +205,16 @@ class VaultExporter:
                     else:
                         result["skipped"] += 1
                 except Exception as e:
+                    logger.warning(
+                        "VaultExporter.export_all_knowledge: 未预期的异常被静默捕获（P-17 收口）",
+                        exc_info=True,
+                    )
                     result["errors"].append(f"导出失败 [{row['knowledge_id']}]: {e}")
         except Exception as e:
+            logger.warning(
+                "VaultExporter.export_all_knowledge: 未预期的异常被静默捕获（P-17 收口）",
+                exc_info=True,
+            )
             result["errors"].append(f"全量导出失败: {e}")
         return result
 
@@ -435,6 +449,10 @@ class VaultExporter:
                     if match and safe_project in match.group(1):
                         daily_reports.append(md_file.stem)
                 except Exception:
+                    logger.warning(
+                        "VaultExporter._write_project_dashboard: 未预期的异常被静默捕获（P-17 收口）",
+                        exc_info=True,
+                    )
                     continue
 
         # 统计知识卡片
@@ -452,6 +470,10 @@ class VaultExporter:
                         rel_path = card_file.relative_to(self._vault_root)
                         skill_links.append(str(rel_path.with_suffix("")))
                 except Exception:
+                    logger.warning(
+                        "VaultExporter._write_project_dashboard: 未预期的异常被静默捕获（P-17 收口）",
+                        exc_info=True,
+                    )
                     continue
 
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -547,6 +569,10 @@ class VaultExporter:
             )
             return dict(rows[0]) if rows else None
         except Exception:
+            logger.warning(
+                "VaultExporter._get_knowledge_by_id: 未预期的异常被静默捕获（P-17 收口）",
+                exc_info=True,
+            )
             return None
 
     def _build_frontmatter(
