@@ -416,6 +416,50 @@
   .notif-item.ni-error { border-left: 3px solid var(--red); }
   .notif-item.ni-warning { border-left: 3px solid var(--yellow); }
   .notif-item.ni-info { border-left: 3px solid var(--blue); }
+
+  /* ── Pipeline (task stage progress) ── */
+  .pipeline { margin-bottom: 12px; padding: 12px 14px; background: var(--panel-2);
+    border-radius: var(--r); border: 1px solid var(--border-soft); }
+  .pl-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .pl-type-icon { font-size: 16px; line-height: 1; }
+  .pl-type-name { font-size: 13px; font-weight: 600; color: var(--text); }
+  .pl-elapsed { margin-left: auto; font-size: 11px; color: var(--text-muted);
+    font-family: var(--mono); }
+  .pl-stages { display: flex; align-items: center; gap: 0; }
+  .pl-stage { display: flex; align-items: center; gap: 5px; font-size: 11px;
+    color: var(--text-muted); white-space: nowrap; position: relative; }
+  .pl-stage .pl-dot { width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid var(--border); flex-shrink: 0; transition: all var(--dur) var(--ease); }
+  .pl-stage .pl-label { transition: color var(--dur) var(--ease); }
+  .pl-stage.done .pl-dot { background: var(--green); border-color: var(--green); }
+  .pl-stage.done .pl-dot::after { content: '✓'; font-size: 9px; color: #fff;
+    position: absolute; top: 0; left: 0; width: 14px; height: 14px;
+    display: flex; align-items: center; justify-content: center; }
+  .pl-stage.done .pl-label { color: var(--green); }
+  .pl-stage.active .pl-dot { border-color: var(--accent); background: var(--accent-soft);
+    animation: pl-pulse 1.6s ease-in-out infinite; }
+  .pl-stage.active .pl-label { color: var(--accent-2); font-weight: 600; }
+  .pl-stage.error .pl-dot { background: var(--red); border-color: var(--red); }
+  .pl-stage.error .pl-dot::after { content: '✗'; font-size: 9px; color: #fff;
+    position: absolute; top: 0; left: 0; width: 14px; height: 14px;
+    display: flex; align-items: center; justify-content: center; }
+  .pl-stage.error .pl-label { color: var(--red); }
+  .pl-connector { width: 16px; height: 1px; background: var(--border);
+    flex-shrink: 0; margin: 0 2px; transition: background var(--dur) var(--ease); }
+  .pl-connector.done { background: var(--green); }
+  .pl-sub-bar { height: 3px; border-radius: 2px; background: var(--border-soft);
+    margin-top: 6px; overflow: hidden; }
+  .pl-sub-bar-fill { height: 100%; border-radius: 2px; background: var(--accent);
+    transition: width .5s var(--ease); }
+  .pl-preview { font-size: 11px; color: var(--text-2); margin-top: 6px;
+    font-family: var(--mono); max-height: 32px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  @keyframes pl-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 var(--accent-soft); }
+    50% { box-shadow: 0 0 0 4px transparent; }
+  }
+  /* empty state when no running tasks */
+  .pl-idle { padding: 14px; text-align: center; color: var(--text-muted); font-size: 13px; }
 </style>
 </head>
 <body>
@@ -1231,20 +1275,149 @@ async function refreshTaskOps() {
 async function refreshDiagnostics() {
   try {
     const d = await fetchJSON('/api/tasks/diagnostics');
-    let html = '';
     const running = d.running_tasks || [];
-    if (running.length) {
-      html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">运行中 (' + running.length + ')</div>';
-      html += running.map(t => `<div class="diag-row"><span class="diag-name mono">${(t.id||'').slice(0,8)} · ${t.type||'-'}</span><span class="diag-val">${fmtTime(t.started)}</span></div>`).join('');
-    }
     const pending = d.pending_preview || [];
-    if (pending.length) {
-      html += '<div style="font-size:12px;color:var(--text-muted);margin:8px 0 4px;">排队中 (' + d.pending_in_queue + ')</div>';
-      html += pending.map(t => `<div class="diag-row"><span class="diag-name mono">${(t.id||'').slice(0,8)} · ${t.type||'-'}</span></div>`).join('');
+
+    // 类型 → 图标/名称映射
+    const TASK_META = {
+      daily_summary: { icon: '📅', name: '日报生成' },
+      weekly_report: { icon: '📊', name: '周报生成' },
+      monthly_report: { icon: '📈', name: '月报生成' },
+      annual_report: { icon: '🗓', name: '年报生成' },
+      step_analysis: { icon: '🔍', name: '步骤分析' },
+      conversation_analysis: { icon: '💬', name: '对话分析' },
+      conversation_finalize: { icon: '✅', name: '对话收尾' },
+      knowledge_extraction: { icon: '🧩', name: '知识提取' },
+      profile_update: { icon: '👤', name: '画像更新' },
+      system_optimization: { icon: '⚙️', name: '系统优化' },
+      growth_analysis: { icon: '📈', name: '成长分析' },
+    };
+
+    let html = '';
+    if (running.length) {
+      html += running.map(t => renderPipeline(t, TASK_META[t.task_type] || { icon: '🔄', name: t.task_type || '未知' })).join('');
     }
-    if (!html) html = '<div class="empty">队列空闲，无运行中任务</div>';
+    if (pending.length) {
+      html += '<div style="font-size:12px;color:var(--text-muted);margin:8px 0 4px;">排队中 (' + (d.pending_in_queue || 0) + ')</div>';
+      html += pending.map(t => '<div class="diag-row"><span class="diag-name mono">' + escHtml((t.id||'').slice(0,8)) + ' · ' + escHtml(t.type||'-') + '</span></div>').join('');
+    }
+    if (!html) html = '<div class="pl-idle">队列空闲，无运行中任务</div>';
     document.getElementById('diagContent').innerHTML = html;
   } catch(e) { document.getElementById('diagContent').innerHTML = '<div class="empty" style="color:var(--red)">诊断信息获取失败</div>'; }
+}
+
+/* ── Pipeline renderer ── */
+function renderPipeline(task, meta) {
+  const progress = task.progress || 0;
+  const started = task.started_at || '';
+  const elapsed = started ? elapsedSince(started) : '';
+  const statusNote = task.status_note || '';
+  const preview = task.partial_result || '';
+
+  // 根据进度判断阶段
+  const STAGES = [
+    { key: 'prepare', label: '准备数据', range: [0.0, 0.25] },
+    { key: 'analyze', label: 'LLM 分析', range: [0.25, 0.75] },
+    { key: 'parse', label: '解析结果', range: [0.75, 0.85] },
+    { key: 'export', label: '保存导出', range: [0.85, 0.95] },
+  ];
+
+  let stageStatus = {};
+  STAGES.forEach(s => {
+    if (progress >= s.range[1]) stageStatus[s.key] = 'done';
+    else if (progress >= s.range[0]) stageStatus[s.key] = 'active';
+    else stageStatus[s.key] = 'pending';
+  });
+
+  // LLM 分析的子进度（0.25~0.75 映射到 0~100%）
+  let subPct = 0;
+  if (progress >= 0.25 && progress < 0.75) {
+    subPct = Math.round(((progress - 0.25) / 0.50) * 100);
+  } else if (progress >= 0.75) {
+    subPct = 100;
+  }
+
+  const stageHtml = STAGES.map((s, i) => {
+    let conn = '';
+    if (i > 0) {
+      const prevDone = progress >= STAGES[i-1].range[1];
+      conn = '<span class="pl-connector' + (prevDone ? ' done' : '') + '"></span>';
+    }
+    let subBar = '';
+    if (s.key === 'analyze' && stageStatus[s.key] === 'active' && subPct > 0) {
+      subBar = '<div class="pl-sub-bar"><div class="pl-sub-bar-fill" style="width:' + subPct + '%"></div></div>';
+    }
+    return conn + '<span class="pl-stage ' + stageStatus[s.key] + '" title="' + s.label + (subPct > 0 && s.key==='analyze' ? ' ' + subPct + '%' : '') + '">' +
+      '<span class="pl-dot"></span>' +
+      '<span class="pl-label">' + s.label + (s.key==='analyze' && stageStatus[s.key]==='active' && subPct>0 ? ' <span style="font-size:10px;opacity:.7">' + subPct + '%</span>' : '') + '</span>' +
+      (subBar ? subBar : '') +
+      '</span>';
+  }).join('');
+
+  const error = progress < 0.05 && task.status === 'failed';
+
+  return '<div class="pipeline" id="pl-' + task.task_id + '">' +
+    '<div class="pl-header">' +
+      '<span class="pl-type-icon">' + meta.icon + '</span>' +
+      '<span class="pl-type-name">' + meta.name + '</span>' +
+      (elapsed ? '<span class="pl-elapsed">⏱ ' + elapsed + '</span>' : '') +
+    '</div>' +
+    '<div class="pl-stages">' + stageHtml + '</div>' +
+    (preview ? '<div class="pl-preview">' + escHtml(preview).substring(0, 80) + '</div>' : '') +
+    (statusNote ? '<div class="pl-preview" style="color:var(--accent-2)">' + escHtml(statusNote) + '</div>' : '') +
+    '</div>';
+}
+
+function elapsedSince(iso) {
+  if (!iso) return '';
+  try {
+    const ms = Date.now() - new Date(iso).getTime();
+    if (ms < 0) return '';
+    const sec = Math.floor(ms / 1000);
+    if (sec < 60) return sec + 's';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return min + 'm ' + (sec % 60) + 's';
+    return Math.floor(min / 60) + 'h ' + (min % 60) + 'm';
+  } catch(e) { return ''; }
+}
+
+/* ── Update pipelines from SSE ── */
+function updatePipelinesFromSSE(tasks) {
+  if (!tasks || !tasks.length) {
+    // 没有运行中任务，清空管道区域
+    const diagEl = document.getElementById('diagContent');
+    if (diagEl && !diagEl.querySelector('.pipeline')) return; // 已经是空闲状态
+    if (diagEl) diagEl.innerHTML = '<div class="pl-idle">队列空闲，无运行中任务</div>';
+    return;
+  }
+
+  const TASK_META = {
+    daily_summary: { icon: '📅', name: '日报生成' },
+    weekly_report: { icon: '📊', name: '周报生成' },
+    monthly_report: { icon: '📈', name: '月报生成' },
+    annual_report: { icon: '🗓', name: '年报生成' },
+    step_analysis: { icon: '🔍', name: '步骤分析' },
+    conversation_analysis: { icon: '💬', name: '对话分析' },
+    conversation_finalize: { icon: '✅', name: '对话收尾' },
+    knowledge_extraction: { icon: '🧩', name: '知识提取' },
+    profile_update: { icon: '👤', name: '画像更新' },
+    system_optimization: { icon: '⚙️', name: '系统优化' },
+    growth_analysis: { icon: '📈', name: '成长分析' },
+  };
+
+  const diagEl = document.getElementById('diagContent');
+  // 替换整个诊断区域为管道视图
+  diagEl.innerHTML = tasks.map(t => {
+    const meta = TASK_META[t.task_type] || { icon: '🔄', name: t.task_type || '未知' };
+    return renderPipeline({
+      task_id: t.task_id,
+      progress: t.progress || 0,
+      status_note: t.status_note || '',
+      partial_result: t.partial_result || '',
+      started_at: t.started_at || '',
+      status: 'running',
+    }, meta);
+  }).join('') || '<div class="pl-idle">队列空闲，无运行中任务</div>';
 }
 async function refreshHandlers() {
   try {
@@ -2177,7 +2350,10 @@ function connectTaskSSE() {
       const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val ?? '-'; };
       setVal('pendingTasks', d.pending_tasks);
       setVal('runningTasks', d.running_tasks);
+      setVal('completedTasks', d.completed_tasks);
       setVal('taskTotal', (d.pending_tasks||0)+(d.running_tasks||0)+(d.completed_tasks||0)+(d.failed_tasks||0));
+      // 更新管道视图
+      if (d.tasks !== undefined) updatePipelinesFromSSE(d.tasks || []);
     } catch(ignored) {}
   };
   _sseConn.onerror = () => {

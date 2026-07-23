@@ -1533,6 +1533,7 @@ def register_rest_routes(mcp):
                 try:
                     # 收集任务状态
                     stats = tq.get_queue_stats()
+                    running = tq.get_running_tasks_with_progress()
                     # 收集 pending analyses
                     pa = db.query_local(
                         "SELECT COUNT(*) as cnt FROM pending_analyses WHERE status = 'pending'"
@@ -1545,12 +1546,13 @@ def register_rest_routes(mcp):
                         "completed_tasks": stats.get("total_completed", 0),
                         "failed_tasks": stats.get("total_failed", 0),
                         "pending_analysis": pending_analysis,
+                        "tasks": running,  # ← 新：运行中任务的阶段进度
                     }
 
                     yield f"data: {_json.dumps(data)}\n\n"
                 except Exception:
                     yield f"data: {_json.dumps({})}\n\n"
-                await asyncio.sleep(5)  # 每 5 秒推送
+                await asyncio.sleep(3)  # 每 3 秒推送（原 5 秒→加快刷新）
 
         return StreamingResponse(
             event_stream(),

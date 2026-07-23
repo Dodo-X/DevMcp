@@ -475,7 +475,8 @@ def generate_monthly_report(
 
 
 def generate_annual_report(
-    trigger_time: datetime = None, target_date: str = None, force_overwrite: bool = False
+    trigger_time: datetime = None, target_date: str = None, force_overwrite: bool = False,
+    on_progress=None,
 ) -> dict:
     """
     生成年报（v8.0 — LLM 驱动 + MD 自包含）
@@ -575,6 +576,14 @@ def generate_annual_report(
 
         from backend.templates.llm_prompt import TASK_ANNUAL_REPORT, run_analysis
 
+        if on_progress:
+            def _a_progress(partial_text, pct):
+                stage_progress = 0.25 + pct * 0.45
+                on_progress(stage_progress, partial_text[:200], "LLM 分析中...")
+            _a_progress("", 0.0)
+        else:
+            _a_progress = None
+
         llm_result = run_analysis(
             TASK_ANNUAL_REPORT,
             period_start=period_start,
@@ -582,9 +591,11 @@ def generate_annual_report(
             monthly_summaries=monthly_summaries_text[:14000],
             user_profile_snapshot=user_snapshot[:2000],
             project_profile_snapshot=project_snapshot[:2000],
+            on_progress=_a_progress,
         )
 
         if llm_result and isinstance(llm_result, dict) and "summary" in llm_result:
+            if on_progress: on_progress(0.80, "", "正在导出年报文件...")
             file_path = exporter.export_annual_report(year_str, llm_result)
             result["success"] = True
             result["method"] = "llm"

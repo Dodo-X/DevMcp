@@ -207,6 +207,27 @@ def apply_patches():
 
     except ImportError:
         logger.warning("无法导入 anyio，跳过 MemoryObjectSendStream 补丁")
+
+    # Windows Proactor: 抑制客户端断开 SSE 连接时的 WinError 10054 噪音
+    if sys.platform == "win32":
+        try:
+            from asyncio.proactor_events import _ProactorBasePipeTransport
+
+            _original_connection_lost = _ProactorBasePipeTransport._call_connection_lost
+
+            def _patched_connection_lost(self, exc):
+                if exc is None:
+                    try:
+                        _original_connection_lost(self, None)
+                    except (ConnectionResetError, OSError):
+                        pass  # 客户端断开 SSE/HTTP 连接，无需报错
+                else:
+                    _original_connection_lost(self, exc)
+
+            _ProactorBasePipeTransport._call_connection_lost = _patched_connection_lost
+            logger.info("Windows Proactor WinError 10054 噪音已抑制")
+        except ImportError:
+            pass
     except Exception as e:
         logger.warning(f"MemoryObjectSendStream 补丁应用失败: {e}")
 
