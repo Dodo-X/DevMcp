@@ -54,6 +54,16 @@ def handle_daily_summary(payload: dict) -> dict:
     except Exception as e:
         logger.warning(f"日报 [{target_date}] MD 导出失败: {e}")
 
+    # Step 3: 结构化指标/心理落库（P1，使分数可聚合/趋势/环比）
+    if summary.get("analysis_method") == "llm":
+        try:
+            from backend.business.task_handlers.daily_summary import _store_daily_report_metrics
+            from backend.core.database.base_conn import get_db
+
+            _store_daily_report_metrics(get_db(), target_date, summary)
+        except Exception as e:
+            logger.warning(f"日报 [{target_date}] 指标落库失败: {e}")
+
     return summary
 
 

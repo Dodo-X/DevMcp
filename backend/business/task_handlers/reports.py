@@ -118,10 +118,7 @@ def _cleanup_old_growth_analysis(db, current_period: str):
     """
     try:
         year, month = int(current_period[:4]), int(current_period[5:7])
-        if month == 1:
-            before = f"{year - 1}-12"
-        else:
-            before = f"{year}-{month - 1:02d}"
+        before = f"{year - 1}-12" if month == 1 else f"{year}-{month - 1:02d}"
 
         deleted = db.cleanup_growth_analysis(before)
         if deleted > 0:

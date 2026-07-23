@@ -92,7 +92,6 @@ def _status(value, baseline, direction, delta_pct=None):
     if value is None:
         return "warn"
     improved = delta_pct is not None and delta_pct <= -20
-    worsened = delta_pct is not None and delta_pct >= 20
     if direction == "up_good":
         if value >= base:
             return "ok"

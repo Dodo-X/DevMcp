@@ -831,6 +831,51 @@ class Database:
             ON pending_analyses(analysis_type, source_date)
         """)
 
+        # ════════════════════════════════════════════════════════════════
+        # 表: daily_report_metrics — 日报结构化指标/心理/事实落库（v9.10.1 P1）
+        # 用途: 让日报分数/心理可聚合、可趋势/环比（此前只渲染进 MD，无落库）
+        # 字段:
+        #   date                TEXT     日期主键（YYYY-MM-DD），每日一行
+        #   *_score             INTEGER  4 个维度分数（0-10）
+        #   *_evidence          TEXT     分数依据（引用 facts 中的真实数字）
+        #   frustration_level   INTEGER  挫败水平 1-5
+        #   flow_signals        JSON     心流信号列表
+        #   decision_style      TEXT     决策风格
+        #   recurring_blockers  JSON     反复阻塞点列表
+        #   facts               JSON     可量化事实列表
+        #   psychology          JSON     完整 psychology 快照
+        #   metrics_json        JSON     完整 metrics 快照（兼容未来扩展）
+        #   llm_method          TEXT     生成方式（llm / rules_fallback / data_only）
+        #   created_at          TEXT     落库时间
+        # ════════════════════════════════════════════════════════════════
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS daily_report_metrics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL UNIQUE,
+                productivity_score INTEGER,
+                learning_score INTEGER,
+                collaboration_score INTEGER,
+                focus_score INTEGER,
+                productivity_evidence TEXT,
+                learning_evidence TEXT,
+                collaboration_evidence TEXT,
+                focus_evidence TEXT,
+                frustration_level INTEGER,
+                flow_signals JSON DEFAULT '[]',
+                decision_style TEXT,
+                recurring_blockers JSON DEFAULT '[]',
+                facts JSON DEFAULT '[]',
+                psychology JSON DEFAULT '{}',
+                metrics_json JSON DEFAULT '{}',
+                llm_method TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_daily_report_metrics_date
+            ON daily_report_metrics(date)
+        """)
+
         # v9.5.5: 删除所有 ALTER TABLE 补列代码 — 所有列已在 DDL 中定义
 
         # meta 元数据表 — 跟踪 schema 版本

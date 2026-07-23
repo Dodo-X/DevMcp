@@ -249,6 +249,67 @@ def generate_daily_summary(date_str: str = "", use_llm: bool = True) -> dict:
         }
 
 
+def _store_daily_report_metrics(db, date_str: str, summary: dict) -> bool:
+    """将日报结构化指标/心理/事实落库，供聚合与趋势分析（v9.10.1 P1）
+
+    Args:
+        db: 数据库连接（含 query_local）
+        date_str: 日报日期 YYYY-MM-DD
+        summary: LLM 日报结果 dict（含 metrics / psychology / facts）
+    Returns:
+        bool: 是否成功写入
+    """
+    try:
+        rd = summary or {}
+        metrics = rd.get("metrics", {}) or {}
+
+        def _score(k: str):
+            v = metrics.get(k)
+            if isinstance(v, dict):
+                return v.get("score"), v.get("evidence", "")
+            return v, ""
+
+        p_score, p_ev = _score("productivity_score")
+        l_score, l_ev = _score("learning_score")
+        c_score, c_ev = _score("collaboration_score")
+        f_score, f_ev = _score("focus_score")
+
+        psy = rd.get("psychology", {}) or {}
+        facts = rd.get("facts") or []
+        if not isinstance(facts, list):
+            facts = []
+
+        db.query_local(
+            """INSERT OR REPLACE INTO daily_report_metrics (
+                date, productivity_score, learning_score, collaboration_score, focus_score,
+                productivity_evidence, learning_evidence, collaboration_evidence, focus_evidence,
+                frustration_level, flow_signals, decision_style, recurring_blockers,
+                facts, psychology, metrics_json, llm_method, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                date_str,
+                p_score, l_score, c_score, f_score,
+                p_ev, l_ev, c_ev, f_ev,
+                psy.get("frustration_level"),
+                json.dumps(psy.get("flow_signals", []), ensure_ascii=False),
+                psy.get("decision_style", ""),
+                json.dumps(psy.get("recurring_blockers", []), ensure_ascii=False),
+                json.dumps(facts, ensure_ascii=False),
+                json.dumps(psy, ensure_ascii=False),
+                json.dumps(metrics, ensure_ascii=False),
+                summary.get("analysis_method", "llm"),
+                datetime.now().isoformat(),
+            ),
+        )
+        logger.info(f"📊 日报指标已落库: {date_str}")
+        return True
+    except Exception:
+        logger.warning(
+            "_store_daily_report_metrics: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+        )
+        return False
+
+
 def _check_llm_available(feature_flag: str = "enhance_daily_summary") -> tuple:
     """检查 LLM 是否可用，返回 (available: bool, reason: str)
 

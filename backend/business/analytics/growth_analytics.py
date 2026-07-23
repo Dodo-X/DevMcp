@@ -50,7 +50,7 @@ def get_user_growth_overview() -> str:
         # 1. 总知识点数和平均置信度
         # confidence 范围 0-1，映射到 0-100
         skills_result = db.query_local("""
-            SELECT 
+            SELECT
                 COUNT(*) as total_skills,
                 AVG(COALESCE(confidence, 0.5)) * 100 as avg_mastery,
                 MAX(created_at) as last_updated
@@ -96,7 +96,7 @@ def get_user_growth_overview() -> str:
 
         # 6. 各领域知识点分布（按 domain 聚合，展示平均置信度和难度分布）
         domain_dist_result = db.query_local("""
-            SELECT 
+            SELECT
                 domain,
                 COUNT(*) as count,
                 AVG(COALESCE(confidence, 0.5)) * 100 as avg_mastery,
@@ -200,7 +200,7 @@ def get_system_evolution_stats() -> str:
 
         # 2. 最近变更记录（最新5条）
         recent_changes_result = db.query_local("""
-            SELECT 
+            SELECT
                 id,
                 version,
                 change_type,
@@ -229,7 +229,7 @@ def get_system_evolution_stats() -> str:
 
         # 3. LLM 分析引擎统计（近30天 step_analysis + conversation_finalize 任务统计）
         llm_stats_result = db.query_local("""
-            SELECT 
+            SELECT
                 SUM(CASE WHEN task_type = 'step_analysis' THEN 1 ELSE 0 END) as step_analyses,
                 SUM(CASE WHEN task_type = 'conversation_finalize' THEN 1 ELSE 0 END) as conv_analyses,
                 SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
@@ -259,8 +259,8 @@ def get_system_evolution_stats() -> str:
         )[0]["cnt"]
         past_skills_result = db.query_local(
             """
-            SELECT COUNT(*) as cnt 
-            FROM knowledge_points 
+            SELECT COUNT(*) as cnt
+            FROM knowledge_points
             WHERE type='skill' AND created_at < ?
         """,
             (month_ago,),
@@ -279,7 +279,7 @@ def get_system_evolution_stats() -> str:
         ninety_days_ago = (datetime.now() - timedelta(days=90)).isoformat()
         adoption_result = db.query_local(
             """
-            SELECT 
+            SELECT
                 SUM(CASE WHEN status = 'approved' AND applied_at IS NOT NULL THEN 1 ELSE 0 END) as adopted,
                 SUM(CASE WHEN status IN ('approved', 'rejected') THEN 1 ELSE 0 END) as reviewed,
                 COUNT(*) as total
@@ -495,7 +495,7 @@ def get_user_skill_radar() -> str:
             "overall_avg_past": round(sum(radar_data["thirty_days_ago"]) / n, 1) if n > 0 else 0,
             "improvement_vector": [
                 round(c - p, 1)
-                for c, p in zip(radar_data["current"], radar_data["thirty_days_ago"])
+                for c, p in zip(radar_data["current"], radar_data["thirty_days_ago"], strict=False)
             ]
             if n > 0
             else [],
@@ -558,7 +558,7 @@ def get_learning_timeline(limit: int = 20) -> str:
         # 1. 用户事件：最近的知识点创建
         new_kps = db.query_local(
             """
-            SELECT 
+            SELECT
                 domain,
                 title,
                 difficulty,
@@ -589,7 +589,7 @@ def get_learning_timeline(limit: int = 20) -> str:
         # 2. 系统事件：最近的进化记录
         evolutions = db.query_local(
             """
-            SELECT 
+            SELECT
                 description,
                 change_type,
                 version,

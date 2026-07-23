@@ -26,7 +26,9 @@ from .md_engine import (
     render_achievements,
     render_kv,
     render_list,
+    render_metrics,
     render_project_dimension,
+    render_psychology,
     render_text,
     render_user_profile,
 )
@@ -90,11 +92,28 @@ def _daily_fm(data: dict) -> dict:
     rd = data.get("report_data", {})
     proj = rd.get("project_analysis", {}).get("projects", [])
     proj_names = [p.get("project_name", "") for p in proj if p.get("project_name")]
+    metrics = rd.get("metrics", {}) or {}
+
+    def _score(k: str):
+        v = metrics.get(k)
+        if isinstance(v, dict):
+            return v.get("score")
+        return v
+
+    psy = rd.get("psychology") or {}
+    tags = ["daily-report", "devpartner"]
+    tags += [f"proj-{p}" for p in proj_names if p]
     return {
         "type": "daily_report",
         "date": data.get("date_str", ""),
         "engine": rd.get("inference_engine", "ollama"),
         "projects": proj_names,
+        "productivity_score": _score("productivity_score"),
+        "learning_score": _score("learning_score"),
+        "collaboration_score": _score("collaboration_score"),
+        "focus_score": _score("focus_score"),
+        "frustration_level": psy.get("frustration_level"),
+        "tags": tags,
         "generated": datetime.now().isoformat(),
     }
 
@@ -102,11 +121,14 @@ def _daily_fm(data: dict) -> dict:
 def _weekly_fm(data: dict) -> dict:
     ps = data.get("period_start", "")
     pe = data.get("period_end", "")
+    rd = data.get("report_data", {}) or {}
     return {
         "type": "weekly_report",
         "period_start": ps,
         "period_end": pe,
         "week": _week_label(ps),
+        "overall_score": (rd.get("metrics", {}) or {}).get("overall_score"),
+        "emotional_state_trend": (rd.get("psychology", {}) or {}).get("emotional_state_trend"),
         "sources": [f"Calendar/{ps}.md", f"Calendar/{pe}.md"],
         "generated": datetime.now().isoformat(),
     }
@@ -114,11 +136,14 @@ def _weekly_fm(data: dict) -> dict:
 
 def _monthly_fm(data: dict) -> dict:
     ps = data.get("period_start", "")
+    rd = data.get("report_data", {}) or {}
     return {
         "type": "monthly_report",
         "period_start": ps,
         "period_end": data.get("period_end", ""),
         "month": _month_label(ps),
+        "overall_productivity": (rd.get("metrics", {}) or {}).get("overall_productivity"),
+        "emotional_state_trend": (rd.get("psychology", {}) or {}).get("emotional_state_trend"),
         "sources": [f"Reports/Weekly/{ps[:4]}-W*.md"],
         "generated": datetime.now().isoformat(),
     }
@@ -126,9 +151,12 @@ def _monthly_fm(data: dict) -> dict:
 
 def _annual_fm(data: dict) -> dict:
     y = data.get("year", "")
+    rd = data.get("report_data", {}) or {}
     return {
         "type": "annual_report",
         "year": y,
+        "overall_growth_score": (rd.get("metrics", {}) or {}).get("overall_growth_score"),
+        "emotional_state_trend": (rd.get("psychology", {}) or {}).get("emotional_state_trend"),
         "sources": [f"Reports/Monthly/{y}-*.md"],
         "generated": datetime.now().isoformat(),
     }
@@ -211,6 +239,13 @@ def register_all(assembler: MdAssembler = None):
                 ),
                 MdSection(
                     "report_data",
+                    "## 📊 事实锚点",
+                    render_kv,
+                    kv_map=[("facts", "事实锚点")],
+                    condition=lambda d: bool((d.get("report_data") or {}).get("facts")),
+                ),
+                MdSection(
+                    "report_data",
                     "## 🔍 深度体验",
                     render_kv,
                     kv_map=[("deep_dive", "深入探索"), ("lesson", "经验教训")],
@@ -262,7 +297,7 @@ def register_all(assembler: MdAssembler = None):
                 MdSection(
                     "report_data",
                     "## 📊 指标",
-                    render_kv,
+                    render_metrics,
                     kv_map=[
                         ("productivity_score", "生产力"),
                         ("learning_score", "学习"),
@@ -270,6 +305,18 @@ def register_all(assembler: MdAssembler = None):
                         ("focus_score", "专注"),
                     ],
                     condition=lambda d: bool((d.get("report_data") or {}).get("metrics")),
+                ),
+                MdSection(
+                    "report_data",
+                    "## 🧠 心理与协作信号",
+                    render_psychology,
+                    kv_map=[
+                        ("frustration_level", "挫败水平(1-5)"),
+                        ("flow_signals", "心流信号"),
+                        ("decision_style", "决策风格"),
+                        ("recurring_blockers", "反复阻塞"),
+                    ],
+                    condition=lambda d: bool((d.get("report_data") or {}).get("psychology")),
                 ),
                 MdSection(
                     "report_data",
@@ -357,6 +404,25 @@ def register_all(assembler: MdAssembler = None):
                     ],
                     condition=lambda d: bool(d.get("report_data", {}).get("metrics")),
                 ),
+                MdSection(
+                    "report_data",
+                    "## 📊 事实锚点",
+                    render_kv,
+                    kv_map=[("facts", "事实锚点")],
+                    condition=lambda d: bool(d.get("report_data", {}).get("facts")),
+                ),
+                MdSection(
+                    "report_data",
+                    "## 🧠 心理与协作信号",
+                    render_psychology,
+                    kv_map=[
+                        ("emotional_state_trend", "情绪走向"),
+                        ("recurring_friction", "反复卡点"),
+                        ("growth_mindset", "成长思维"),
+                        ("communication_pattern", "沟通风格"),
+                    ],
+                    condition=lambda d: bool(d.get("report_data", {}).get("psychology")),
+                ),
             ],
             frontmatter_builder=_weekly_fm,
             footer_lines=_build_weekly_footer,
@@ -434,6 +500,25 @@ def register_all(assembler: MdAssembler = None):
                         ("work_life_balance", "工作生活平衡"),
                     ],
                     condition=lambda d: bool(d.get("report_data", {}).get("metrics")),
+                ),
+                MdSection(
+                    "report_data",
+                    "## 📊 事实锚点",
+                    render_kv,
+                    kv_map=[("facts", "事实锚点")],
+                    condition=lambda d: bool(d.get("report_data", {}).get("facts")),
+                ),
+                MdSection(
+                    "report_data",
+                    "## 🧠 心理与协作信号",
+                    render_psychology,
+                    kv_map=[
+                        ("emotional_state_trend", "情绪走向"),
+                        ("recurring_friction", "反复卡点"),
+                        ("growth_mindset", "成长思维"),
+                        ("communication_pattern", "沟通风格"),
+                    ],
+                    condition=lambda d: bool(d.get("report_data", {}).get("psychology")),
                 ),
             ],
             frontmatter_builder=_monthly_fm,
@@ -515,6 +600,25 @@ def register_all(assembler: MdAssembler = None):
                         ("sustainability", "可持续性"),
                     ],
                     condition=lambda d: bool(d.get("report_data", {}).get("metrics")),
+                ),
+                MdSection(
+                    "report_data",
+                    "## 📊 事实锚点",
+                    render_kv,
+                    kv_map=[("facts", "事实锚点")],
+                    condition=lambda d: bool(d.get("report_data", {}).get("facts")),
+                ),
+                MdSection(
+                    "report_data",
+                    "## 🧠 心理与协作信号",
+                    render_psychology,
+                    kv_map=[
+                        ("emotional_state_trend", "情绪走向"),
+                        ("recurring_friction", "反复卡点"),
+                        ("growth_mindset", "成长思维"),
+                        ("communication_pattern", "沟通风格"),
+                    ],
+                    condition=lambda d: bool(d.get("report_data", {}).get("psychology")),
                 ),
             ],
             frontmatter_builder=_annual_fm,

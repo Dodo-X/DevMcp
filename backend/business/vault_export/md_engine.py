@@ -80,7 +80,9 @@ class MdTemplate:
 
 
 def render_text(value: Any, data: dict, **kwargs) -> list[str]:
-    """纯文本段落"""
+    """纯文本段落（兼容 value 为整个 report_data dict：取其 summary 字段）"""
+    if isinstance(value, dict):
+        value = value.get("summary") or value.get("text") or ""
     if not value:
         return []
     return [str(value), ""]
@@ -92,12 +94,26 @@ def render_kv(value: Any, data: dict, kv_map=None, **kwargs) -> list[str]:
     从 value dict 取对应字段输出。
     列表值: **label**:\n- item
     标量值: **label**: value
+
+    v9.10.1 修复：report_data 的子字段多为嵌套 dict（如 experience.deep_dive、
+    metrics.productivity_score）。当 value 顶层取不到 key 时，自动下钻一层
+    （在 value 的子 dict 中找该 key），使嵌套 section 正确渲染。
     """
     if not value or not isinstance(value, dict) or not kv_map:
         return []
+
+    def _resolve(v: dict, key: str):
+        if key in v:
+            return v[key]
+        # 下钻一层：在子 dict 中查找（当前数据 key 基本唯一，风险低）
+        for sub in v.values():
+            if isinstance(sub, dict) and key in sub:
+                return sub[key]
+        return None
+
     lines = []
     for key, label in kv_map:
-        items = value.get(key)
+        items = _resolve(value, key)
         if items is None:
             continue
         if isinstance(items, list):
@@ -123,7 +139,11 @@ def render_list(value: Any, data: dict, **kwargs) -> list[str]:
 
 
 def render_achievements(value: Any, data: dict, **kwargs) -> list[str]:
-    """成果段落：- **{achievement}** — {impact}"""
+    """成果段落：- **{achievement}** — {impact}
+    v9.10.1 修复：value 为整个 report_data dict 时，取其 key_achievements/
+    major_achievements 子字段（list）再渲染。"""
+    if isinstance(value, dict):
+        value = value.get("key_achievements") or value.get("major_achievements") or []
     if not value or not isinstance(value, list):
         return []
     lines = []
@@ -135,6 +155,50 @@ def render_achievements(value: Any, data: dict, **kwargs) -> list[str]:
         else:
             lines.append(f"- {item}")
     lines.append("")
+    return lines
+
+
+def render_psychology(value: Any, data: dict, kv_map=None, **kwargs) -> list[str]:
+    """心理/协作信号：从 report_data['psychology'] 嵌套 dict 取子字段渲染（复用 render_kv）"""
+    if not isinstance(value, dict):
+        return []
+    psy = value.get("psychology") or {}
+    if not isinstance(psy, dict):
+        return []
+    return render_kv(psy, data, kv_map=kv_map)
+
+
+def render_metrics(value: Any, data: dict, kv_map=None, **kwargs) -> list[str]:
+    """指标段落：每个指标为 {score, evidence}（或纯整数），渲染为 `**label**: score — 证据：evidence`
+
+    v9.10.1 新增（P1）：日报 metrics 改为带证据结构，分数不再是无依据的拍脑袋分。
+    v9.10.1 修复：assemble 传入整个 report_data dict 作为 value，需先下钻到 metrics 子 dict
+    （与 render_achievements / render_project_dimension 一致）。
+    """
+    if not isinstance(value, dict) or not kv_map:
+        return []
+    metrics = value.get("metrics") or {}
+    if not isinstance(metrics, dict):
+        return []
+    lines = []
+    for key, label in kv_map:
+        item = metrics.get(key)
+        if item is None:
+            continue
+        if isinstance(item, dict):
+            score = item.get("score")
+            evidence = item.get("evidence", "")
+        else:
+            score = item
+            evidence = ""
+        if score is None:
+            continue
+        line = f"**{label}**: {score}"
+        if evidence:
+            line += f" — 证据：{evidence}"
+        lines.append(line)
+    if lines:
+        lines.append("")
     return lines
 
 
@@ -168,7 +232,10 @@ def render_user_profile(value: Any, data: dict, **kwargs) -> list[str]:
 
 
 def render_project_dimension(value: Any, data: dict, **kwargs) -> list[str]:
-    """项目维度段落（日报中的项目归纳）"""
+    """项目维度段落（日报中的项目归纳）
+    v9.10.1 修复：value 为整个 report_data dict 时，取其 project_analysis.projects 子字段。"""
+    if isinstance(value, dict):
+        value = (value.get("project_analysis") or {}).get("projects") or []
     if not value or not isinstance(value, list):
         return []
     lines = ["> 以下为今日各项目的简要归纳，完整分析见项目仪表盘。", ""]

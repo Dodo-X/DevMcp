@@ -348,7 +348,7 @@ class VaultExporter:
         tags = self._safe_json(kp_row.get("tags", "[]"), [])
         created_at = kp_row.get("created_at", "")
         source_id = kp_row.get("source_id", "")
-        aliases = self._safe_json(kp_row.get("aliases", "[]"), [])
+        self._safe_json(kp_row.get("aliases", "[]"), [])
         related_ids_raw = kp_row.get("related_knowledge_ids", "")
 
         if card_type == "skill":
