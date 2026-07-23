@@ -556,7 +556,6 @@ class LLMEngine:
         req.add_header("Content-Type", "application/json")
         req.add_header("Connection", "keep-alive")
         req.add_header("Keep-Alive", "timeout=600")  # 10 分钟保活
-        http_timeout = timeout if timeout > 0 else None
 
         full_text = []
         token_count = 0

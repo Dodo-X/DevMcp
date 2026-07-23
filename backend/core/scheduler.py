@@ -358,6 +358,28 @@ class ProfileScheduler:
             if cascade_count > 0:
                 logger.info(f"📋 日报兜底扫描: 补交 {cascade_count} 个遗漏的 daily_summary")
 
+            # 去重：检查今日日报是否已生成（task_queue 中已有 或 Calendar/{date}.md 已存在）
+            from pathlib import Path
+
+            calendar_file = Path("data/vault/Calendar") / f"{target_date}.md"
+            if calendar_file.exists():
+                logger.info(f"📅 今日日报已存在: {calendar_file}，跳过")
+                return
+
+            existing = db.query_local(
+                """
+                SELECT task_id FROM task_queue
+                WHERE task_type = 'daily_summary'
+                  AND is_deleted = 0
+                  AND json_extract(payload, '$.target_date') = ?
+                LIMIT 1
+            """,
+                (target_date,),
+            )
+            if existing:
+                logger.info(f"📅 今日日报任务已排队: {existing[0]['task_id']}，跳过")
+                return
+
             # 提交当日日报
             task_id = queue.submit_task(
                 task_type="daily_summary",
@@ -401,7 +423,6 @@ class ProfileScheduler:
                     COUNT(*) as total,
                     SUM(CASE WHEN analyzed = 1 THEN 1 ELSE 0 END) as analyzed
                 FROM conversations
-                WHERE is_deleted = 0
                 GROUP BY DATE(created_at)
                 HAVING analyzed = total AND total > 0
             """)
@@ -433,6 +454,16 @@ class ProfileScheduler:
                     logger.debug(
                         f"[日报兜底] {target_date}: 已有 daily_summary "
                         f"({existing[0]['task_id']}, status={existing[0]['status']})，跳过"
+                    )
+                    continue
+
+                # 2.5: 检查 Calendar/{date}.md 是否已存在（日报已完成生成）
+                from pathlib import Path
+
+                vault_root = Path("data/vault/Calendar")
+                if (vault_root / f"{target_date}.md").exists():
+                    logger.info(
+                        f"[日报兜底] {target_date}: Calendar/{target_date}.md 已存在，跳过"
                     )
                     continue
 
