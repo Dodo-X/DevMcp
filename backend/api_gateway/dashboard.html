@@ -439,6 +439,7 @@
         <div class="nav-label">管理</div>
         <button class="nav-item" data-page="suggestions"><span class="ic">✦</span> 优化建议 <span class="kbd">6</span></button>
         <button class="nav-item" data-page="ops"><span class="ic">⚙</span> 系统运维 <span class="kbd">7</span></button>
+        <button class="nav-item" data-page="settings"><span class="ic">🔧</span> 设置 <span class="kbd">9</span></button>
       </div>
     </nav>
 
@@ -851,6 +852,24 @@
         </div>
       </section>
 
+      <!-- ══ Settings ══ -->
+      <section class="page" id="page-settings" aria-label="设置">
+        <div class="card">
+          <h3>运行配置</h3>
+          <div class="kv-grid" id="settingsForm">
+            <div><label>模型名称</label><input id="set-model_name" placeholder="qwen2.5:7b"></div>
+            <div><label>Ollama 地址</label><input id="set-ollama_host" placeholder="http://localhost:11434"></div>
+            <div><label>自动刷新</label><select id="set-auto_refresh"><option value="true">启用</option><option value="false">禁用</option></select></div>
+            <div><label>刷新间隔(秒)</label><input id="set-refresh_interval" type="number" min="10" max="300" placeholder="30"></div>
+            <div><label>界面语言</label><select id="set-language"><option value="zh">中文</option><option value="en">English</option></select></div>
+          </div>
+          <div class="row" style="margin-top:14px">
+            <button class="btn primary" id="settingsSave" onclick="saveSettings()">保存设置</button>
+            <span id="settingsMsg" style="font-size:12px;color:var(--text-muted)"></span>
+          </div>
+        </div>
+      </section>
+
     </div>
   </div>
 </div>
@@ -1038,6 +1057,7 @@ const PAGES = {
   conversations:{ title: '会话', crumb: '历史会话浏览与详情回溯', load: refreshConversationsPage },
   suggestions:{ title: '优化建议', crumb: 'growth_analysis 审核工作流', load: refreshSuggestionsPage },
   ops:       { title: '系统运维', crumb: '诊断 / 完整性 / LLM / 拦截器 / 清理', load: refreshOpsPage },
+  settings:  { title: '设置',   crumb: '模型 / 刷新 / 语言偏好', load: refreshSettingsPage },
 };
 
 function switchPage(name) {
@@ -1981,9 +2001,46 @@ document.addEventListener('keydown', e => {
   else if (e.key === 't' || e.key === 'T') document.getElementById('themeBtn').click();
 });
 
+/* ── Settings ── */
+async function refreshSettingsPage() {
+  try {
+    const d = await fetchJSON('/api/settings');
+    const s = d.data || {};
+    const keys = ['model_name','ollama_host','auto_refresh','refresh_interval','language'];
+    keys.forEach(k => {
+      const el = document.getElementById('set-'+k);
+      if (el) el.value = s[k] || '';
+    });
+    document.getElementById('settingsMsg').textContent = '';
+  } catch(e) { /* silent */ }
+}
+async function saveSettings() {
+  const payload = {};
+  ['model_name','ollama_host','auto_refresh','refresh_interval','language'].forEach(k => {
+    const el = document.getElementById('set-'+k);
+    if (el) payload[k] = el.value;
+  });
+  try {
+    const r = await fetch('/api/settings', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    const d = await r.json();
+    if (d.code === 0) {
+      showToast({ text: '设置已保存', type: 'success' });
+      document.getElementById('settingsMsg').textContent = '已保存';
+      // 如果自动刷新状态变了，同步刷新定时器
+      if (payload.auto_refresh === 'false') clearInterval(window._refreshTimer);
+      else if (payload.auto_refresh === 'true') {
+        clearInterval(window._refreshTimer);
+        window._refreshTimer = setInterval(refreshAll, parseInt(payload.refresh_interval||30)*1000);
+      }
+    } else {
+      showToast({ text: '保存失败: '+(d.message||'未知错误'), type: 'error' });
+    }
+  } catch(e) { showToast({ text: '保存请求失败', type: 'error' }); }
+}
+
 // boot
 refreshAll();
-setInterval(refreshAll, 30000);
+window._refreshTimer = setInterval(refreshAll, 30000);
 </script>
 </body>
 </html>

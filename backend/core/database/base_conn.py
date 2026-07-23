@@ -876,6 +876,28 @@ class Database:
             ON daily_report_metrics(date)
         """)
 
+        # ── Settings (用户可调配置) ──
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+        # 写入默认值（不存在时才插入）
+        defaults = {
+            "model_name": "qwen2.5:7b",
+            "ollama_host": "http://localhost:11434",
+            "auto_refresh": "true",
+            "refresh_interval": "30",
+            "language": "zh",
+        }
+        for k, v in defaults.items():
+            cursor.execute(
+                "INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+                (k, v),
+            )
+
         # v9.5.5: 删除所有 ALTER TABLE 补列代码 — 所有列已在 DDL 中定义
 
         # meta 元数据表 — 跟踪 schema 版本

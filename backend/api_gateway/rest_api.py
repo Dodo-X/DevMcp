@@ -379,6 +379,53 @@ def register_rest_routes(mcp):
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     # ════════════════════════════════════════════════
+    # 设置 API
+    # ════════════════════════════════════════════════
+    @mcp.custom_route("/api/settings", methods=["GET"])
+    async def api_settings_get(request: Request) -> JSONResponse:
+        """读取所有设置"""
+        try:
+            from backend.core.database.base_conn import get_db
+
+            db = get_db()
+            rows = db.query_local("SELECT key, value, updated_at FROM settings ORDER BY key")
+            settings = {r["key"]: r["value"] for r in (rows or [])}
+            return JSONResponse(content={"code": 0, "message": "ok", "data": settings})
+        except Exception as e:
+            logger.warning("api_settings_get 失败", exc_info=True)
+            return JSONResponse(content={"code": -1, "message": str(e), "data": {}}, status_code=500)
+
+    @mcp.custom_route("/api/settings", methods=["POST"])
+    async def api_settings_update(request: Request) -> JSONResponse:
+        """写入一个或多个设置项"""
+        try:
+
+            from backend.core.database.base_conn import get_db
+
+            body = await request.json()
+            if not isinstance(body, dict):
+                return JSONResponse(
+                    content={"code": -1, "message": "请求体应为 JSON 字典"}, status_code=400
+                )
+
+            db = get_db()
+            updated = {}
+            allowed = {"model_name", "ollama_host", "auto_refresh", "refresh_interval", "language"}
+            for k, v in body.items():
+                if k not in allowed:
+                    continue
+                db.execute(
+                    "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))",
+                    (k, str(v)),
+                )
+                updated[k] = str(v)
+
+            return JSONResponse(content={"code": 0, "message": "ok", "data": {"updated": updated}})
+        except Exception as e:
+            logger.warning("api_settings_update 失败", exc_info=True)
+            return JSONResponse(content={"code": -1, "message": str(e), "data": {}}, status_code=500)
+
+    # ════════════════════════════════════════════════
     # 请求拦截调试 API (v9.5.1)
     # ════════════════════════════════════════════════
     @mcp.custom_route("/api/debug/intercept/status", methods=["GET"])
