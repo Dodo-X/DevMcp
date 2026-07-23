@@ -37,6 +37,40 @@
     --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   }
 
+  /* ── Light theme ── */
+  [data-theme="light"] {
+    --bg:           #f5f6fa;  --bg-elev:      #fafbfd;
+    --panel:        #ffffff;  --panel-2:       #f0f1f5;
+    --border:       #dde0e8;  --border-soft:   #e2e5ed99;
+    --text:         #1a1d26;  --text-2:        #4a5060;
+    --text-muted:   #8b909e;
+    --accent:       #6366f1;  --accent-2:      #4f46e5;
+    --accent-soft:  rgba(99,102,241,0.08);
+    --accent-line:  rgba(99,102,241,0.22);
+    --green:  #10b981;  --green-soft:  rgba(16,185,129,0.10);
+    --yellow: #d97706;  --yellow-soft: rgba(217,119,6,0.10);
+    --red:    #ef4444;  --red-soft:    rgba(239,68,68,0.10);
+    --blue:   #3b82f6;  --blue-soft:   rgba(59,130,246,0.10);
+    --shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.06);
+  }
+  @media (prefers-color-scheme: light) {
+    [data-theme="system"] {
+      --bg:           #f5f6fa;  --bg-elev:      #fafbfd;
+      --panel:        #ffffff;  --panel-2:       #f0f1f5;
+      --border:       #dde0e8;  --border-soft:   #e2e5ed99;
+      --text:         #1a1d26;  --text-2:        #4a5060;
+      --text-muted:   #8b909e;
+      --accent:       #6366f1;  --accent-2:      #4f46e5;
+      --accent-soft:  rgba(99,102,241,0.08);
+      --accent-line:  rgba(99,102,241,0.22);
+      --green:  #10b981;  --green-soft:  rgba(16,185,129,0.10);
+      --yellow: #d97706;  --yellow-soft: rgba(217,119,6,0.10);
+      --red:    #ef4444;  --red-soft:    rgba(239,68,68,0.10);
+      --blue:   #3b82f6;  --blue-soft:   rgba(59,130,246,0.10);
+      --shadow: 0 1px 3px rgba(0,0,0,.08), 0 4px 16px rgba(0,0,0,.06);
+    }
+  }
+
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
   body {
@@ -406,6 +440,7 @@
         <kbd>/</kbd>
       </label>
       <button class="btn" id="refreshBtn" title="刷新 (R)">⟳ 刷新</button>
+      <button class="btn ghost" id="themeBtn" title="切换主题 (T)">🌓</button>
       <button class="btn ghost" id="helpBtn" title="快捷键 (?)">?</button>
     </header>
 
@@ -799,8 +834,9 @@
   <div class="modal">
     <h3>键盘快捷键</h3>
     <div class="shortcuts-grid">
-      <kbd>1–8</kbd><span>切换侧边栏页面</span>
+      <kbd>1–9</kbd><span>切换侧边栏页面</span>
       <kbd>R</kbd><span>刷新当前页面</span>
+      <kbd>T</kbd><span>切换主题（暗色/浅色/跟随系统）</span>
       <kbd>/</kbd><span>聚焦搜索框</span>
       <kbd>?</kbd><span>打开本帮助</span>
       <kbd>Esc</kbd><span>关闭弹窗 / 帮助</span>
@@ -853,6 +889,26 @@ function escapeHtml(s) {
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ));
 }
+
+/* ── Theme toggle ── */
+(() => {
+  const STORAGE_KEY = 'dp-theme';
+  const button = document.getElementById('themeBtn');
+  const html = document.documentElement;
+  const ICONS = { light: '☀️', dark: '🌙', system: '🌓' };
+  const TITLES = { light: '浅色模式', dark: '暗色模式', system: '跟随系统' };
+
+  let theme = localStorage.getItem(STORAGE_KEY) || 'dark';
+  function apply(t) { html.setAttribute('data-theme', t); if (button) { button.textContent = ICONS[t]; button.title = '切换主题 (T) — ' + TITLES[t]; } }
+  apply(theme);
+
+  button && button.addEventListener('click', () => {
+    theme = theme === 'dark' ? 'light' : theme === 'light' ? 'system' : 'dark';
+    localStorage.setItem(STORAGE_KEY, theme);
+    apply(theme);
+    showToast({ text: '主题: ' + TITLES[theme] });
+  });
+})();
 
 /* ── UX layer: toast / confirm / skeleton ── */
 function toast(msg, type) {
@@ -1808,6 +1864,7 @@ document.addEventListener('keydown', e => {
   else if (e.key === '/') { e.preventDefault(); document.getElementById('globalSearch').focus(); }
   else if (e.key === '?') document.getElementById('helpScrim').classList.add('open');
   else if (e.key === 'Escape') { document.getElementById('confirmScrim').classList.remove('open'); document.getElementById('helpScrim').classList.remove('open'); document.getElementById('convDetailScrim').classList.remove('open'); }
+  else if (e.key === 't' || e.key === 'T') document.getElementById('themeBtn').click();
 });
 
 // boot
