@@ -452,20 +452,10 @@ def run_analysis(
             return None
 
     try:
-        # 自动压缩大文本参数（在 format 之前，避免 HTTP body 过大断开连接）
-        budget = max(3000, task.input_truncate - 3000)  # 留 3000 给 prompt 模板
-        compressed = {}
-        for k, v in kwargs.items():
-            if isinstance(v, str) and len(v) > budget // 2:
-                compressed[k] = compact_for_llm(v, max(1000, budget // 3))
-            else:
-                compressed[k] = v
-        kwargs = compressed
-
         # 构造 prompt
         prompt = task.prompt_template.format(**kwargs)
 
-        # 二次截断保护
+        # 智能截断：按语义边界截断，避免一刀切破坏数据完整性
         if len(prompt) > task.input_truncate:
             logger.warning(
                 f"任务 {task.name} prompt 超长: {len(prompt)} > {task.input_truncate}，触发智能截断"

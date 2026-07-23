@@ -139,7 +139,7 @@ TASK_DAILY_SUMMARY = AnalysisTask(
 8. project_analysis 按 system_id 分组归纳，system_id 为空的归入"通用/未分类"
 9. 只输出 JSON，无数据字段留空（用空字符串/空数组），禁止虚构细节""",
     parser=_parse_daily_summary,
-    max_tokens=4000,
-    input_truncate=8000,
+    max_tokens=8192,
+    input_truncate=16000,
     feature_flag="enhance_daily_summary",
 )

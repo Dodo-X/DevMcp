@@ -88,10 +88,43 @@ def handle_daily_export(payload: dict) -> dict:
 
 
 def register_task_handlers():
-    """注册日报任务处理器到 task_queue"""
+    """注册日报/报告任务处理器到 task_queue"""
     from backend.core.task_queue_kernel.queue_client import get_task_queue
 
     queue = get_task_queue()
     queue.register_handler("daily_summary", handle_daily_summary)
     queue.register_handler("daily_export", handle_daily_export)
-    logger.info("📝 日报任务处理器已注册 (2 个 handler)")
+
+    # 注册大型报告 handler（串行化执行，防止 Ollama 连接争抢）
+    def _weekly_wrapper(payload: dict) -> dict:
+        from datetime import datetime as _dt
+
+        from backend.business.task_handlers.reports import generate_weekly_report
+
+        ts = payload.get("trigger_time", "")
+        trigger_time = _dt.fromisoformat(ts) if ts else None
+        return generate_weekly_report(trigger_time)
+
+    def _monthly_wrapper(payload: dict) -> dict:
+        from datetime import datetime as _dt
+
+        from backend.business.task_handlers.reports import generate_monthly_report
+
+        ts = payload.get("trigger_time", "")
+        trigger_time = _dt.fromisoformat(ts) if ts else None
+        return generate_monthly_report(trigger_time=trigger_time)
+
+    def _annual_wrapper(payload: dict) -> dict:
+        from datetime import datetime as _dt
+
+        from backend.business.task_handlers.reports import generate_annual_report
+
+        ts = payload.get("trigger_time", "")
+        trigger_time = _dt.fromisoformat(ts) if ts else None
+        return generate_annual_report(trigger_time=trigger_time)
+
+    queue.register_handler("weekly_report", _weekly_wrapper)
+    queue.register_handler("monthly_report", _monthly_wrapper)
+    queue.register_handler("annual_report", _annual_wrapper)
+
+    logger.info("📝 日报+报告任务处理器已注册 (5 个 handler)")

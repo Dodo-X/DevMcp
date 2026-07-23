@@ -461,24 +461,23 @@ class ProfileScheduler:
     # 用户画像/业务知识由 finalize 子任务实时处理，不再需要每日二次 LLM 合并
 
     def _execute_weekly_roadmap(self, trigger_time: datetime):
-        """
-        执行每周成长路线图生成（v8.5.4: 使用 LLM 驱动的 generate_weekly_report）
-        """
-        logger.info(f"🗺️ 开始执行每周成长路线图 [{trigger_time.strftime('%Y-%m-%d %H:%M')}]")
+        """执行每周成长路线图（v9.11: 改为异步提交到 task_queue 串行化）"""
+        logger.info(f"🗺️ 提交周报任务 [{trigger_time.strftime('%Y-%m-%d %H:%M')}]")
 
         try:
-            from backend.business.task_handlers.daily_summary import generate_weekly_report
+            from backend.core.task_queue_kernel.queue_client import get_task_queue
 
-            result = generate_weekly_report(trigger_time)
-            if result.get("success") and result.get("method") != "none":
-                logger.info(f"✅ 每周成长路线图完成: 方法={result.get('method', 'unknown')}")
-            elif result.get("method") == "pending":
-                logger.warning("⏸️ 周报数据已暂存 pending_analyses，等待 LLM 可用时清算")
-            else:
-                logger.info("ℹ️ 本周无数据，跳过周报生成")
-
+            queue = get_task_queue()
+            task_id = queue.submit_task(
+                task_type="weekly_report",
+                payload={"trigger_time": trigger_time.isoformat()},
+                priority=3,
+                estimated_memory_mb=200,
+                timeout=1800,
+            )
+            logger.info(f"✅ 周报任务已提交: {task_id}")
         except Exception as e:
-            logger.error(f"❌ 每周成长路线图执行失败: {e}", exc_info=True)
+            logger.error(f"❌ 周报任务提交失败: {e}", exc_info=True)
 
     def trigger_manual_analysis(self, scope: str = "full") -> dict:
         """
@@ -586,62 +585,42 @@ class ProfileScheduler:
             logger.error(f"❌ 每周数据归档执行失败: {e}", exc_info=True)
 
     def _execute_monthly_report(self, trigger_time: datetime):
-        """
-        执行每月报告生成（v8.0）
-
-        每月1号上午10点执行，基于上月周报生成月报。
-        数据来源：Reports/Weekly/*.md（不依赖 SQLite）
-        输出：Reports/Monthly/{YYYY-MM}.md
-        """
-        logger.info(f"🗓️ 开始执行月报生成 [{trigger_time.strftime('%Y-%m')}]")
+        """执行每月报告生成（v8.0 — v9.11 改为异步提交到 task_queue 串行化）"""
+        logger.info(f"🗓️ 提交月报任务 [{trigger_time.strftime('%Y-%m')}]")
 
         try:
-            from backend.business.task_handlers.daily_summary import generate_monthly_report
+            from backend.core.task_queue_kernel.queue_client import get_task_queue
 
-            result = generate_monthly_report(trigger_time=trigger_time)
-
-            if result.get("success"):
-                method = result.get("method", "unknown")
-                if method == "llm":
-                    logger.info(f"✅ 月报生成完成: {result.get('file_path', '')}")
-                elif method == "pending":
-                    logger.warning("⚠️ 月报数据已暂存: LLM 不可用，等待下次清算")
-                else:
-                    logger.info(f"ℹ️ 月报: {result.get('note', '无数据')}")
-            else:
-                logger.warning(f"⚠️ 月报生成失败: {result.get('error', 'unknown')}")
-
+            queue = get_task_queue()
+            task_id = queue.submit_task(
+                task_type="monthly_report",
+                payload={"trigger_time": trigger_time.isoformat()},
+                priority=3,
+                estimated_memory_mb=200,
+                timeout=1800,
+            )
+            logger.info(f"✅ 月报任务已提交: {task_id}")
         except Exception as e:
-            logger.error(f"❌ 月报生成执行失败: {e}", exc_info=True)
+            logger.error(f"❌ 月报任务提交失败: {e}", exc_info=True)
 
     def _execute_annual_report(self, trigger_time: datetime):
-        """
-        执行年度报告生成（v8.0）
-
-        每年12月31日晚8点执行，基于本年月报生成年报。
-        数据来源：Reports/Monthly/*.md（不依赖 SQLite）
-        输出：Reports/Annual/{YYYY}.md
-        """
-        logger.info(f"📖 开始执行年报生成 [{trigger_time.year}]")
+        """执行年度报告生成（v9.11: 改为异步提交到 task_queue 串行化）"""
+        logger.info(f"📖 提交年报任务 [{trigger_time.year}]")
 
         try:
-            from backend.business.task_handlers.daily_summary import generate_annual_report
+            from backend.core.task_queue_kernel.queue_client import get_task_queue
 
-            result = generate_annual_report(trigger_time=trigger_time)
-
-            if result.get("success"):
-                method = result.get("method", "unknown")
-                if method == "llm":
-                    logger.info(f"✅ 年报生成完成: {result.get('file_path', '')}")
-                elif method == "pending":
-                    logger.warning("⚠️ 年报数据已暂存: LLM 不可用，等待下次清算")
-                else:
-                    logger.info(f"ℹ️ 年报: {result.get('note', '无数据')}")
-            else:
-                logger.warning(f"⚠️ 年报生成失败: {result.get('error', 'unknown')}")
-
+            queue = get_task_queue()
+            task_id = queue.submit_task(
+                task_type="annual_report",
+                payload={"trigger_time": trigger_time.isoformat()},
+                priority=3,
+                estimated_memory_mb=200,
+                timeout=3600,
+            )
+            logger.info(f"✅ 年报任务已提交: {task_id}")
         except Exception as e:
-            logger.error(f"❌ 年报生成执行失败: {e}", exc_info=True)
+            logger.error(f"❌ 年报任务提交失败: {e}", exc_info=True)
 
     def _execute_pending_scan(self, trigger_time: datetime):
         """

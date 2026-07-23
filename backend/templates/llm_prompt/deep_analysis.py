@@ -113,8 +113,8 @@ TASK_BUSINESS_TECH_ASSESSMENT = AnalysisTask(
 - confidence 范围 0.0-1.0，completeness 范围 0-100
 - 基于具体对话证据，避免主观臿断""",
     parser=_parse_business_tech,
-    max_tokens=3000,
-    input_truncate=8000,
+    max_tokens=4096,
+    input_truncate=12000,
     feature_flag="enhance_analysis",
 )
 
@@ -182,6 +182,6 @@ TASK_CONV_USER_PROFILE = AnalysisTask(
 - 基于具体对话证据，避免主观臿断""",
     parser=_parse_user_profile,
     max_tokens=2000,
-    input_truncate=8000,
+    input_truncate=12000,
     feature_flag="enhance_analysis",
 )

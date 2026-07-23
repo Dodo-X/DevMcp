@@ -542,14 +542,20 @@ class LLMEngine:
             "model": model_name,
             "prompt": prompt,
             "stream": True,
-            "options": {"num_predict": max_tokens},
+            "options": {
+                "num_predict": max_tokens,
+                "num_ctx": 32768,  # 模型最大上下文窗口
+            },
         }
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(
             f"{_OLLAMA_BASE_URL}/api/generate",
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            data=data,
             method="POST",
         )
         req.add_header("Content-Type", "application/json")
+        req.add_header("Connection", "keep-alive")
+        req.add_header("Keep-Alive", "timeout=600")  # 10 分钟保活
         http_timeout = timeout if timeout > 0 else None
 
         full_text = []

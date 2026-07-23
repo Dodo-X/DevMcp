@@ -112,6 +112,16 @@ class TaskQueue:
         "daily_export",
     }
 
+    # 大型汇总报告 — 同一时间只允许一个执行（防止 Ollama 资源争抢断开）
+    REPORT_TYPES = {
+        "daily_summary",
+        "daily_export",
+        "weekly_report",
+        "monthly_report",
+        "annual_report",
+        "growth_analysis",
+    }
+
     def __init__(self):
         self._task_queue: collections.deque = collections.deque()
         self._queue_lock = threading.Lock()
@@ -141,6 +151,7 @@ class TaskQueue:
 
         self._max_concurrent: int = _num_parallel
         self._semaphore: threading.Semaphore = threading.Semaphore(_num_parallel)
+        self._report_semaphore: threading.Semaphore = threading.Semaphore(1)  # 大型报告串行化
         self._executor: ThreadPoolExecutor = ThreadPoolExecutor(
             max_workers=_num_parallel * 2, thread_name_prefix="task_worker_"
         )
@@ -702,6 +713,21 @@ class TaskQueue:
             raise ValueError(
                 f"未注册的任务类型: {task_type} | 已注册: {list(self._handlers.keys())}"
             )
+
+        # 大型汇总报告串行化：同一时间只允许一个报告任务占用 Ollama
+        if task_type in self.REPORT_TYPES:
+            logger.info(f"📊 报告任务排队: {task_type} — 等待报告槽位...")
+            acquired = self._report_semaphore.acquire(timeout=1800)
+            if not acquired:
+                raise RuntimeError(f"报告槽位等待超时: {task_type} (30min)")
+            logger.info(f"📊 报告槽位获得: {task_type} — 开始执行")
+            try:
+                result = handler(payload)
+            finally:
+                self._report_semaphore.release()
+                logger.info(f"📊 报告槽位释放: {task_type}")
+            return result
+
         return handler(payload)
 
     # ══════════════════════════════════════════════════════════

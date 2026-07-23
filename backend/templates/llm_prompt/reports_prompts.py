@@ -88,8 +88,8 @@ TASK_WEEKLY_REPORT = AnalysisTask(
 4. overall_score 为 0-10 整数，反映本周综合产出质量
 5. 只输出 JSON，不要额外说明""",
     parser=parse_json,
-    max_tokens=4000,
-    input_truncate=8000,
+    max_tokens=8192,
+    input_truncate=16000,
     feature_flag="enhance_weekly_report",
 )
 
@@ -163,8 +163,8 @@ TASK_MONTHLY_REPORT = AnalysisTask(
 4. overall_productivity 为 0-10 整数
 5. 只输出 JSON，不要额外说明""",
     parser=parse_json,
-    max_tokens=4000,
-    input_truncate=8000,
+    max_tokens=8192,
+    input_truncate=16000,
     feature_flag="enhance_monthly_report",
 )
 
@@ -244,8 +244,8 @@ TASK_ANNUAL_REPORT = AnalysisTask(
 3. overall_growth_score 为 0-10 整数，衡量全年综合成长
 4. 只输出 JSON，不要额外说明""",
     parser=parse_json,
-    max_tokens=4000,
-    input_truncate=8000,
+    max_tokens=8192,
+    input_truncate=18000,
     feature_flag="enhance_annual_report",
 )
 
@@ -315,6 +315,6 @@ TASK_GROWTH_ANALYSIS = AnalysisTask(
 3. 所有内容基于输入数据，禁止编造；只输出 JSON""",
     parser=parse_json,
     max_tokens=3000,
-    input_truncate=8000,
+    input_truncate=16000,
     feature_flag="",
 )
