@@ -94,14 +94,25 @@ def parse_json(raw: str, fallback: dict = None):
         pass
 
     # 尝试提取 markdown 代码块中的 JSON
-    json_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", raw, re.DOTALL)
-    if json_match:
+    # 匹配 ```json ... ```，支持代码块内嵌反引号、截断无结尾等情况
+    m = re.search(r"```(?:json)?\s*\n?(.*)", raw, re.DOTALL)
+    if m:
+        inner = m.group(1)
+        # 尝试剥离尾部 ```
+        end = inner.rfind("\n```")
+        if end == -1:
+            end = inner.rfind("```")
+        if end != -1:
+            inner = inner[:end]
+        inner = inner.strip()
         try:
-            result = json.loads(json_match.group(1).strip())
+            result = json.loads(inner)
             if isinstance(result, (dict, list)):
                 return result
         except json.JSONDecodeError:
             pass
+        # 代码块内 JSON 解析失败 → 继续尝试后面的提取方法
+        raw = inner  # 用剥离后的内容继续下面的提取
 
     # 尝试找到第一个 { ... } 对象
     brace_start = raw.find("{")

@@ -103,63 +103,104 @@ def _daily_fm(data: dict) -> dict:
     psy = rd.get("psychology") or {}
     tags = ["daily-report", "devpartner"]
     tags += [f"proj-{p}" for p in proj_names if p]
-    return {
+
+    date_str = data.get("date_str", "")
+    week = ""
+    month = ""
+    if date_str:
+        try:
+            d = datetime.strptime(date_str, "%Y-%m-%d")
+            week = d.strftime("%Y-W%W")
+            month = d.strftime("%Y-%m")
+        except ValueError:
+            pass
+
+    fm = {
         "type": "daily_report",
-        "date": data.get("date_str", ""),
+        "date": date_str,
         "engine": rd.get("inference_engine", "ollama"),
         "projects": proj_names,
-        "productivity_score": _score("productivity_score"),
-        "learning_score": _score("learning_score"),
-        "collaboration_score": _score("collaboration_score"),
-        "focus_score": _score("focus_score"),
-        "frustration_level": psy.get("frustration_level"),
         "tags": tags,
         "generated": datetime.now().isoformat(),
     }
+
+    # 可选字段：仅在有值时输出，避免 YAML 中出现 "None" 字符串
+    for key, val in [
+        ("week", week),
+        ("month", month),
+        ("productivity_score", _score("productivity_score")),
+        ("learning_score", _score("learning_score")),
+        ("collaboration_score", _score("collaboration_score")),
+        ("focus_score", _score("focus_score")),
+        ("frustration_level", psy.get("frustration_level")),
+    ]:
+        if val is not None and val != "":
+            fm[key] = val
+
+    return fm
 
 
 def _weekly_fm(data: dict) -> dict:
     ps = data.get("period_start", "")
     pe = data.get("period_end", "")
     rd = data.get("report_data", {}) or {}
-    return {
+
+    fm = {
         "type": "weekly_report",
         "period_start": ps,
         "period_end": pe,
         "week": _week_label(ps),
-        "overall_score": (rd.get("metrics", {}) or {}).get("overall_score"),
-        "emotional_state_trend": (rd.get("psychology", {}) or {}).get("emotional_state_trend"),
         "sources": [f"Calendar/{ps}.md", f"Calendar/{pe}.md"],
         "generated": datetime.now().isoformat(),
     }
+    # 可选字段
+    for key, val in [
+        ("overall_score", (rd.get("metrics", {}) or {}).get("overall_score")),
+        ("emotional_state_trend", (rd.get("psychology", {}) or {}).get("emotional_state_trend")),
+    ]:
+        if val is not None and val != "":
+            fm[key] = val
+    return fm
 
 
 def _monthly_fm(data: dict) -> dict:
     ps = data.get("period_start", "")
     rd = data.get("report_data", {}) or {}
-    return {
+
+    fm = {
         "type": "monthly_report",
         "period_start": ps,
         "period_end": data.get("period_end", ""),
         "month": _month_label(ps),
-        "overall_productivity": (rd.get("metrics", {}) or {}).get("overall_productivity"),
-        "emotional_state_trend": (rd.get("psychology", {}) or {}).get("emotional_state_trend"),
         "sources": [f"Reports/Weekly/{ps[:4]}-W*.md"],
         "generated": datetime.now().isoformat(),
     }
+    for key, val in [
+        ("overall_productivity", (rd.get("metrics", {}) or {}).get("overall_productivity")),
+        ("emotional_state_trend", (rd.get("psychology", {}) or {}).get("emotional_state_trend")),
+    ]:
+        if val is not None and val != "":
+            fm[key] = val
+    return fm
 
 
 def _annual_fm(data: dict) -> dict:
     y = data.get("year", "")
     rd = data.get("report_data", {}) or {}
-    return {
+
+    fm = {
         "type": "annual_report",
         "year": y,
-        "overall_growth_score": (rd.get("metrics", {}) or {}).get("overall_growth_score"),
-        "emotional_state_trend": (rd.get("psychology", {}) or {}).get("emotional_state_trend"),
         "sources": [f"Reports/Monthly/{y}-*.md"],
         "generated": datetime.now().isoformat(),
     }
+    for key, val in [
+        ("overall_growth_score", (rd.get("metrics", {}) or {}).get("overall_growth_score")),
+        ("emotional_state_trend", (rd.get("psychology", {}) or {}).get("emotional_state_trend")),
+    ]:
+        if val is not None and val != "":
+            fm[key] = val
+    return fm
 
 
 def _card_fm(
@@ -170,11 +211,14 @@ def _card_fm(
     created: str,
     knowledge_id: str = "",
     source: str = "",
+    project: str = "",
 ) -> str:
     """构建知识卡片 YAML frontmatter（返回字符串以保留格式）"""
     lines = ["---"]
     lines.append(f"type: {card_type}_card")
     lines.append(f'domain: "{_escape_yaml(domain)}"')
+    if project:
+        lines.append(f'project: "{_escape_yaml(project)}"')
     lines.append(f'title: "{_escape_yaml(title)}"')
     tag_list = (tags or []) + ["review"]
     tag_str = ", ".join(tag_list)

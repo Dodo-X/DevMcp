@@ -205,7 +205,7 @@ class ConversationDAO:
             f"SELECT COUNT(*) as total, "
             f"SUM(CASE WHEN analyzed = 1 THEN 1 ELSE 0 END) as analyzed "
             f"FROM {TABLE_CONVERSATIONS} "
-            f"WHERE DATE(created_at) = ? AND is_deleted = 0",
+            f"WHERE DATE(created_at) = ?",
             (target_date,),
         )[0]
         return row["total"] or 0, row["analyzed"] or 0

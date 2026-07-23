@@ -96,13 +96,14 @@ class VaultExporter:
     # 公开方法
     # ══════════════════════════════════════════════════════════
 
-    def export_skill_card(self, kp_id: str, kp_row: dict = None) -> str | None:
+    def export_skill_card(self, kp_id: str, kp_row: dict = None, project: str = "") -> str | None:
         """
         导出一张技能卡片到 Cards/{domain}/{id}_{title}.md
 
         Args:
             kp_id: knowledge_id
             kp_row: 如果已查好行数据可传入避免重复查询
+            project: 关联项目名，用于 frontmatter project 字段
 
         Returns:
             文件路径，如果跳过则返回 None
@@ -112,9 +113,9 @@ class VaultExporter:
         if not kp_row:
             return None
 
-        return self._export_card(kp_row, card_type="skill")
+        return self._export_card(kp_row, card_type="skill", project=project)
 
-    def export_business_card(self, kp_id: str, kp_row: dict = None) -> str | None:
+    def export_business_card(self, kp_id: str, kp_row: dict = None, project: str = "") -> str | None:
         """
         导出一张业务知识卡片到 Efforts/{project}/业务知识/{id}_{title}.md
         """
@@ -123,7 +124,7 @@ class VaultExporter:
         if not kp_row:
             return None
 
-        return self._export_card(kp_row, card_type="business")
+        return self._export_card(kp_row, card_type="business", project=project)
 
     def export_batch(
         self,
@@ -155,11 +156,11 @@ class VaultExporter:
 
                 kp_type = kp_row.get("type", "skill")
                 if kp_type == "business":
-                    path = self.export_business_card(kid, kp_row)
+                    path = self.export_business_card(kid, kp_row, project=project)
                     if path:
                         result["business_exported"] += 1
                 else:
-                    path = self.export_skill_card(kid, kp_row)
+                    path = self.export_skill_card(kid, kp_row, project=project)
                     if path:
                         result["skills_exported"] += 1
             except Exception as e:
@@ -340,13 +341,14 @@ class VaultExporter:
     # 内部方法
     # ══════════════════════════════════════════════════════════
 
-    def _export_card(self, kp_row: dict, card_type: str) -> str | None:
+    def _export_card(self, kp_row: dict, card_type: str, project: str = "") -> str | None:
         """
         统一导出卡片（技能或业务知识）。
 
         Args:
             kp_row: knowledge_points 行数据
             card_type: 'skill' 或 'business'
+            project: 关联项目名（业务卡片从 domain 推导，技能卡片从调用方传入）
 
         Returns:
             文件路径，如果跳过则返回 None
@@ -360,6 +362,15 @@ class VaultExporter:
         source_id = kp_row.get("source_id", "")
         self._safe_json(kp_row.get("aliases", "[]"), [])
         related_ids_raw = kp_row.get("related_knowledge_ids", "")
+
+        # ── 项目归属推导 ──
+        if not project:
+            if card_type == "business":
+                project = domain or self._derive_project_name()
+            else:
+                # 技能卡片：从 domain 中尝试推导（非通用领域时即视为项目相关）
+                # 否则使用当前工作目录名作为兜底
+                project = domain if domain not in ("General", "通用", "通用工程") else self._derive_project_name()
 
         if card_type == "skill":
             dir_path = self._vault_root / "Cards" / self._sanitize_path(domain)
@@ -394,6 +405,7 @@ class VaultExporter:
             tags=final_tags,
             created=created_at or datetime.now().isoformat(),
             knowledge_id=kp_id,
+            project=project,
             extra=extra,
         )
 
@@ -616,6 +628,7 @@ class VaultExporter:
         created: str,
         knowledge_id: str = "",
         source: str = "",
+        project: str = "",
         extra: dict = None,
     ) -> str:
         """构建 YAML Frontmatter"""
@@ -624,6 +637,8 @@ class VaultExporter:
             f"type: {card_type}",
             f"domain: {domain}",
         ]
+        if project:
+            lines.append(f'project: "{self._escape_yaml(project)}"')
         if tags:
             lines.append("tags: [" + ", ".join(tags) + "]")
         lines.append(f"created: {created}")

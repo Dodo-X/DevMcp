@@ -1047,7 +1047,7 @@ class TaskQueue:
             partial_result: 部分生成结果的前若干字符（预览用）
             status_note: 状态备注（如 "正在生成用户画像..."）
         """
-        progress = max(0.0, min(1.0, progress))
+        progress = max(0.0, min(1.0, float(progress)))
         now = datetime.now().isoformat()
 
         if task_id in self._task_map:

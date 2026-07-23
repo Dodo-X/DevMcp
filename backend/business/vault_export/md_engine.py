@@ -405,6 +405,8 @@ class MdAssembler:
     def _dict_to_yaml(data: dict) -> str:
         lines = ["---"]
         for k, v in data.items():
+            if v is None or v == "":
+                continue  # 跳过空值，避免 YAML 中出现 "None" 字符串或��引号
             if isinstance(v, str):
                 v = v.replace('"', '\\"').replace("\n", "\\n")
                 lines.append(f'{k}: "{v}"')
