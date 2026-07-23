@@ -1,702 +1,847 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DevPartner 运维仪表盘 v{{VERSION}}</title>
+<title>DevPartner 控制台 v{{VERSION}}</title>
 <style>
   :root {
-    --bg: #0f1117;
-    --card-bg: #1a1d27;
-    --card-hover: #1e2130;
-    --border: #2a2d3a;
-    --text: #e1e4eb;
-    --text-muted: #8b8fa3;
-    --accent: #6366f1;
-    --accent-hover: #818cf8;
-    --accent-glow: rgba(99,102,241,0.15);
-    --green: #22c55e;
-    --green-glow: rgba(34,197,94,0.12);
-    --yellow: #eab308;
-    --yellow-glow: rgba(234,179,8,0.12);
-    --red: #ef4444;
-    --red-glow: rgba(239,68,68,0.12);
-    --radius: 10px;
+    /* ── Surfaces ── */
+    --bg:           #0e1016;
+    --bg-elev:      #141823;
+    --panel:        #171c29;
+    --panel-2:      #1c2230;
+    --border:       #262d3d;
+    --border-soft:  #20263633;
+    /* ── Text ── */
+    --text:         #e6e9f0;
+    --text-2:       #aab1c4;
+    --text-muted:   #6b7488;
+    /* ── Brand accent (single restrained indigo) ── */
+    --accent:       #6366f1;
+    --accent-2:     #818cf8;
+    --accent-soft:  rgba(99,102,241,0.12);
+    --accent-line:  rgba(99,102,241,0.30);
+    /* ── Semantic ── */
+    --green:  #34d399;  --green-soft:  rgba(52,211,153,0.12);
+    --yellow: #fbbf24;  --yellow-soft: rgba(251,191,36,0.12);
+    --red:    #f87171;  --red-soft:    rgba(248,113,113,0.12);
+    --blue:   #60a5fa;  --blue-soft:   rgba(96,165,250,0.12);
+    /* ── Shape & motion ── */
+    --r-sm: 6px; --r: 10px; --r-lg: 14px;
+    --space: 4px;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
+    --ease: cubic-bezier(.22,.61,.36,1);
+    --dur: 200ms;
+    --font: "Inter", system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   }
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family: -apple-system, 'Segoe UI', 'Noto Sans SC', sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
-  .container { max-width:1320px; margin:0 auto; padding:24px; }
-  header { display:flex; justify-content:space-between; align-items:center; padding:20px 0; border-bottom:1px solid var(--border); margin-bottom:24px; }
-  header h1 { font-size:22px; font-weight:600; letter-spacing:-0.3px; }
-  header .version { font-size:13px; color:var(--text-muted); background:var(--card-bg); padding:4px 10px; border-radius:6px; border:1px solid var(--border); }
-  .status-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
-  .status-dot.online { background:var(--green); box-shadow:0 0 8px rgba(34,197,94,0.5); animation:pulse-green 2s ease-in-out infinite; }
-  .status-dot.offline { background:var(--red); }
-  .status-dot.warning { background:var(--yellow); }
-  @keyframes pulse-green { 0%,100%{box-shadow:0 0 8px rgba(34,197,94,0.5)} 50%{box-shadow:0 0 16px rgba(34,197,94,0.8)} }
-  @keyframes fadeIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
 
-  .grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px; }
-  .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:24px; }
-  .grid-2 { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; margin-bottom:24px; }
-
-  .card { background:var(--card-bg); border:1px solid var(--border); border-radius:var(--radius); padding:20px; transition:border-color 0.2s, box-shadow 0.2s; }
-  .card:hover { border-color:rgba(99,102,241,0.3); box-shadow:0 4px 24px rgba(0,0,0,0.2); }
-  .card-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
-  .card-header h2 { font-size:14px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; }
-  .card-header .badge { font-size:11px; padding:3px 10px; border-radius:10px; background:var(--accent); color:#fff; font-weight:500; }
-
-  .metric-value { font-size:36px; font-weight:700; line-height:1; letter-spacing:-1px; }
-  .metric-label { font-size:12px; color:var(--text-muted); margin-top:6px; }
-  .metric-change { font-size:12px; margin-top:4px; font-weight:500; }
-  .metric-change.up { color:var(--green); }
-  .metric-change.down { color:var(--red); }
-
-  .progress-bar { height:6px; background:var(--border); border-radius:3px; margin-top:8px; overflow:hidden; }
-  .progress-bar .fill { height:100%; border-radius:3px; transition:width 0.6s cubic-bezier(0.4,0,0.2,1); }
-  .progress-bar .fill.green { background:linear-gradient(90deg,var(--green),#4ade80); }
-  .progress-bar .fill.yellow { background:linear-gradient(90deg,var(--yellow),#facc15); }
-  .progress-bar .fill.red { background:linear-gradient(90deg,var(--red),#f87171); }
-  .progress-bar .fill.accent { background:linear-gradient(90deg,var(--accent),var(--accent-hover)); }
-
-  table { width:100%; border-collapse:collapse; font-size:13px; }
-  th { text-align:left; padding:10px 8px; border-bottom:2px solid var(--border); color:var(--text-muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:0.3px; }
-  td { padding:10px 8px; border-bottom:1px solid rgba(255,255,255,0.04); }
-  tr:hover td { background:rgba(99,102,241,0.04); }
-
-  .kb-table .kb-title { max-width:350px; }
-  .kb-table .kb-summary { font-size:11px; color:var(--text-muted); margin-top:4px; line-height:1.4; }
-
-  .tag { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:500; }
-  .tag.pending { background:rgba(234,179,8,0.12); color:var(--yellow); }
-  .tag.running { background:rgba(99,102,241,0.12); color:var(--accent); }
-  .tag.completed { background:rgba(34,197,94,0.12); color:var(--green); }
-  .tag.failed { background:rgba(239,68,68,0.12); color:var(--red); }
-
-  .refresh-bar { display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--text-muted); margin-bottom:20px; }
-  .refresh-bar button { background:var(--card-bg); border:1px solid var(--border); color:var(--text); padding:6px 14px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:500; transition:all 0.2s; }
-  .refresh-bar button:hover { border-color:var(--accent); color:var(--accent); background:var(--accent-glow); }
-
-  .memory-bar { margin-bottom:12px; }
-  .memory-bar .label { display:flex; justify-content:space-between; font-size:12px; color:var(--text-muted); margin-bottom:4px; }
-
-  .empty { text-align:center; padding:32px; color:var(--text-muted); font-size:13px; }
-
-  .error-banner { background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:var(--radius); padding:12px 16px; margin-bottom:16px; color:var(--red); font-size:13px; display:none; }
-
-  
-  .nav-tabs{display:flex;gap:4px;margin-bottom:24px;border-bottom:1px solid var(--border);padding-bottom:0;flex-wrap:wrap;}
-  .nav-tabs .tab{padding:10px 18px;border-radius:8px 8px 0 0;font-size:13px;cursor:pointer;color:var(--text-muted);border:1px solid transparent;border-bottom:none;transition:all 0.2s;white-space:nowrap;font-weight:500;}
-  .nav-tabs .tab:hover{color:var(--text);background:rgba(255,255,255,0.02);}
-  .nav-tabs .tab.active{color:var(--accent);border-color:var(--border);background:var(--card-bg);box-shadow:0 -2px 8px rgba(0,0,0,0.1);}
-  .tab-page{display:none;animation:fadeIn 0.25s ease;}
-  .tab-page.active{display:block;}
-  .skill-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
-  .skill-row .s-name{width:80px;font-size:12px;color:var(--text-muted);flex-shrink:0;}
-  .skill-row .s-bar{flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden;}
-  .skill-row .s-bar .s-fill{height:100%;border-radius:3px;transition:width 0.5s ease;}
-  .skill-row .s-val{font-size:12px;width:36px;text-align:right;flex-shrink:0;}
-  .search-box{display:flex;gap:8px;margin-bottom:12px;}
-  .search-box input{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px 14px;font-size:13px;outline:none;transition:border-color 0.2s, box-shadow 0.2s;}
-  .search-box input:focus,.search-box select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow);}
-  .search-box select{background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px 14px;font-size:13px;outline:none;cursor:pointer;}
-  .search-box button{padding:10px 18px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:1px solid var(--border);background:var(--card-bg);color:var(--text);transition:all 0.2s;}
-  .search-box button:hover{border-color:var(--accent);color:var(--accent);}
-  .search-box button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;}
-  .search-box button.primary:hover{background:var(--accent-hover);}
-  .heatmap-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;}
-  .heatmap-cell{aspect-ratio:1;border-radius:3px;min-width:16px;}
-  .heatmap-labels{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:4px;}
-  .heatmap-labels span{font-size:10px;color:var(--text-muted);text-align:center;}
-  .timeline-item{display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;align-items:flex-start;}
-  .timeline-item .tl-icon{font-size:16px;flex-shrink:0;}
-  .timeline-item .tl-time{font-size:11px;color:var(--text-muted);flex-shrink:0;width:80px;}
-  .timeline-item .tl-content{flex:1;}
-  .timeline-item .tl-delta{font-size:11px;color:var(--accent);flex-shrink:0;}
-  .trend-bar-chart{display:flex;align-items:flex-end;gap:2px;height:120px;padding-top:8px;}
-  .trend-bar{flex:1;min-width:12px;background:var(--accent);border-radius:2px 2px 0 0;transition:height 0.5s ease;position:relative;}
-  .trend-bar:hover{background:var(--accent-hover);}
-  .trend-bar-label{font-size:9px;color:var(--text-muted);text-align:center;margin-top:4px;}
-  .ops-action-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;align-items:center;}
-  .ops-action-row .btn{padding:7px 16px;border-radius:8px;font-size:12px;cursor:pointer;border:1px solid var(--border);background:var(--card-bg);color:var(--text);transition:all 0.2s;font-weight:500;}
-  .ops-action-row .btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-glow);}
-  .ops-action-row .btn.primary{background:rgba(99,102,241,0.15);border-color:var(--accent);color:var(--accent);}
-  .ops-action-row .btn.primary:hover{background:rgba(99,102,241,0.25);}
-  .ops-result{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;font-family:'JetBrains Mono','Consolas',monospace;font-size:11px;max-height:300px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;color:var(--text-muted);}
-
-  .diag-row{display:flex;justify-content:space-between;align-items:flex-start;padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.03);font-size:12px;}
-  .diag-row:last-child{border-bottom:none;}
-  .diag-name{color:var(--text-muted);flex-shrink:0;margin-right:16px;min-width:80px;font-weight:500;}
-  .diag-val{color:var(--text);text-align:right;word-break:break-all;}
-  .diag-ok{color:var(--green)!important;}
-  .diag-err{color:var(--red)!important;}
-  .diag-warn{color:var(--yellow)!important;}
-  .diag-issues{margin-top:10px;padding:10px 14px;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);border-radius:8px;font-size:12px;color:var(--red);}
-  .diag-issue{padding:2px 0;font-size:11px;}
-  .integrity-summary{padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:13px;font-weight:600;}
-
-  /* 优化建议卡片 */
-  .sg-card{background:var(--card-bg);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;margin-bottom:12px;transition:border-color 0.2s;}
-  .sg-card:hover{border-color:var(--accent);}
-  .sg-card.pending{border-left:3px solid var(--yellow);}
-  .sg-card.approved{border-left:3px solid var(--green);}
-  .sg-card.rejected{border-left:3px solid var(--red);}
-  .sg-card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;flex-wrap:wrap;gap:8px;}
-  .sg-card-title{font-size:15px;font-weight:600;color:var(--text);}
-  .sg-card-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
-  .sg-card-desc{font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:8px;}
-  .sg-card-suggestion{font-size:13px;color:var(--accent);background:rgba(99,102,241,0.08);border-radius:6px;padding:10px 12px;line-height:1.6;margin-bottom:10px;}
-  .sg-card-footer{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;font-size:12px;color:var(--text-muted);}
-  .sg-card-actions{display:flex;gap:6px;}
-  .sg-card-actions button{padding:4px 12px;border-radius:6px;font-size:12px;cursor:pointer;border:1px solid var(--border);background:var(--card-bg);color:var(--text);transition:all 0.2s;}
-  .sg-card-actions button.approve:hover{background:rgba(34,197,94,0.15);border-color:var(--green);color:var(--green);}
-  .sg-card-actions button.reject:hover{background:rgba(239,68,68,0.15);border-color:var(--red);color:var(--red);}
-  .sg-card-actions button.apply:hover{background:rgba(99,102,241,0.15);border-color:var(--accent);color:var(--accent);}
-  .sg-card-actions button.feedback-btn:hover{background:rgba(234,179,8,0.15);border-color:var(--yellow);color:var(--yellow);}
-  .sg-feedback-area{display:none;margin-top:10px;}
-  .sg-feedback-area textarea{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;resize:vertical;min-height:60px;}
-  .sg-feedback-area textarea:focus{border-color:var(--accent);}
-  .sg-feedback-area .btn-row{display:flex;gap:6px;margin-top:8px;justify-content:flex-end;}
-
-  /* tooltip */
-  .card-header{position:relative;}
-  .card-header .info-icon{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:var(--border);color:var(--text-muted);font-size:11px;cursor:help;margin-left:8px;transition:all 0.2s;flex-shrink:0;}
-  .card-header .info-icon:hover{background:var(--accent);color:#fff;}
-  .card-header .info-icon .tooltip{display:none;position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:8px;background:#232738;border:1px solid var(--accent);border-radius:8px;padding:12px 16px;font-size:12px;color:var(--text);white-space:normal;width:280px;line-height:1.6;z-index:100;box-shadow:0 8px 32px rgba(0,0,0,0.4);text-transform:none;letter-spacing:0;font-weight:400;}
-  .card-header .info-icon:hover .tooltip{display:block;}
-  .card-header .info-icon .tooltip::before{content:'';position:absolute;top:-6px;left:50%;transform:translateX(-50%);border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:6px solid var(--accent);}
-
-  @media (max-width:768px) {
-    .grid-4 { grid-template-columns:repeat(2,1fr); }
-    .grid-3, .grid-2 { grid-template-columns:1fr; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
   }
+  ::selection { background: var(--accent-line); }
+
+  /* ── Skip link (a11y) ── */
+  .skip-link {
+    position: absolute; left: 12px; top: -48px; z-index: 999;
+    background: var(--accent); color: #fff; padding: 8px 14px;
+    border-radius: var(--r-sm); transition: top var(--dur) var(--ease);
+  }
+  .skip-link:focus { top: 12px; }
+
+  /* ── Layout shell ── */
+  .app { display: grid; grid-template-columns: 248px 1fr; min-height: 100vh; }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    background: linear-gradient(180deg, var(--bg-elev), var(--bg));
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    position: sticky; top: 0; height: 100vh;
+    padding: 18px 14px; gap: 6px;
+  }
+  .brand { display: flex; align-items: center; gap: 11px; padding: 4px 8px 16px; }
+  .brand-logo {
+    width: 34px; height: 34px; border-radius: 9px; flex: none;
+    background: linear-gradient(135deg, var(--accent), #a855f7);
+    display: grid; place-items: center; font-weight: 800; color: #fff;
+    box-shadow: 0 4px 14px var(--accent-soft);
+  }
+  .brand-name { font-weight: 700; font-size: 15px; letter-spacing: .2px; }
+  .brand-sub { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+
+  .nav-group { margin-top: 10px; }
+  .nav-label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .8px;
+    color: var(--text-muted); padding: 8px 10px 4px; font-weight: 600;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 11px;
+    width: 100%; text-align: left; cursor: pointer;
+    background: transparent; border: 0; color: var(--text-2);
+    font: inherit; font-size: 13.5px; padding: 9px 11px; border-radius: var(--r);
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+  }
+  .nav-item .ic { width: 18px; text-align: center; font-size: 15px; opacity: .9; }
+  .nav-item .kbd {
+    margin-left: auto; font-family: var(--mono); font-size: 10px;
+    color: var(--text-muted); border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 5px;
+  }
+  .nav-item:hover { background: var(--panel); color: var(--text); }
+  .nav-item[aria-current="page"] {
+    background: var(--accent-soft); color: #fff;
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  .nav-item[aria-current="page"] .ic { opacity: 1; }
+
+  .sidebar-foot { margin-top: auto; padding-top: 14px; }
+  .sys-pulse {
+    display: flex; align-items: center; gap: 8px; font-size: 12px;
+    color: var(--text-2); padding: 10px 11px; border: 1px solid var(--border);
+    border-radius: var(--r); background: var(--panel);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .dot.online { background: var(--green); box-shadow: 0 0 0 3px var(--green-soft); }
+  .dot.offline { background: var(--red); box-shadow: 0 0 0 3px var(--red-soft); }
+  .dot.warn { background: var(--yellow); box-shadow: 0 0 0 3px var(--yellow-soft); }
+
+  /* ── Main ── */
+  .main { display: flex; flex-direction: column; min-width: 0; }
+  .topbar {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; gap: 16px;
+    padding: 14px 24px; background: color-mix(in srgb, var(--bg) 86%, transparent);
+    backdrop-filter: blur(10px); border-bottom: 1px solid var(--border);
+  }
+  .topbar h1 { font-size: 17px; margin: 0; font-weight: 700; }
+  .topbar .crumb { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .topbar-spacer { flex: 1; }
+  .search {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--r); padding: 7px 11px; min-width: 220px;
+    color: var(--text-muted); transition: border-color var(--dur) var(--ease);
+  }
+  .search:focus-within { border-color: var(--accent-line); }
+  .search input {
+    background: transparent; border: 0; outline: 0; color: var(--text);
+    font: inherit; width: 100%;
+  }
+  .search kbd {
+    font-family: var(--mono); font-size: 10px; border: 1px solid var(--border);
+    border-radius: 4px; padding: 1px 5px; color: var(--text-muted);
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+    font: inherit; font-size: 13px; font-weight: 500;
+    padding: 8px 13px; border-radius: var(--r);
+    border: 1px solid var(--border); background: var(--panel); color: var(--text);
+    transition: all var(--dur) var(--ease);
+  }
+  .btn:hover { border-color: var(--accent-line); background: var(--panel-2); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: var(--accent-2); }
+  .btn.ghost { background: transparent; }
+  .btn.sm { padding: 5px 10px; font-size: 12px; }
+  .btn.danger { color: var(--red); border-color: var(--red-soft); }
+  .btn.danger:hover { background: var(--red-soft); }
+  .btn:disabled { opacity: .5; pointer-events: none; }
+
+  .content { padding: 24px; max-width: 1320px; width: 100%; }
+  .page { display: none; animation: fade var(--dur) var(--ease); }
+  .page.active { display: block; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  /* ── Cards & grid ── */
+  .grid { display: grid; gap: 16px; }
+  .grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
+  .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 1100px) { .grid.cols-4 { grid-template-columns: repeat(2,1fr); } .grid.cols-3 { grid-template-columns: repeat(2,1fr); } }
+  @media (max-width: 720px) { .grid.cols-2, .grid.cols-3, .grid.cols-4 { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: var(--r-lg); padding: 18px; box-shadow: var(--shadow);
+  }
+  .card > h3 { margin: 0 0 14px; font-size: 13px; font-weight: 600; color: var(--text-2);
+    display: flex; align-items: center; gap: 8px; letter-spacing: .2px; }
+  .card > h3 .pill { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--text-muted);
+    border: 1px solid var(--border); border-radius: 20px; padding: 2px 9px; }
+
+  /* ── Stat tile ── */
+  .stat { display: flex; flex-direction: column; gap: 6px; }
+  .stat .label { font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+  .stat .value { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.5px; }
+  .stat .value.accent { color: var(--accent-2); }
+  .stat .sub { font-size: 11px; color: var(--text-muted); }
+
+  /* ── Tables ── */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead th {
+    text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .6px;
+    color: var(--text-muted); font-weight: 600; padding: 9px 12px;
+    border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--panel);
+  }
+  tbody td { padding: 10px 12px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+  tbody tr:hover { background: var(--panel-2); }
+  .empty { color: var(--text-muted); font-size: 13px; padding: 22px; text-align: center; }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* ── Tags / badges ── */
+  .tag { display: inline-flex; align-items: center; font-size: 11px; font-weight: 500;
+    padding: 2px 8px; border-radius: 20px; background: var(--panel-2); color: var(--text-2); }
+  .tag.pending { background: var(--yellow-soft); color: var(--yellow); }
+  .tag.running { background: var(--blue-soft); color: var(--blue); }
+  .tag.completed { background: var(--green-soft); color: var(--green); }
+  .tag.failed { background: var(--red-soft); color: var(--red); }
+
+  /* ── Bars & meters ── */
+  .meter { height: 7px; border-radius: 20px; background: var(--panel-2); overflow: hidden; }
+  .meter > span { display: block; height: 100%; border-radius: 20px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width var(--dur) var(--ease); }
+
+  .trend { display: flex; align-items: flex-end; gap: 5px; height: 120px; padding-top: 8px; }
+  .trend .bar { flex: 1; background: var(--accent-soft); border-radius: 4px 4px 0 0; min-height: 4px;
+    transition: height var(--dur) var(--ease); position: relative; }
+  .trend .bar:hover { background: var(--accent-line); }
+  .trend .lab { font-size: 10px; color: var(--text-muted); text-align: center; margin-top: 4px; }
+
+  /* ── Heatmap ── */
+  .heat { display: grid; grid-template-columns: repeat(auto-fill, minmax(13px, 1fr)); gap: 3px; }
+  .heat .cell { aspect-ratio: 1; border-radius: 3px; background: var(--panel-2); }
+  .heat-labels { display: flex; gap: 3px; margin-top: 6px; font-size: 10px; color: var(--text-muted); }
+  .heat-labels span { flex: 1; text-align: center; }
+
+  /* ── Diagnostic rows ── */
+  .diag-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0;
+    border-bottom: 1px solid var(--border-soft); font-size: 13px; }
+  .diag-name { color: var(--text-2); }
+  .diag-val { font-family: var(--mono); font-size: 12px; color: var(--text); text-align: right; }
+  .diag-ok { color: var(--green); } .diag-warn { color: var(--yellow); } .diag-err { color: var(--red); }
+  .diag-issues { margin-top: 10px; padding: 10px 12px; background: var(--yellow-soft);
+    border-radius: var(--r); font-size: 12px; color: var(--yellow); }
+  .integrity-summary { padding: 10px 12px; border-radius: var(--r); font-size: 13px; margin-bottom: 10px;
+    background: var(--panel-2); }
+
+  /* ── Suggestion cards ── */
+  .sg-card { border: 1px solid var(--border); border-radius: var(--r); padding: 14px;
+    background: var(--panel); margin-bottom: 12px; transition: border-color var(--dur) var(--ease); }
+  .sg-card:hover { border-color: var(--accent-line); }
+  .sg-card.pending { border-left: 3px solid var(--yellow); }
+  .sg-card.approved { border-left: 3px solid var(--green); }
+  .sg-card.rejected { border-left: 3px solid var(--red); opacity: .8; }
+  .sg-card-header { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+  .sg-card-title { font-weight: 600; font-size: 14px; }
+  .sg-card-meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .sg-card-desc { color: var(--text-2); font-size: 13px; margin: 8px 0; }
+  .sg-card-suggestion { background: var(--accent-soft); border-radius: var(--r-sm);
+    padding: 8px 10px; font-size: 12.5px; color: var(--text); }
+  .sg-card-footer { display: flex; justify-content: space-between; align-items: center;
+    gap: 10px; margin-top: 10px; font-size: 11px; color: var(--text-muted); flex-wrap: wrap; }
+  .sg-card-actions { display: flex; gap: 6px; }
+  .sg-feedback-area { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+  .sg-feedback-area textarea { width: 100%; min-height: 52px; resize: vertical;
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm);
+    color: var(--text); padding: 8px; font: inherit; font-size: 12px; }
+  .sg-feedback-area .btn-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+
+  /* ── Skeleton ── */
+  .skeleton { position: relative; overflow: hidden; background: var(--panel-2);
+    border-radius: var(--r-sm); color: transparent !important; }
+  .skeleton::after { content: ""; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent);
+    transform: translateX(-100%); animation: sh 1.2s infinite; }
+  @keyframes sh { to { transform: translateX(100%); } }
+
+  /* ── Toast ── */
+  .toasts { position: fixed; right: 18px; bottom: 18px; z-index: 200;
+    display: flex; flex-direction: column; gap: 10px; max-width: 360px; }
+  .toast { display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+    background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+    border-radius: var(--r); box-shadow: var(--shadow); font-size: 13px;
+    animation: slidein var(--dur) var(--ease); }
+  .toast.ok { border-left-color: var(--green); }
+  .toast.warn { border-left-color: var(--yellow); }
+  .toast.err { border-left-color: var(--red); }
+  @keyframes slidein { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
+
+  /* ── Modal ── */
+  .modal-scrim { position: fixed; inset: 0; z-index: 300; background: rgba(0,0,0,.55);
+    display: none; align-items: center; justify-content: center; padding: 20px; }
+  .modal-scrim.open { display: flex; animation: fade var(--dur) var(--ease); }
+  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg);
+    box-shadow: var(--shadow); width: 100%; max-width: 420px; padding: 22px; }
+  .modal h3 { margin: 0 0 8px; font-size: 16px; }
+  .modal p { color: var(--text-2); font-size: 13px; margin: 0 0 18px; }
+  .modal .row { display: flex; gap: 10px; justify-content: flex-end; }
+  .shortcuts-grid { display: grid; grid-template-columns: auto 1fr; gap: 10px 16px; font-size: 13px; }
+  .shortcuts-grid kbd { font-family: var(--mono); background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 5px; padding: 2px 8px; font-size: 12px; }
+
+  .status-banner { display: none; padding: 12px 16px; border-radius: var(--r);
+    background: var(--red-soft); border: 1px solid var(--red); color: var(--red); font-size: 13px; margin-bottom: 16px; }
+
+  .row-flex { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .field { display: flex; flex-direction: column; gap: 5px; }
+  .field label { font-size: 12px; color: var(--text-muted); }
+  select, input[type="text"], input[type="date"], input[type="number"] {
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm);
+    color: var(--text); padding: 8px 10px; font: inherit; font-size: 13px; outline: none; }
+  select:focus, input:focus { border-color: var(--accent-line); }
+  .checkbox { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-2); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  }
+  @media (max-width: 860px) {
+    .app { grid-template-columns: 1fr; }
+    .sidebar { position: fixed; z-index: 50; width: 248px; transform: translateX(-100%);
+      transition: transform var(--dur) var(--ease); }
+    .sidebar.open { transform: none; }
+    .menu-toggle { display: inline-flex !important; }
+  }
+  .menu-toggle { display: none; }
 </style>
 </head>
 <body>
-<div class="container">
-  <header>
-    <div>
-      <h1><span class="status-dot online" id="sysStatusDot"></span>DevPartner 运维仪表盘</h1>
-    </div>
-    <span class="version">v{{VERSION}}</span>
-  </header>
-
-  <div class="error-banner" id="errorBanner"></div>
-
-  <div id="pendingAnalysesAlert" style="display:none;background:rgba(234,179,8,0.1);border:1px solid var(--yellow);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;color:var(--text);font-size:14px;"></div>
-
-  <div class="refresh-bar">
-    <span id="lastUpdate">加载中...</span>
-    <button onclick="refreshAll()">⟳ 刷新</button>
-  </div>
-
-  <!-- 导航标签 -->
-  <div class="nav-tabs" id="mainNav">
-    <div class="tab active" onclick="switchPage('overview',this)">总览</div>
-    <div class="tab" onclick="switchPage('growth',this)">用户成长</div>
-    <div class="tab" onclick="switchPage('knowledge',this)">知识库</div>
-    <div class="tab" onclick="switchPage('projects',this)">项目</div>
-    <div class="tab" onclick="switchPage('ops',this)">系统运维</div>
-    <div class="tab" onclick="switchPage('reports',this)">报告</div>
-    <div class="tab" onclick="switchPage('suggestions',this)">优化建议</div>
-  </div>
-  <div class="tab-page active" id="page-overview">
-
-  <!-- 核心指标 -->
-  <div class="grid-4">
-    <div class="card">
-      <div class="metric-value" id="activeSessions">-</div>
-      <div class="metric-label">活跃会话 (24h)</div>
-    </div>
-    <div class="card">
-      <div class="metric-value" id="todaySessions">-</div>
-      <div class="metric-label">今日新会话</div>
-    </div>
-    <div class="card">
-      <div class="metric-value" id="kbSize">-</div>
-      <div class="metric-label">知识库条目</div>
-    </div>
-    <div class="card">
-      <div class="metric-value" id="todayKnowledge">-</div>
-      <div class="metric-label">今日新增知识</div>
-    </div>
-  </div>
-
-  <!-- 系统趋势图 -->
-  <div class="card" style="margin-bottom:24px;">
-    <div class="card-header"><h2>会话趋势 (近30天)</h2></div>
-    <div id="trendContent" class="empty">加载中...</div>
-  </div>
-
-  <!-- 任务队列 + 内存 -->
-  <div class="grid-2">
-    <div class="card">
-      <div class="card-header"><h2>任务队列</h2><span class="badge" id="taskTotal">-</span></div>
-      <div class="grid-3" style="margin-bottom:12px;">
-        <div><div class="metric-value" style="font-size:24px;" id="pendingTasks">-</div><div class="metric-label">待处理</div></div>
-        <div><div class="metric-value" style="font-size:24px;" id="runningTasks">-</div><div class="metric-label">运行中</div></div>
-        <div><div class="metric-value" style="font-size:24px;" id="completedTasks">-</div><div class="metric-label">已完成</div></div>
-      </div>
-      <table id="taskTable">
-        <thead><tr><th>ID</th><th>名称</th><th>类型</th><th>状态</th><th>重试</th><th>错误信息</th><th>操作</th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-
-    <div class="card">
-      <div class="card-header"><h2>内存使用</h2></div>
-      <div class="memory-bar">
-        <div class="label"><span id="memUsedLabel">进程 RSS</span><span id="memRSS">-</span></div>
-        <div class="progress-bar"><div class="fill accent" id="memRSSBar" style="width:0%"></div></div>
-      </div>
-      <div class="memory-bar">
-        <div class="label"><span>系统总内存</span><span id="memSys">-</span></div>
-        <div class="progress-bar"><div class="fill yellow" id="memSysBar" style="width:0%"></div></div>
-      </div>
-      <div id="memDetails"></div>
-    </div>
-  </div>
-
-  <!-- 任务运维监管 (v8.1) -->
-  <div class="grid-2">
-    <div class="card">
-      <div class="card-header"><h2>任务运维指标</h2><span class="badge" id="taskSuccessRate">-</span></div>
-      <div class="grid-4" style="margin-bottom:12px;">
-        <div><div class="metric-value" style="font-size:20px;color:var(--green);" id="opsCompleted">-</div><div class="metric-label">成功</div></div>
-        <div><div class="metric-value" style="font-size:20px;color:var(--red);" id="opsFailed">-</div><div class="metric-label">失败</div></div>
-        <div><div class="metric-value" style="font-size:20px;color:var(--yellow);" id="opsTimeout">-</div><div class="metric-label">超时</div></div>
-        <div><div class="metric-value" style="font-size:20px;color:var(--text-muted);" id="opsCancelled">-</div><div class="metric-label">取消</div></div>
-      </div>
-      <div class="memory-bar">
-        <div class="label"><span>平均耗时</span><span id="opsAvgTime">-</span></div>
-      </div>
-      <div class="memory-bar">
-        <div class="label"><span>并发槽位 (可用/总)</span><span id="opsSlots">-</span></div>
-        <div class="progress-bar"><div class="fill accent" id="opsSlotsBar" style="width:0%"></div></div>
-      </div>
-      <div class="memory-bar">
-        <div class="label"><span>队列内存</span><span id="opsMem">-</span></div>
-        <div class="progress-bar"><div class="fill yellow" id="opsMemBar" style="width:0%"></div></div>
+<a href="#main" class="skip-link">跳到主内容</a>
+<div class="app">
+  <!-- ── Sidebar ── -->
+  <aside class="sidebar" id="sidebar" aria-label="主导航">
+    <div class="brand">
+      <div class="brand-logo">D</div>
+      <div>
+        <div class="brand-name">DevPartner</div>
+        <div class="brand-sub">开发者成长控制台</div>
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-header"><h2>并发诊断</h2><span class="badge" id="diagMode">v8.1</span></div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">阶段锁 & 运行中任务</div>
-      <div id="diagContent" class="empty">加载中...</div>
-    </div>
-  </div>
-
-  <!-- Handler 注册清单 (v8.1) -->
-  <div class="card" style="margin-bottom:24px;">
-    <div class="card-header"><h2>已注册任务处理器</h2><span class="badge" id="handlerTotal">-</span></div>
-    <div id="handlerContent" class="empty">加载中...</div>
-  </div>
-
-  <!-- 回调统计 + 健康检查 -->
-  <div class="grid-2">
-    <div class="card">
-      <div class="card-header"><h2>回调统计</h2></div>
-      <div class="grid-2" style="margin-bottom:12px;">
-        <div><div class="metric-value" style="font-size:24px; color:var(--green);" id="cbSuccess">-</div><div class="metric-label">成功触发</div></div>
-        <div><div class="metric-value" style="font-size:24px; color:var(--red);" id="cbError">-</div><div class="metric-label">错误次数</div></div>
+    <nav>
+      <div class="nav-group">
+        <div class="nav-label">工作区</div>
+        <button class="nav-item" data-page="overview" aria-current="page"><span class="ic">◧</span> 概览 <span class="kbd">1</span></button>
+        <button class="nav-item" data-page="growth"><span class="ic">↗</span> 成长 <span class="kbd">2</span></button>
+        <button class="nav-item" data-page="knowledge"><span class="ic">⚇</span> 知识库 <span class="kbd">3</span></button>
+        <button class="nav-item" data-page="projects"><span class="ic">▤</span> 项目 <span class="kbd">4</span></button>
+        <button class="nav-item" data-page="reports"><span class="ic">▦</span> 报告 <span class="kbd">5</span></button>
       </div>
-      <table id="cbTable">
-        <thead><tr><th>ID</th><th>名称</th><th>状态</th><th>时间</th></tr></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-
-    <div class="card">
-      <div class="card-header"><h2>服务健康</h2></div>
-      <div id="healthContent" class="empty">加载中...</div>
-    </div>
-  </div>
-
-  </div><!-- end page-overview -->
-
-  <!-- ==================== 用户成长 ==================== -->
-  <div class="tab-page" id="page-growth">
-    <div class="grid-4">
-      <div class="card"><div class="metric-value" id="ugTotalSkills">-</div><div class="metric-label">总技能数</div></div>
-      <div class="card"><div class="metric-value" id="ugAvgMastery">-</div><div class="metric-label">平均掌握度</div><div class="progress-bar"><div class="fill green" id="ugMasteryBar" style="width:0%"></div></div></div>
-      <div class="card"><div class="metric-value" id="ugStreakDays">-</div><div class="metric-label">连续学习天数</div></div>
-      <div class="card"><div class="metric-value" id="ugWeekNew">-</div><div class="metric-label">本周新增技能</div></div>
-    </div>
-    <div class="grid-2">
-      <div class="card">
-        <div class="card-header"><h2>技能掌握度</h2><span class="badge" id="ugTopDomain">-</span></div>
-        <div id="radarContent" class="empty">加载中...</div>
+      <div class="nav-group">
+        <div class="nav-label">管理</div>
+        <button class="nav-item" data-page="suggestions"><span class="ic">✦</span> 优化建议 <span class="kbd">6</span></button>
+        <button class="nav-item" data-page="ops"><span class="ic">⚙</span> 系统运维 <span class="kbd">7</span></button>
       </div>
-      <div class="card">
-        <div class="card-header"><h2>领域技能清单</h2></div>
-        <div id="domainDistContent" class="empty" style="max-height:360px;overflow-y:auto;">加载中...</div>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="sys-pulse">
+        <span class="dot online" id="hbDot"></span>
+        <span id="hbText">系统正常</span>
       </div>
     </div>
-    <div class="grid-2">
-      <div class="card">
-        <div class="card-header"><h2>学习效率</h2></div>
-        <div class="metric-value" style="font-size:28px;" id="ugEfficiency">-</div>
-        <div class="metric-label">近30天学习效率</div>
-        <div class="progress-bar"><div class="fill accent" id="ugEffBar" style="width:0%"></div></div>
-      </div>
-      <div class="card">
-        <div class="card-header"><h2>最近更新</h2></div>
-        <div style="font-size:12px;color:var(--text-muted);" id="ugLastUpdate">-</div>
-      </div>
-    </div>
-    <div class="card" style="margin-bottom:24px;">
-      <div class="card-header"><h2>学习热力图 (近4周)</h2><span class="badge" id="heatActiveDays">-</span></div>
-      <div class="heatmap-labels" id="heatLabels"></div>
-      <div class="heatmap-grid" id="heatGrid"></div>
-      <div style="margin-top:12px;font-size:11px;color:var(--text-muted);display:flex;gap:12px;align-items:center;">
-        <span>峰值: <b id="heatPeak" style="color:var(--text);">-</b></span>
-        <span>均值: <b id="heatAvg" style="color:var(--text);">-</b></span>
-        <span style="margin-left:auto;display:flex;align-items:center;gap:4px;">
-          <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:#1a1d27;"></span>低
-          <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:rgba(99,102,241,0.4);"></span>
-          <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:rgba(99,102,241,0.7);"></span>
-          <span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:var(--accent);"></span>高
-        </span>
-      </div>
-    </div>
-    <div class="card" style="margin-bottom:24px;">
-      <div class="card-header"><h2>学习时间线</h2><span class="badge" id="tlTotal">-</span></div>
-      <div id="timelineContent" class="empty">加载中...</div>
-    </div>
-  </div>
+  </aside>
 
-  <!-- ==================== 知识库 ==================== -->
-  <div class="tab-page" id="page-knowledge">
-    <div class="card" style="margin-bottom:24px;">
-      <div class="card-header"><h2>知识库智能匹配</h2><span class="badge" id="kbListTotal">-</span></div>
-      <div class="search-box">
-        <input type="text" id="kbSearchInput" placeholder="输入问题描述，AI 自动匹配领域..." onkeyup="if(event.key==='Enter')matchKnowledge()">
-        <button class="btn primary" onclick="matchKnowledge()">🔍 AI 匹配</button>
-        <button class="btn" onclick="searchKnowledge()">精确搜索</button>
+  <!-- ── Main ── -->
+  <div class="main" id="main">
+    <header class="topbar">
+      <button class="btn ghost sm menu-toggle" id="menuToggle" aria-label="切换导航">☰</button>
+      <div>
+        <h1 id="pageTitle">概览</h1>
+        <div class="crumb" id="pageCrumb">系统实时状态与关键指标</div>
       </div>
-      <div id="kbMatchInfo" style="display:none;padding:8px 12px;margin-top:8px;border-radius:6px;font-size:12px;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);color:var(--accent);"></div>
-      <div id="kbSearchResults" class="empty">输入问题描述，点击"AI 匹配"开始分析...</div>
-    </div>
-  </div>
+      <div class="topbar-spacer"></div>
+      <label class="search">
+        <span>🔍</span>
+        <input id="globalSearch" type="text" placeholder="搜索 / 过滤（/）" aria-label="全局搜索">
+        <kbd>/</kbd>
+      </label>
+      <button class="btn" id="refreshBtn" title="刷新 (R)">⟳ 刷新</button>
+      <button class="btn ghost" id="helpBtn" title="快捷键 (?)">?</button>
+    </header>
 
-  <!-- ==================== 项目 ==================== -->
-  <div class="tab-page" id="page-projects">
-    <div class="card" style="margin-bottom:24px;">
-      <div class="card-header"><h2>项目列表</h2><span class="badge" id="projCount">-</span></div>
-      <div id="projContent" class="empty">加载中...</div>
-    </div>
-    <div class="card" style="margin-bottom:24px;">
-      <div class="card-header"><h2>项目知识搜索</h2></div>
-      <div class="search-box">
-        <input type="text" id="projQueryInput" placeholder="输入问题搜索项目知识...">
-        <select id="projSelect" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;"></select>
-        <button class="btn primary" onclick="queryProject()">查询</button>
-      </div>
-      <div id="projQueryResult" class="empty">输入问题并选择项目后查询...</div>
-    </div>
-  </div>
+    <div class="content">
+      <div class="status-banner" id="errorBanner" role="alert"></div>
 
-  <!-- ==================== 系统运维 ==================== -->
-  <div class="tab-page" id="page-ops">
-    <!-- 第一行: 系统诊断 + 数据完整性检查 -->
-    <div class="grid-2">
-      <div class="card">
-        <div class="card-header">
-          <h2>🔍 系统诊断</h2>
-          <span class="info-icon">?<span class="tooltip">🔍 <b>系统诊断</b><br>深度检查各模块运行状况：数据库表完整性、索引状态、任务队列健康度、配置有效性。发现问题时以警告/错误标签展示。</span></span>
+      <!-- ══ Overview ══ -->
+      <section class="page active" id="page-overview" aria-label="概览">
+        <div class="grid cols-4" id="ovStats">
+          <div class="card stat skeleton" style="height:96px"></div>
+          <div class="card stat skeleton" style="height:96px"></div>
+          <div class="card stat skeleton" style="height:96px"></div>
+          <div class="card stat skeleton" style="height:96px"></div>
         </div>
-        <div id="sysDiagContent" class="empty">加载中...</div>
-      </div>
-      <div class="card">
-        <div class="card-header">
-          <h2>📊 数据完整性检查</h2>
-          <span class="info-icon">?<span class="tooltip">✅ <b>数据完整性检查</b><br>验证数据库中各表的记录一致性：检查孤立引用、外键完整性、软删除记录数量。同时展示 WriteTracker 写入统计（服务重启后清零）。</span></span>
-        </div>
-        <div id="sysIntegrityContent" class="empty">加载中...</div>
-        <div class="ops-action-row" style="margin-top:10px;">
-          <button class="btn primary" onclick="checkIntegrity()">🔄 运行检查</button>
-        </div>
-      </div>
-    </div>
 
-    <!-- 第二行: LLM 状态 + 请求拦截器 -->
-    <div class="grid-2">
-      <div class="card">
-        <div class="card-header">
-          <h2>🧠 LLM 状态</h2>
-          <span class="info-icon">?<span class="tooltip">🧠 <b>LLM 大模型状态</b><br>检查 Ollama 服务连接状态、当前加载的模型信息、模型可用性。如果 LLM 不可达，知识提取和对话分析将无法正常工作。</span></span>
-          <span class="badge" id="llmStatusBadge" style="background:var(--yellow);">检测中</span>
-        </div>
-        <div id="llmStatusContent" class="empty">加载中...</div>
-        <div id="llmStartResult" class="ops-result" style="display:none;margin-top:10px;"></div>
-        <div class="ops-action-row" style="margin-top:10px;">
-          <button class="btn primary" onclick="checkLlmStatus()">🔄 刷新状态</button>
-          <button class="btn" onclick="reconnectOllama()" style="color:var(--green);border-color:var(--green);">🔗 重新连接</button>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-header">
-          <h2>🔍 请求拦截器</h2>
-          <span class="info-icon">?<span class="tooltip">🔍 <b>Ollama 请求拦截器</b><br>实时捕获 DevPartner 系统内部所有发往 Ollama <code>127.0.0.1:11434/api/generate</code> 的请求，用于诊断 404 等问题。<br>• 手动开启/关闭，不持久化<br>• 最多保留 50 条最近请求<br>• 每条记录含：时间、模型、模式、状态、耗时、prompt 预览<br>• <b>注意</b>：只拦截 DevPartner 自身的 LLM 调用（分析任务等），不拦截外部直接请求<br>⚠️ 调试完成后请关闭，避免占用内存。</span></span>
-          <span class="badge" id="interceptBadge" style="background:var(--red);">OFF</span>
-        </div>
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;padding:6px 10px;background:var(--bg);border-radius:4px;line-height:1.6;">
-          📌 拦截范围：<code style="color:var(--accent);">127.0.0.1:11434/api/generate</code>（DevPartner 内部 LLM 调用）。<br>
-          💡 开启后，当系统执行分析任务时，所有 Ollama 请求会自动出现在下方。
-        </div>
-        <div class="ops-action-row">
-          <button id="interceptToggleBtn" class="btn primary" onclick="toggleIntercept()" style="color:var(--green);border-color:var(--green);">⚡ 开启拦截</button>
-          <button class="btn" onclick="clearInterceptLogs()">🗑 清空</button>
-          <button class="btn" onclick="refreshInterceptLogs()">🔄 刷新</button>
-          <span id="interceptLogCount" style="font-size:12px;color:var(--text-muted);margin-left:auto;line-height:32px;">日志: 0 条</span>
-        </div>
-        <div id="interceptLogContent" style="max-height:400px;overflow-y:auto;font-size:12px;">
-          <div class="empty">拦截器已关闭，点击"开启拦截"开始捕获</div>
-        </div>
-      </div>
-    </div>
+        <div id="pendingAnalysesAlert" style="display:none;margin-top:16px"></div>
 
-    <!-- 第三行: 数据清理 + 数据归档 -->
-    <div class="grid-2">
-      <div class="card">
-        <div class="card-header">
-          <h2>🧹 数据清理</h2>
-          <span class="info-icon">?<span class="tooltip">🧹 <b>数据清理</b><br>清理过期和无效数据，支持按范围执行：<br>• <b>全部</b> — 归档清理 + 软删除物理清除<br>• <b>旧日志</b> — 清理过期的 improvement_log / evolution_log<br>• <b>孤立数据</b> — 清理无关联的 task_queue 记录<br>点击"预览"可先查看将要清理的内容而不实际执行。</span></span>
-        </div>
-        <div style="margin-bottom:10px;">
-          <label style="font-size:12px;color:var(--text-muted);margin-right:10px;">范围:</label>
-          <select id="cleanupScope" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:12px;">
-            <option value="all">全部</option>
-            <option value="old_logs">旧日志</option>
-            <option value="orphan_data">孤立数据</option>
-          </select>
-        </div>
-        <div class="ops-action-row">
-          <button class="btn" onclick="runCleanup(false)">🧹 执行清理</button>
-          <button class="btn" onclick="runCleanup(true)" style="color:var(--yellow);border-color:var(--yellow);">🔍 预览 (dry-run)</button>
-        </div>
-        <div id="cleanupResult" class="ops-result" style="display:none;margin-top:10px;"></div>
-      </div>
-      <div class="card">
-        <div class="card-header">
-          <h2>📦 数据归档</h2>
-          <span class="info-icon">?<span class="tooltip">📦 <b>数据归档</b><br>将旧数据按生命周期分层处理，释放存储空间：<br>• <b>温归档(30-180天)</b> — 压缩步骤详情，保留摘要<br>• <b>冷归档(>180天)</b> — 迁移至归档表，依赖日报MD<br>• <b>深度清理(>365天)</b> — 删除归档记录<br>• <b>日志清理(>90天)</b> — 清除过期操作日志<br>⚠️ 归档前会自动校验日报MD是否已导出。</span></span>
-        </div>
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">归档旧数据以释放空间</div>
-        <div class="ops-action-row">
-          <button class="btn primary" onclick="runArchive()">📦 执行归档</button>
-        </div>
-        <div id="archiveResult" class="ops-result" style="display:none;margin-top:10px;"></div>
-      </div>
-    </div>
-
-    <!-- 第四行: 任务清理 -->
-    <div class="grid-2">
-      <div class="card">
-        <div class="card-header">
-          <h2>🗑️ 清理 Pending 任务</h2>
-          <span class="info-icon">?<span class="tooltip">🗑️ <b>清理 Pending 任务</b><br>清理超过指定时间仍未执行的 pending/queued 任务：<br>• <b>时间范围</b> — 清理多久之前的任务（默认 24h）<br>• <b>任务类型</b> — 可限定 step_analysis 或全部<br>• <b>预览模式</b> — 先查看将要清理的内容<br>• <b>级联清理</b> — step 失败时自动取消对应的 conversation_finalize<br>💡 适用于 20+ 任务堆积、超时雪崩后的手动清理。</span></span>
-        </div>
-        <div style="margin-bottom:10px;">
-          <label style="font-size:12px;color:var(--text-muted);margin-right:10px;">时间:</label>
-          <select id="pendingCleanupHours" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:12px;">
-            <option value="1">1 小时前</option>
-            <option value="3">3 小时前</option>
-            <option value="6">6 小时前</option>
-            <option value="12">12 小时前</option>
-            <option value="24" selected>24 小时前</option>
-            <option value="48">48 小时前</option>
-            <option value="72">72 小时前</option>
-            <option value="168">7 天前</option>
-          </select>
-          <label style="font-size:12px;color:var(--text-muted);margin-left:10px;margin-right:10px;">类型:</label>
-          <select id="pendingCleanupTypes" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:12px;">
-            <option value="all" selected>全部</option>
-            <option value="step_analysis">step_analysis</option>
-            <option value="conversation_finalize">conversation_finalize</option>
-          </select>
-        </div>
-        <div class="ops-action-row">
-          <button class="btn" onclick="runPendingCleanup(false, false)">🗑️ 执行清理</button>
-          <button class="btn" onclick="runPendingCleanup(true, false)" style="color:var(--yellow);border-color:var(--yellow);">🔍 预览</button>
-          <button class="btn primary" onclick="runPendingCleanup(false, true)">⚡ 级联清理</button>
-        </div>
-        <div id="pendingCleanupResult" class="ops-result" style="display:none;margin-top:10px;"></div>
-      </div>
-      <div class="card">
-        <div class="card-header">
-          <h2>📊 Pending 任务统计</h2>
-          <span class="info-icon">?<span class="tooltip">📊 <b>Pending 任务统计</b><br>查看当前 pending/queued 任务的分布：<br>• 按任务类型分组统计<br>• 按时间分布（<1h / 1-6h / 6-24h / >24h）<br>💡 用于评估是否需要手动清理。</span></span>
-        </div>
-        <div class="ops-action-row">
-          <button class="btn" onclick="refreshPendingStats()">🔄 刷新统计</button>
-        </div>
-        <div id="pendingStatsResult" class="ops-result" style="display:none;margin-top:10px;"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ==================== 报告 ==================== -->
-  <div class="tab-page" id="page-reports">
-    <!-- 报告类型选择 -->
-    <div class="card" style="margin-bottom:24px;">
-      <div class="card-header"><h2>生成报告</h2><span class="badge" id="reportGenStatus">手动触发</span></div>
-      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">
-        <div>
-          <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px;">报告类型</label>
-          <select id="reportType" onchange="onReportTypeChange()" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;">
-            <option value="daily">日报</option>
-            <option value="weekly">周报</option>
-            <option value="monthly">月报</option>
-            <option value="annual">年报</option>
-          </select>
-        </div>
-        <!-- 日报：日期选择器 -->
-        <div id="reportDailyPicker" style="display:none;gap:12px;align-items:flex-end;">
-          <div>
-            <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px;">选择日期</label>
-            <input type="date" id="reportTargetDate" onchange="onReportDateChange()" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;"/>
+        <div class="grid cols-3" style="margin-top:16px">
+          <div class="card" style="grid-column: span 2;">
+            <h3>会话趋势 <span class="pill">近 14 天</span></h3>
+            <div class="trend" id="trendContent"><div class="empty">加载中...</div></div>
+          </div>
+          <div class="card">
+            <h3>系统状态</h3>
+            <div class="diag-row"><span class="diag-name">活跃会话</span><span class="diag-val" id="activeSessions">-</span></div>
+            <div class="diag-row"><span class="diag-name">今日新增</span><span class="diag-val" id="todaySessions">-</span></div>
+            <div class="diag-row"><span class="diag-name">知识库条目</span><span class="diag-val" id="kbSize">-</span></div>
+            <div class="diag-row"><span class="diag-name">今日新增知识</span><span class="diag-val" id="todayKnowledge">-</span></div>
+            <div class="diag-row"><span class="diag-name">回调触发</span><span class="diag-val" id="cbSuccess">-</span></div>
           </div>
         </div>
-        <!-- 周报：周下拉框 -->
-        <div id="reportWeeklyPicker" style="display:none;flex-direction:column;gap:4px;">
-          <label style="font-size:12px;color:var(--text-muted);">选择周</label>
-          <select id="reportTargetWeek" onchange="onReportDateChange()" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;min-width:280px;"></select>
+
+        <div class="grid cols-3" style="margin-top:16px">
+          <div class="card">
+            <h3>任务概览</h3>
+            <div class="diag-row"><span class="diag-name">待处理</span><span class="diag-val" id="pendingTasks">-</span></div>
+            <div class="diag-row"><span class="diag-name">运行中</span><span class="diag-val" id="runningTasks">-</span></div>
+            <div class="diag-row"><span class="diag-name">已完成</span><span class="diag-val" id="completedTasks">-</span></div>
+            <div class="diag-row"><span class="diag-name">合计</span><span class="diag-val" id="taskTotal">-</span></div>
+          </div>
+          <div class="card">
+            <h3>队列概览</h3>
+            <div id="diagContent"><div class="empty">加载中...</div></div>
+          </div>
+          <div class="card">
+            <h3>快捷操作</h3>
+            <div class="row-flex" style="flex-direction:column;align-items:stretch">
+              <button class="btn primary" onclick="genDailyNow()">⚡ 生成今日日报</button>
+              <button class="btn" onclick="processPendingAnalyses()">🧹 清算待分析数据</button>
+              <button class="btn ghost" onclick="switchPage('reports')">📄 查看报告</button>
+            </div>
+          </div>
         </div>
-        <!-- 月报：月下拉框 -->
-        <div id="reportMonthlyPicker" style="display:none;flex-direction:column;gap:4px;">
-          <label style="font-size:12px;color:var(--text-muted);">选择月份</label>
-          <select id="reportTargetMonth" onchange="onReportDateChange()" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;min-width:200px;"></select>
+      </section>
+
+      <!-- ══ Growth ══ -->
+      <section class="page" id="page-growth" aria-label="成长">
+        <div class="grid cols-4" id="ugStats">
+          <div class="card stat skeleton" style="height:92px"></div>
+          <div class="card stat skeleton" style="height:92px"></div>
+          <div class="card stat skeleton" style="height:92px"></div>
+          <div class="card stat skeleton" style="height:92px"></div>
         </div>
-        <!-- 年报：年份下拉框 -->
-        <div id="reportYearPicker" style="display:none;flex-direction:column;gap:4px;">
-          <label style="font-size:12px;color:var(--text-muted);">选择年份</label>
-          <select id="reportTargetYear" onchange="onReportDateChange()" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;"></select>
+        <div class="grid cols-2" style="margin-top:16px">
+          <div class="card">
+            <h3>技能维度掌握度</h3>
+            <div id="radarContent"><div class="empty">加载中...</div></div>
+          </div>
+          <div class="card">
+            <h3>活跃热力图</h3>
+            <div class="row-flex" style="justify-content:space-between;font-size:12px;color:var(--text-muted)">
+              <span id="heatActiveDays">-</span><span id="heatPeak">-</span><span id="heatAvg">-</span>
+            </div>
+            <div class="heat" id="heatGrid" style="margin-top:10px"></div>
+            <div class="heat-labels" id="heatLabels"></div>
+          </div>
         </div>
-        <div id="reportPeriodInfo" style="font-size:13px;color:var(--accent);font-weight:600;">周期: --</div>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <label style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:4px;cursor:pointer;">
-          <input type="checkbox" id="reportForceOverwrite" style="accent-color:var(--yellow);"/> 覆盖已存在的报告
-        </label>
-        <button class="btn primary" onclick="generateReport()" style="margin-left:auto;">⚡ 生成报告</button>
-      </div>
-      <div id="reportGenResult" class="ops-result" style="display:none;margin-top:10px;"></div>
-    </div>
+        <div class="grid cols-2" style="margin-top:16px">
+          <div class="card">
+            <h3>领域技能分布</h3>
+            <div id="domainDistContent"><div class="empty">加载中...</div></div>
+          </div>
+          <div class="card">
+            <h3>成长时间线 <span class="pill" id="tlTotal">0</span></h3>
+            <div id="timelineContent" style="max-height:340px;overflow:auto"><div class="empty">加载中...</div></div>
+          </div>
+        </div>
+      </section>
 
-    <!-- 报告列表 -->
-    <div class="grid-2" style="margin-bottom:24px;">
-      <div class="card">
-        <div class="card-header"><h2>日报列表</h2><span class="badge" id="dailyCount">-</span></div>
-        <div id="dailyList" class="empty" style="max-height:300px;overflow-y:auto;">加载中...</div>
-      </div>
-      <div class="card">
-        <div class="card-header"><h2>周报列表</h2><span class="badge" id="weeklyCount">-</span></div>
-        <div id="weeklyList" class="empty" style="max-height:300px;overflow-y:auto;">加载中...</div>
-      </div>
-    </div>
-    <div class="grid-2" style="margin-bottom:24px;">
-      <div class="card">
-        <div class="card-header"><h2>月报列表</h2><span class="badge" id="monthlyCount">-</span></div>
-        <div id="monthlyList" class="empty" style="max-height:300px;overflow-y:auto;">加载中...</div>
-      </div>
-      <div class="card">
-        <div class="card-header"><h2>年报列表</h2><span class="badge" id="annualCount">-</span></div>
-        <div id="annualList" class="empty" style="max-height:300px;overflow-y:auto;">加载中...</div>
-      </div>
-    </div>
+      <!-- ══ Knowledge ══ -->
+      <section class="page" id="page-knowledge" aria-label="知识库">
+        <div class="card">
+          <h3>知识检索</h3>
+          <div class="row-flex">
+            <input id="kbSearchInput" type="text" style="flex:1;min-width:240px"
+                   placeholder="描述你遇到的问题，例如：如何处理 Python 异步超时">
+            <button class="btn primary" onclick="matchKnowledge()">🤖 AI 匹配</button>
+            <button class="btn" onclick="searchKnowledge()">🔍 关键词搜索</button>
+          </div>
+          <div id="kbMatchInfo" style="display:none;margin-top:10px;padding:8px 12px;
+               background:var(--accent-soft);border-radius:var(--r-sm);font-size:13px"></div>
+          <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">
+            匹配结果 <b id="kbListTotal">0</b> 条</div>
+          <div id="kbSearchResults" style="margin-top:12px"><div class="empty">输入问题描述，点击“AI 匹配”开始分析...</div></div>
+        </div>
+      </section>
 
-    <!-- ==================== 优化建议 ==================== -->
-  <div class="tab-page" id="page-suggestions">
-    <!-- 统计概览 -->
-    <div class="grid-4" style="margin-bottom:24px;">
-      <div class="card"><div class="metric-value" id="sgPending">-</div><div class="metric-label">待审核</div></div>
-      <div class="card"><div class="metric-value" id="sgApproved">-</div><div class="metric-label">已通过</div></div>
-      <div class="card"><div class="metric-value" id="sgRejected">-</div><div class="metric-label">已拒绝</div></div>
-      <div class="card"><div class="metric-value" id="sgApplied">-</div><div class="metric-label">已应用</div></div>
-    </div>
+      <!-- ══ Projects ══ -->
+      <section class="page" id="page-projects" aria-label="项目">
+        <div class="grid cols-2">
+          <div class="card">
+            <h3>已对接项目 <span class="pill" id="projCount">0</span></h3>
+            <div id="projContent"><div class="empty">加载中...</div></div>
+          </div>
+          <div class="card">
+            <h3>项目问答</h3>
+            <div class="row-flex" style="margin-bottom:12px">
+              <select id="projSelect" style="flex:1"><option value="">-- 选择项目 --</option></select>
+            </div>
+            <textarea id="projQueryInput" style="width:100%;min-height:72px;resize:vertical;
+              background:var(--bg);border:1px solid var(--border);border-radius:var(--r-sm);
+              color:var(--text);padding:10px;font:inherit;font-size:13px"
+              placeholder="向该项目的历史知识提问..."></textarea>
+            <button class="btn primary" style="margin-top:10px" onclick="queryProject()">查询</button>
+            <div id="projQueryResult" style="margin-top:14px"><div class="empty">选择项目并输入问题后查询</div></div>
+          </div>
+        </div>
+      </section>
 
-    <!-- 筛选栏 -->
-    <div class="card" style="margin-bottom:24px;">
-      <div class="card-header"><h2>优化建议列表</h2><span class="badge" id="sgTotal">-</span></div>
-      <div class="search-box">
-        <select id="sgStatusFilter" onchange="refreshSuggestionsPage()" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;">
-          <option value="pending">待审核</option>
-          <option value="approved">已通过</option>
-          <option value="rejected">已拒绝</option>
-          <option value="all">全部</option>
-        </select>
-        <select id="sgTypeFilter" onchange="refreshSuggestionsPage()" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 12px;font-size:13px;outline:none;">
-          <option value="">全部类型</option>
-          <option value="prompt_optimize">Prompt 优化</option>
-          <option value="analysis_add">新增分析</option>
-          <option value="knowledge_gap">知识缺口</option>
-          <option value="user_profile_enhance">用户画像增强</option>
-          <option value="skill_planning">技能规划</option>
-          <option value="tech_trend">技术趋势</option>
-          <option value="growth_path">成长路径</option>
-          <option value="learning_advice">学习建议</option>
-          <option value="data_quality">数据质量</option>
-        </select>
-        <button class="btn" onclick="refreshSuggestionsPage()">刷新</button>
-      </div>
-    </div>
+      <!-- ══ Reports ══ -->
+      <section class="page" id="page-reports" aria-label="报告">
+        <div class="card">
+          <h3>报告生成</h3>
+          <div class="row-flex" style="margin-bottom:14px">
+            <div class="field">
+              <label>类型</label>
+              <select id="reportType" onchange="onReportTypeChange()">
+                <option value="daily">日报</option>
+                <option value="weekly">周报</option>
+                <option value="monthly">月报</option>
+                <option value="annual">年报</option>
+              </select>
+            </div>
+            <div class="field" id="reportDailyPicker" style="display:flex">
+              <label>日期</label><input type="date" id="reportTargetDate">
+            </div>
+            <div class="field" id="reportWeeklyPicker" style="display:none">
+              <label>周</label><select id="reportTargetWeek"></select>
+            </div>
+            <div class="field" id="reportMonthlyPicker" style="display:none">
+              <label>月</label><select id="reportTargetMonth"></select>
+            </div>
+            <div class="field" id="reportYearPicker" style="display:none">
+              <label>年</label><select id="reportTargetYear"></select>
+            </div>
+            <div class="field">
+              <label>&nbsp;</label>
+              <label class="checkbox"><input type="checkbox" id="reportForceOverwrite"> 覆盖已有</label>
+            </div>
+            <div class="field">
+              <label>&nbsp;</label>
+              <button class="btn primary" onclick="generateReport()">生成报告</button>
+            </div>
+            <div id="reportPeriodInfo" style="align-self:flex-end;color:var(--text-muted);font-size:13px"></div>
+          </div>
+          <div id="reportGenStatus" class="tag" style="margin-bottom:8px">待生成</div>
+          <div id="reportGenResult" style="display:none;font-size:13px;margin-bottom:14px"></div>
 
-    <!-- 建议卡片列表 -->
-    <div id="sgList" class="empty">加载中...</div>
+          <div class="grid cols-4" style="margin-top:6px">
+            <div><div class="diag-row"><span class="diag-name">日报</span><span class="diag-val" id="dailyCount">0</span></div><div id="dailyList"></div></div>
+            <div><div class="diag-row"><span class="diag-name">周报</span><span class="diag-val" id="weeklyCount">0</span></div><div id="weeklyList"></div></div>
+            <div><div class="diag-row"><span class="diag-name">月报</span><span class="diag-val" id="monthlyCount">0</span></div><div id="monthlyList"></div></div>
+            <div><div class="diag-row"><span class="diag-name">年报</span><span class="diag-val" id="annualCount">0</span></div><div id="annualList"></div></div>
+          </div>
+        </div>
+        <div class="card" style="margin-top:16px">
+          <h3>报告预览</h3>
+          <div id="reportPreviewTitle" style="font-weight:600;margin-bottom:10px">请选择一份报告</div>
+          <div id="reportPreviewContent" style="font-size:13px;line-height:1.7;max-height:520px;overflow:auto">
+            <div class="empty">从上方列表点击报告查看内容</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ══ Suggestions ══ -->
+      <section class="page" id="page-suggestions" aria-label="优化建议">
+        <div class="grid cols-4" style="margin-bottom:16px">
+          <div class="card stat"><div class="label">待审核</div><div class="value accent" id="sgPending">0</div></div>
+          <div class="card stat"><div class="label">已通过</div><div class="value" id="sgApproved">0</div></div>
+          <div class="card stat"><div class="label">已拒绝</div><div class="value" id="sgRejected">0</div></div>
+          <div class="card stat"><div class="label">已应用</div><div class="value" id="sgApplied">0</div></div>
+        </div>
+        <div class="card">
+          <h3>优化建议审核 <span class="pill" id="sgTotal">0</span></h3>
+          <div class="row-flex" style="margin-bottom:14px">
+            <select id="sgStatusFilter" onchange="refreshSgList()">
+              <option value="all">全部状态</option>
+              <option value="pending">待审核</option>
+              <option value="approved">已通过</option>
+              <option value="rejected">已拒绝</option>
+            </select>
+            <select id="sgTypeFilter" onchange="refreshSgList()">
+              <option value="">全部类型</option>
+              <option value="prompt_optimize">Prompt 优化</option>
+              <option value="analysis_add">新增分析</option>
+              <option value="knowledge_gap">知识缺口</option>
+              <option value="user_profile_enhance">用户画像增强</option>
+              <option value="skill_planning">技能规划</option>
+              <option value="tech_trend">技术趋势</option>
+              <option value="growth_path">成长路径</option>
+              <option value="learning_advice">学习建议</option>
+              <option value="data_quality">数据质量</option>
+            </select>
+          </div>
+          <div id="sgList"><div class="empty">加载中...</div></div>
+        </div>
+      </section>
+
+      <!-- ══ Ops ══ -->
+      <section class="page" id="page-ops" aria-label="系统运维">
+        <div class="grid cols-2">
+          <div class="card">
+            <h3>系统诊断</h3>
+            <div id="sysDiagContent"><div class="empty">加载中...</div></div>
+            <button class="btn sm" style="margin-top:10px" onclick="refreshSysDiagnose()">重新诊断</button>
+          </div>
+          <div class="card">
+            <h3>完整性检查</h3>
+            <div id="sysIntegrityContent"><div class="empty">加载中...</div></div>
+            <button class="btn sm" style="margin-top:10px" onclick="checkIntegrity()">运行检查</button>
+          </div>
+        </div>
+
+        <div class="grid cols-2" style="margin-top:16px">
+          <div class="card">
+            <h3>LLM / Ollama 状态</h3>
+            <div class="row-flex" style="margin-bottom:10px">
+              <span class="tag" id="llmStatusBadge">--</span>
+              <button class="btn sm" onclick="recheckOllama()">🔄 重新验证</button>
+              <button class="btn sm" onclick="reconnectOllama()">⚡ 重新连接</button>
+            </div>
+            <div id="llmStatusContent"><div class="empty">加载中...</div></div>
+            <div id="llmStartResult" style="display:none;margin-top:10px;font-size:12px"></div>
+          </div>
+          <div class="card">
+            <h3>任务池运行</h3>
+            <div class="diag-row"><span class="diag-name">已完成</span><span class="diag-val" id="opsCompleted">-</span></div>
+            <div class="diag-row"><span class="diag-name">失败</span><span class="diag-val" id="opsFailed">-</span></div>
+            <div class="diag-row"><span class="diag-name">超时</span><span class="diag-val" id="opsTimeout">-</span></div>
+            <div class="diag-row"><span class="diag-name">已取消</span><span class="diag-val" id="opsCancelled">-</span></div>
+            <div class="diag-row"><span class="diag-name">成功率</span><span class="diag-val" id="taskSuccessRate">-</span></div>
+            <div class="diag-row"><span class="diag-name">平均耗时</span><span class="diag-val" id="opsAvgTime">-</span></div>
+            <div class="diag-row"><span class="diag-name">槽位</span><span class="diag-val" id="opsSlots">-</span></div>
+            <div class="meter" style="margin-top:6px"><span id="opsSlotsBar" style="width:0%"></span></div>
+            <div class="diag-row" style="margin-top:8px"><span class="diag-name">内存</span><span class="diag-val" id="opsMem">-</span></div>
+            <div class="meter"><span id="opsMemBar" style="width:0%"></span></div>
+          </div>
+        </div>
+
+        <div class="grid cols-2" style="margin-top:16px">
+          <div class="card">
+            <h3>处理器 & 回调</h3>
+            <div class="diag-row"><span class="diag-name">已注册处理器</span><span class="diag-val" id="handlerTotal">-</span></div>
+            <div id="handlerContent" style="margin:8px 0"></div>
+            <div class="diag-row"><span class="diag-name">内存占用</span><span class="diag-val" id="memRSS">-</span></div>
+            <div class="meter" style="margin-top:6px"><span id="memRSSBar" style="width:0%"></span></div>
+            <div id="memDetails" style="margin-top:10px"></div>
+            <h3 style="margin-top:14px">回调记录</h3>
+            <table><thead><tr><th>ID</th><th>名称</th><th>状态</th><th>时间</th></tr></thead>
+              <tbody id="cbTable"></tbody></table>
+          </div>
+          <div class="card">
+            <h3>请求拦截器（调试）</h3>
+            <div class="row-flex" style="margin-bottom:10px">
+              <span class="tag" id="interceptBadge">--</span>
+              <span id="interceptLogCount" style="font-size:12px;color:var(--text-muted)"></span>
+              <button class="btn sm" id="interceptToggleBtn" onclick="toggleIntercept()">切换</button>
+              <button class="btn sm ghost" onclick="clearInterceptLogs()">清空</button>
+            </div>
+            <div id="interceptLogContent" style="max-height:340px;overflow:auto"><div class="empty">加载中...</div></div>
+          </div>
+        </div>
+
+        <div class="grid cols-3" style="margin-top:16px">
+          <div class="card">
+            <h3>数据清理</h3>
+            <div class="row-flex" style="margin-bottom:10px">
+              <select id="cleanupScope">
+                <option value="conversations">会话</option>
+                <option value="all">全部</option>
+              </select>
+            </div>
+            <div class="row-flex">
+              <button class="btn sm" onclick="runCleanup(true)">🧪 预览</button>
+              <button class="btn sm danger" onclick="runCleanup(false)">🧹 执行</button>
+              <button class="btn sm" onclick="runArchive()">📦 归档</button>
+            </div>
+            <div id="cleanupResult" style="display:none;margin-top:10px;font-size:12px"></div>
+            <div id="archiveResult" style="display:none;margin-top:10px;font-size:12px"></div>
+          </div>
+          <div class="card">
+            <h3>Pending 清理</h3>
+            <div class="row-flex" style="margin-bottom:8px">
+              <input type="number" id="pendingCleanupHours" value="24" style="width:84px"> <span style="font-size:12px;color:var(--text-muted)">小时前</span>
+            </div>
+            <select id="pendingCleanupTypes" style="width:100%;margin-bottom:8px">
+              <option value="all">全部类型</option>
+              <option value="analysis">analysis</option>
+              <option value="task_queue">task_queue</option>
+            </select>
+            <div class="row-flex">
+              <button class="btn sm" onclick="runPendingCleanup(true,false)">🔍 预览</button>
+              <button class="btn sm" onclick="runPendingCleanup(false,false)">🗑️ 清理</button>
+              <button class="btn sm danger" onclick="runPendingCleanup(false,true)">⚡ 级联</button>
+            </div>
+            <div id="pendingCleanupResult" style="display:none;margin-top:10px;font-size:12px"></div>
+          </div>
+          <div class="card">
+            <h3>Pending 统计</h3>
+            <button class="btn sm" onclick="refreshPendingStats()" style="margin-bottom:10px">统计</button>
+            <div id="pendingStatsResult" style="display:none;font-size:12px"></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <h3>健康检查</h3>
+          <div id="healthContent"><div class="empty">加载中...</div></div>
+        </div>
+      </section>
+
+    </div>
   </div>
+</div>
 
-  <!-- 报告预览 -->
-  <div class="card">
-      <div class="card-header">
-        <h2>报告预览</h2>
-        <span id="reportPreviewTitle" style="font-size:12px;color:var(--text-muted);">点击列表项查看</span>
-      </div>
-      <div id="reportPreviewContent" class="ops-result" style="max-height:600px;overflow-y:auto;font-size:13px;line-height:1.7;">
-        <div class="empty">选择一份报告查看内容</div>
-      </div>
+<!-- ── Toasts ── -->
+<div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+<!-- ── Confirm modal ── -->
+<div class="modal-scrim" id="confirmScrim" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+  <div class="modal">
+    <h3 id="confirmTitle">确认操作</h3>
+    <p id="confirmMsg"></p>
+    <div class="row">
+      <button class="btn ghost" id="confirmCancel">取消</button>
+      <button class="btn primary" id="confirmOk">确认</button>
     </div>
   </div>
+</div>
 
+<!-- ── Shortcuts help ── -->
+<div class="modal-scrim" id="helpScrim" role="dialog" aria-modal="true" aria-label="快捷键">
+  <div class="modal">
+    <h3>键盘快捷键</h3>
+    <div class="shortcuts-grid">
+      <kbd>1–7</kbd><span>切换侧边栏页面</span>
+      <kbd>R</kbd><span>刷新当前页面</span>
+      <kbd>/</kbd><span>聚焦搜索框</span>
+      <kbd>?</kbd><span>打开本帮助</span>
+      <kbd>Esc</kbd><span>关闭弹窗 / 帮助</span>
+    </div>
+    <div class="row" style="margin-top:18px"><button class="btn primary" id="helpClose">知道了</button></div>
+  </div>
 </div>
 
 <script>
 const API_BASE = '';
 
+/* ── Helpers (preserved) ── */
 function formatDate(iso) {
   if (!iso) return '-';
-  // v9.7.1: Python datetime.now().isoformat() 生成的是本地时间（北京时间），
-  // 不含时区后缀。之前加 'Z' 会被 JS 当 UTC 解析，导致显示差 8 小时。
-  // 修复：直接替换 T 为空格，本地显示即北京时间。
   const d = iso.replace('T', ' ');
   return d.length > 19 ? d.slice(0, 19) : d;
 }
-
 function fmtTime(iso) {
   if (!iso) return '-';
-  // v9.7.1: 同上，直接提取时间部分（北京时间）
-  const match = iso.match(/T(\d{2}:\d{2}:\d{2})/);
-  return match ? match[1] : iso;
+  const m = iso.match(/T(\d{2}:\d{2}:\d{2})/);
+  return m ? m[1] : iso;
 }
-
 function escHtml(s) {
   if (s === null || s === undefined) return '';
   if (typeof s !== 'string') s = String(s);
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-
 function statusTag(s) {
   const cls = {pending:'pending',running:'running',completed:'completed',failed:'failed'}[s] || 'pending';
   return `<span class="tag ${cls}">${s}</span>`;
 }
-
 async function fetchJSON(url, options) {
   const r = await fetch(url, options || {});
   if (!r.ok) throw new Error(`${url}: ${r.status}`);
   return r.json();
 }
 
+/* ── UX layer: toast / confirm / skeleton ── */
+function toast(msg, type) {
+  const el = document.createElement('div');
+  el.className = 'toast' + (type ? ' ' + type : '');
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateX(20px)';
+    setTimeout(() => el.remove(), 220); }, 3200);
+}
+function confirmModal(msg) {
+  return new Promise(resolve => {
+    const scrim = document.getElementById('confirmScrim');
+    document.getElementById('confirmMsg').textContent = msg;
+    scrim.classList.add('open');
+    const ok = document.getElementById('confirmOk');
+    const cancel = document.getElementById('confirmCancel');
+    const done = (v) => {
+      scrim.classList.remove('open');
+      ok.removeEventListener('click', onOk);
+      cancel.removeEventListener('click', onCancel);
+      resolve(v);
+    };
+    const onOk = () => done(true);
+    const onCancel = () => done(false);
+    ok.addEventListener('click', onOk);
+    cancel.addEventListener('click', onCancel);
+  });
+}
+async function genDailyNow() {
+  toast('正在生成今日日报...');
+  try {
+    const d = await fetchJSON('/api/reports/generate-daily', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: new Date().toISOString().slice(0,10), force_overwrite: false })
+    });
+    if (d.success) toast('日报已生成', 'ok'); else toast('日报生成: ' + (d.note || d.method || '跳过'), 'warn');
+  } catch(e) { toast('日报生成失败: ' + e.message, 'err'); }
+}
+
+/* ── Pages registry ── */
+const PAGES = {
+  overview:  { title: '概览',   crumb: '系统实时状态与关键指标', load: refreshOverview },
+  growth:    { title: '成长',   crumb: '技能掌握度、活跃度与成长轨迹', load: refreshGrowthPage },
+  knowledge: { title: '知识库', crumb: 'AI 匹配与关键词检索', load: () => {} },
+  projects:  { title: '项目',   crumb: '已对接项目与项目问答', load: refreshProjects },
+  reports:   { title: '报告',   crumb: '日 / 周 / 月 / 年 报生成与预览', load: refreshReportsPage },
+  suggestions:{ title: '优化建议', crumb: 'growth_analysis 审核工作流', load: refreshSuggestionsPage },
+  ops:       { title: '系统运维', crumb: '诊断 / 完整性 / LLM / 拦截器 / 清理', load: refreshOpsPage },
+};
+
+function switchPage(name) {
+  if (!PAGES[name]) return;
+  document.querySelectorAll('.nav-item').forEach(n => n.removeAttribute('aria-current'));
+  const nav = document.querySelector(`.nav-item[data-page="${name}"]`);
+  if (nav) nav.setAttribute('aria-current', 'page');
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.getElementById('pageTitle').textContent = PAGES[name].title;
+  document.getElementById('pageCrumb').textContent = PAGES[name].crumb;
+  document.getElementById('sidebar').classList.remove('open');
+
+  // skeleton on first paint for data-heavy pages
+  if (name === 'overview') skeletonOverview();
+  if (name === 'growth') skeletonGrowth();
+
+  if (name === 'knowledge') {
+    document.getElementById('kbSearchResults').innerHTML = '<div class="empty">输入问题描述，点击“AI 匹配”开始分析...</div>';
+    document.getElementById('kbMatchInfo').style.display = 'none';
+  }
+  PAGES[name].load();
+}
+
+function skeletonOverview() {
+  const wrap = document.getElementById('ovStats');
+  wrap.innerHTML = [0,1,2,3].map(() => '<div class="card stat skeleton" style="height:96px"></div>').join('');
+}
+function skeletonGrowth() {
+  const wrap = document.getElementById('ugStats');
+  wrap.innerHTML = [0,1,2,3].map(() => '<div class="card stat skeleton" style="height:92px"></div>').join('');
+}
+
+/* ── System status (overview) ── */
 async function refreshSystemStatus() {
   try {
     const d = await fetchJSON('/api/system/status');
@@ -709,156 +854,80 @@ async function refreshSystemStatus() {
     document.getElementById('completedTasks').textContent = d.completed_tasks ?? '-';
     document.getElementById('taskTotal').textContent = (d.pending_tasks||0)+(d.running_tasks||0)+(d.completed_tasks||0);
     document.getElementById('cbSuccess').textContent = d.callback_triggers ?? '-';
-    document.getElementById('cbError').textContent = 0;
     document.getElementById('errorBanner').style.display = 'none';
 
     const paCount = d.pending_analyses_count ?? 0;
     const paEl = document.getElementById('pendingAnalysesAlert');
-    if (paEl) {
-      if (paCount > 0) {
-        paEl.style.display = 'block';
-        paEl.innerHTML = '<span class="status-dot warning"></span>' +
-          '<strong>待分析数据: ' + paCount + ' 条</strong> — LLM 不可用时数据暂存，等待下次清算' +
-          '<button onclick="processPendingAnalyses()" style="margin-left:12px;padding:4px 12px;border-radius:6px;border:1px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer;font-size:12px;">手动清算</button>' +
-          '<div id="pendingAnalysesDetails" style="margin-top:8px;font-size:12px;color:var(--text-muted);max-height:120px;overflow-y:auto;"></div>';
-        const details = d.pending_analyses_details ?? [];
-        const detailsEl = document.getElementById('pendingAnalysesDetails');
-        if (detailsEl && details.length) {
-          detailsEl.innerHTML = details.map(pa => {
-            const typeLabel = pa.type === 'daily_profile_merge' ? '用户画像' : '系统认知';
-            const dims = pa.missing_dimensions || '[]';
-            return '<div>' + typeLabel + ' | ' + pa.date + ' | 缺失: ' + dims + '</div>';
-          }).join('');
-        }
-      } else {
-        paEl.style.display = 'none';
+    if (paCount > 0) {
+      paEl.style.display = 'block';
+      paEl.className = 'card';
+      paEl.innerHTML = '<div class="row-flex" style="justify-content:space-between"><div><span class="dot warn"></span> ' +
+        '<strong>待分析数据: ' + paCount + ' 条</strong> — LLM 不可用时数据暂存，等待下次清算</div>' +
+        '<button class="btn sm" onclick="processPendingAnalyses()">手动清算</button></div>' +
+        '<div id="pendingAnalysesDetails" style="margin-top:8px;font-size:12px;color:var(--text-muted);max-height:120px;overflow-y:auto;"></div>';
+      const details = d.pending_analyses_details ?? [];
+      const de = document.getElementById('pendingAnalysesDetails');
+      if (de && details.length) {
+        de.innerHTML = details.map(pa => {
+          const t = pa.type === 'daily_profile_merge' ? '用户画像' : '系统认知';
+          return '<div>' + t + ' | ' + pa.date + ' | 缺失: ' + pa.missing_dimensions + '</div>';
+        }).join('');
       }
-    }
+    } else { paEl.style.display = 'none'; }
+
+    // overview stat tiles
+    const stats = [
+      { label: '活跃会话', value: d.active_sessions ?? '-', sub: '当前进行中', accent: true },
+      { label: '今日新增会话', value: d.today_new_sessions ?? '-', sub: '较昨日' },
+      { label: '知识库条目', value: d.knowledge_base_size ?? '-', sub: '今日 +' + (d.today_knowledge_added ?? 0) },
+      { label: '待处理任务', value: (d.pending_tasks||0)+(d.running_tasks||0), sub: '运行 ' + (d.running_tasks||0) },
+    ];
+    document.getElementById('ovStats').innerHTML = stats.map(s =>
+      `<div class="card stat"><div class="label">${s.label}</div>` +
+      `<div class="value ${s.accent?'accent':''}">${s.value}</div>` +
+      `<div class="sub">${s.sub}</div></div>`).join('');
   } catch(e) {
-    document.getElementById('errorBanner').style.display = 'block';
-    document.getElementById('errorBanner').textContent = '系统状态获取失败: ' + e.message;
+    const b = document.getElementById('errorBanner');
+    b.style.display = 'block'; b.textContent = '系统状态获取失败: ' + e.message;
+    toast('系统状态获取失败', 'err');
   }
 }
-
 async function processPendingAnalyses() {
   try {
     const res = await fetch('/api/pending-analyses/process', { method: 'POST' });
     const data = await res.json();
-    if (data.processed > 0) {
-      alert('清算完成: ' + data.processed + ' 条已处理');
-    } else if (data.still_pending > 0) {
-      alert('LLM 仍不可用，' + data.still_pending + ' 条待处理');
-    } else {
-      alert('无待分析数据');
-    }
+    if (data.processed > 0) toast('清算完成: ' + data.processed + ' 条已处理', 'ok');
+    else if (data.still_pending > 0) toast('LLM 仍不可用，' + data.still_pending + ' 条待处理', 'warn');
+    else toast('无待分析数据', 'ok');
     refreshSystemStatus();
-  } catch(e) {
-    alert('清算失败: ' + e.message);
-  }
+  } catch(e) { toast('清算失败: ' + e.message, 'err'); }
 }
 
+/* ── Tasks / ops ── */
 async function refreshTasks() {
   try {
     const tasks = await fetchJSON('/api/tasks/list?limit=20');
-    const tbody = document.querySelector('#taskTable tbody');
-    if (!tasks.length) {
-      tbody.innerHTML = '<tr><td colspan="7" class="empty">暂无任务</td></tr>';
-      return;
-    }
-    tbody.innerHTML = tasks.map(t => {
-      const canCancel = (t.status === 'pending' || t.status === 'queued');
-      const canRetry = (t.status === 'failed' || t.status === 'dead');
-      const shortId = (t.task_id || '').substring(0, 8);
-
-      // 重试列
-      const maxR = t.max_retries || 0;
-      const curR = t.retry_count || 0;
-      let retryHtml = '-';
-      if (t.status === 'failed') {
-        retryHtml = `<span style="font-size:11px;">${curR}/${maxR}</span>`;
-        if (t.next_retry_at) {
-          const nextTime = t.next_retry_at.substring(11, 16);
-          retryHtml += ` <span style="font-size:10px;color:var(--text-muted);">下次${nextTime}</span>`;
-        }
-      } else if (canRetry) {
-        retryHtml = `<span style="color:var(--red);font-size:11px;">${curR}/${maxR} 耗尽</span>`;
-      } else if (t.status === 'pending' && curR > 0) {
-        retryHtml = `<span style="font-size:11px;">${curR}/${maxR}</span>`;
-      }
-
-      // 错误信息列
-      let errHtml = '-';
-      if (t.error) {
-        const shortErr = t.error.length > 40 ? t.error.substring(0, 40) + '...' : t.error;
-        errHtml = `<span title="${escHtml(t.error)}" style="color:var(--red);font-size:11px;cursor:help;">${escHtml(shortErr)}</span>`;
-      }
-
-      // 操作列
-      let actionHtml = '';
-      if (canCancel) {
-        actionHtml += `<button onclick="cancelTask('${t.task_id}')" style="padding:2px 8px;border-radius:4px;border:1px solid var(--red);background:transparent;color:var(--red);cursor:pointer;font-size:11px;">取消</button>`;
-      } else if (canRetry) {
-        actionHtml += `<button onclick="retryTask('${t.task_id}')" style="padding:2px 8px;border-radius:4px;border:1px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer;font-size:11px;">重试</button>`;
-      } else {
-        actionHtml += '<span style="color:var(--text-muted);font-size:11px;">-</span>';
-      }
-
-      return `
-      <tr>
-        <td style="font-family:monospace;font-size:12px;" title="${t.task_id}">${shortId}</td>
-        <td>${t.task_type || '-'}</td>
-        <td style="font-size:12px;color:var(--text-muted);">${t.conversation_id ? 'conv:' + t.conversation_id.substring(0, 12) : '-'}</td>
-        <td>${statusTag(t.status)}</td>
-        <td>${retryHtml}</td>
-        <td>${errHtml}</td>
-        <td>${actionHtml}</td>
-      </tr>`;
-    }).join('');
-  } catch(e) { /* 静默 */ }
+    // tasks feed the ops page table if present; reuse diagContent for queue preview
+  } catch(e) { /* silent */ }
 }
-
 async function cancelTask(taskId) {
-  if (!confirm('确认取消任务 ' + taskId + ' ?')) return;
+  if (!await confirmModal('确认取消任务 ' + taskId + ' ?')) return;
   try {
-    const res = await fetch('/api/tasks/cancel', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({task_id: taskId})
-    });
+    const res = await fetch('/api/tasks/cancel', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({task_id: taskId}) });
     const data = await res.json();
-    if (data.success) {
-      alert('任务已取消: ' + taskId);
-    } else {
-      alert('取消失败（任务可能已在运行）: ' + taskId);
-    }
-    refreshTasks();
+    if (data.success) toast('任务已取消: ' + taskId, 'ok'); else toast('取消失败（可能已在运行）', 'warn');
     refreshTaskOps();
-  } catch(e) {
-    alert('取消失败: ' + e.message);
-  }
+  } catch(e) { toast('取消失败: ' + e.message, 'err'); }
 }
-
 async function retryTask(taskId) {
-  if (!confirm('确认手动重试任务 ' + taskId + ' ?')) return;
+  if (!await confirmModal('确认手动重试任务 ' + taskId + ' ?')) return;
   try {
-    const res = await fetch('/api/tasks/retry', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({task_id: taskId})
-    });
+    const res = await fetch('/api/tasks/retry', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({task_id: taskId}) });
     const data = await res.json();
-    if (data.success) {
-      alert('任务已重新入队: ' + taskId);
-    } else {
-      alert('重试失败: ' + (data.error || '未知错误'));
-    }
-    refreshTasks();
+    if (data.success) toast('任务已重新入队', 'ok'); else toast('重试失败: ' + (data.error||'未知错误'), 'warn');
     refreshTaskOps();
-  } catch(e) {
-    alert('重试失败: ' + e.message);
-  }
+  } catch(e) { toast('重试失败: ' + e.message, 'err'); }
 }
-
 async function refreshTaskOps() {
   try {
     const d = await fetchJSON('/api/tasks/stats');
@@ -868,240 +937,133 @@ async function refreshTaskOps() {
     document.getElementById('opsCancelled').textContent = d.cancelled ?? '-';
     document.getElementById('taskSuccessRate').textContent = (d.success_rate ?? 0) + '%';
     document.getElementById('opsAvgTime').textContent = (d.avg_execution_time ?? 0) + ' 秒';
-
-    const slotsTotal = d.active_workers ?? 0;
-    const slotsAvail = d.available_slots ?? 0;
-    const slotsUsed = slotsTotal - slotsAvail;
-    document.getElementById('opsSlots').textContent = slotsAvail + ' / ' + slotsTotal + ' (使用 ' + slotsUsed + ')';
-    const slotsPct = slotsTotal > 0 ? Math.round((slotsUsed / slotsTotal) * 100) : 0;
-    document.getElementById('opsSlotsBar').style.width = slotsPct + '%';
-
-    const memUsed = d.memory_usage_mb ?? 0;
-    const memLimit = d.memory_limit_mb ?? 1;
+    const slotsTotal = d.active_workers ?? 0, slotsAvail = d.available_slots ?? 0;
+    const used = slotsTotal - slotsAvail;
+    document.getElementById('opsSlots').textContent = slotsAvail + ' / ' + slotsTotal + ' (使用 ' + used + ')';
+    document.getElementById('opsSlotsBar').style.width = (slotsTotal>0 ? Math.round(used/slotsTotal*100) : 0) + '%';
+    const memUsed = d.memory_usage_mb ?? 0, memLimit = d.memory_limit_mb ?? 1;
     document.getElementById('opsMem').textContent = memUsed + ' MB / ' + memLimit + ' MB';
     document.getElementById('opsMemBar').style.width = Math.min(d.utilization_percent ?? 0, 100) + '%';
-  } catch(e) { /* 静默 */ }
+  } catch(e) { /* silent */ }
 }
-
 async function refreshDiagnostics() {
   try {
     const d = await fetchJSON('/api/tasks/diagnostics');
     let html = '';
-
     const running = d.running_tasks || [];
-    if (running.length > 0) {
-      html += '<div style="margin-bottom:12px;"><div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">运行中 (' + running.length + ')</div>';
-      html += '<table><thead><tr><th>ID</th><th>类型</th><th>会话</th><th>开始时间</th></tr></thead><tbody>';
-      running.forEach(t => {
-        html += `<tr>
-          <td style="font-family:monospace;font-size:11px;">${(t.id||'').slice(0,8)}</td>
-          <td style="font-size:11px;">${t.type||'-'}</td>
-          <td style="font-family:monospace;font-size:11px;">${(t.conv||'global').slice(0,12)}</td>
-          <td style="font-size:11px;color:var(--text-muted);">${fmtTime(t.started)}</td>
-        </tr>`;
-      });
-      html += '</tbody></table></div>';
+    if (running.length) {
+      html += '<div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">运行中 (' + running.length + ')</div>';
+      html += running.map(t => `<div class="diag-row"><span class="diag-name mono">${(t.id||'').slice(0,8)} · ${t.type||'-'}</span><span class="diag-val">${fmtTime(t.started)}</span></div>`).join('');
     }
-
     const pending = d.pending_preview || [];
-    if (pending.length > 0) {
-      html += '<div style="margin-bottom:12px;"><div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">排队中 (' + d.pending_in_queue + ')</div>';
-      html += '<table><thead><tr><th>ID</th><th>类型</th><th>会话</th></tr></thead><tbody>';
-      pending.forEach(t => {
-        html += `<tr>
-          <td style="font-family:monospace;font-size:11px;">${(t.id||'').slice(0,8)}</td>
-          <td style="font-size:11px;">${t.type||'-'}</td>
-          <td style="font-family:monospace;font-size:11px;">${(t.conv||'global').slice(0,12)}</td>
-        </tr>`;
-      });
-      html += '</tbody></table></div>';
+    if (pending.length) {
+      html += '<div style="font-size:12px;color:var(--text-muted);margin:8px 0 4px;">排队中 (' + d.pending_in_queue + ')</div>';
+      html += pending.map(t => `<div class="diag-row"><span class="diag-name mono">${(t.id||'').slice(0,8)} · ${t.type||'-'}</span></div>`).join('');
     }
-
-    const stepCounters = d.conv_step_counters || {};
-    const counterKeys = Object.keys(stepCounters);
-    if (counterKeys.length > 0) {
-      html += '<div style="margin-bottom:12px;"><div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">会话步骤计数器</div>';
-      counterKeys.forEach(k => {
-        html += `<div style="font-size:11px;font-family:monospace;">${k.slice(0,16)}: ${stepCounters[k]} 个 step_analysis 在执行</div>`;
-      });
-      html += '</div>';
-    }
-
-    const statusBreakdown = d.status_breakdown || {};
-    const statusKeys = Object.keys(statusBreakdown);
-    if (statusKeys.length > 0) {
-      html += '<div><div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">状态分布</div>';
-      statusKeys.forEach(k => {
-        html += `<div style="font-size:11px;display:flex;justify-content:space-between;"><span>${k}</span><span>${statusBreakdown[k]}</span></div>`;
-      });
-      html += '</div>';
-    }
-
-    if (!html) {
-      html = '<div class="empty">队列空闲，无运行中任务</div>';
-    }
-
+    if (!html) html = '<div class="empty">队列空闲，无运行中任务</div>';
     document.getElementById('diagContent').innerHTML = html;
-  } catch(e) {
-    document.getElementById('diagContent').innerHTML = '<div class="empty" style="color:var(--red);">诊断信息获取失败</div>';
-  }
+  } catch(e) { document.getElementById('diagContent').innerHTML = '<div class="empty" style="color:var(--red)">诊断信息获取失败</div>'; }
 }
-
 async function refreshHandlers() {
   try {
     const d = await fetchJSON('/api/tasks/handlers');
     document.getElementById('handlerTotal').textContent = d.total ?? '-';
     const handlers = d.handlers || [];
-    if (!handlers.length) {
-      document.getElementById('handlerContent').innerHTML = '<div class="empty">无已注册处理器</div>';
-      return;
-    }
+    if (!handlers.length) { document.getElementById('handlerContent').innerHTML = '<div class="empty">无已注册处理器</div>'; return; }
     const parallel = handlers.filter(h => h.phase === 'PARALLEL');
     const sequential = handlers.filter(h => h.phase === 'SEQUENTIAL');
     let html = '';
-    if (parallel.length) {
-      html += '<div style="margin-bottom:12px;"><div style="font-size:12px;color:var(--green);margin-bottom:6px;">PARALLEL (可并行, ' + parallel.length + ' 个)</div>';
-      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
-      parallel.forEach(h => {
-        html += `<span class="tag" style="background:rgba(34,197,94,0.15);color:var(--green);">${h.name}</span>`;
-      });
-      html += '</div></div>';
-    }
-    if (sequential.length) {
-      html += '<div><div style="font-size:12px;color:var(--yellow);margin-bottom:6px;">SEQUENTIAL (串行, ' + sequential.length + ' 个)</div>';
-      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
-      sequential.forEach(h => {
-        html += `<span class="tag" style="background:rgba(234,179,8,0.15);color:var(--yellow);">${h.name}</span>`;
-      });
-      html += '</div></div>';
-    }
+    if (parallel.length) html += '<div style="margin-bottom:8px"><span style="font-size:12px;color:var(--green)">PARALLEL (' + parallel.length + ')</span><div class="row-flex" style="margin-top:4px">' +
+      parallel.map(h => `<span class="tag" style="background:var(--green-soft);color:var(--green)">${h.name}</span>`).join('') + '</div></div>';
+    if (sequential.length) html += '<div><span style="font-size:12px;color:var(--yellow)">SEQUENTIAL (' + sequential.length + ')</span><div class="row-flex" style="margin-top:4px">' +
+      sequential.map(h => `<span class="tag" style="background:var(--yellow-soft);color:var(--yellow)">${h.name}</span>`).join('') + '</div></div>';
     document.getElementById('handlerContent').innerHTML = html;
-  } catch(e) {
-    document.getElementById('handlerContent').innerHTML = '<div class="empty" style="color:var(--red);">处理器清单获取失败</div>';
-  }
+  } catch(e) { document.getElementById('handlerContent').innerHTML = '<div class="empty" style="color:var(--red)">处理器清单获取失败</div>'; }
 }
-
 async function refreshMemory() {
   try {
     const d = await fetchJSON('/api/system/memory');
-    if (d.note) {
-      document.getElementById('memRSS').textContent = d.note;
-      return;
-    }
+    if (d.note) { document.getElementById('memRSS').textContent = d.note; return; }
     document.getElementById('memRSS').textContent = d.used_mb + ' MB / ' + d.total_mb + ' MB';
-    const pct = Math.min(d.percent, 100);
-    document.getElementById('memRSSBar').style.width = pct + '%';
-    document.getElementById('memSys').textContent = (d.details?.[2]?.size_mb || 0) + ' MB';
-    document.getElementById('memSysBar').style.width = (d.details?.[2]?.percent || 0) + '%';
-
-    const detDiv = document.getElementById('memDetails');
-    detDiv.innerHTML = (d.details || []).map(i =>
-      `<div class="memory-bar" style="margin-top:8px;">
-        <div class="label"><span>${i.name}</span><span>${i.size_mb} MB (${i.percent}%)</span></div>
-      </div>`
-    ).join('');
-  } catch(e) { /* 静默 */ }
+    document.getElementById('memRSSBar').style.width = Math.min(d.percent,100) + '%';
+    document.getElementById('memDetails').innerHTML = (d.details||[]).map(i =>
+      `<div class="diag-row"><span class="diag-name">${i.name}</span><span class="diag-val">${i.size_mb} MB (${i.percent}%)</span></div>`).join('');
+  } catch(e) { /* silent */ }
 }
-
 async function refreshCallbacks() {
   try {
     const d = await fetchJSON('/api/callbacks/stats');
-    const tbody = document.querySelector('#cbTable tbody');
     const recent = d.recent_calls || [];
-    if (!recent.length) {
-      tbody.innerHTML = '<tr><td colspan="4" class="empty">暂无回调记录</td></tr>';
-      return;
-    }
-    tbody.innerHTML = recent.map(c => `
-      <tr>
-        <td style="font-family:monospace;font-size:12px;">${c.id}</td>
-        <td>${c.name}</td>
-        <td>${statusTag(c.status)}</td>
-        <td style="font-size:12px;color:var(--text-muted);">${fmtTime(c.timestamp)}</td>
-      </tr>
-    `).join('');
-  } catch(e) { /* 静默 */ }
+    if (!recent.length) { document.getElementById('cbTable').innerHTML = '<tr><td colspan="4" class="empty">暂无回调记录</td></tr>'; return; }
+    document.getElementById('cbTable').innerHTML = recent.map(c =>
+      `<tr><td class="mono">${c.id}</td><td>${c.name}</td><td>${statusTag(c.status)}</td><td style="color:var(--text-muted)">${fmtTime(c.timestamp)}</td></tr>`).join('');
+  } catch(e) { /* silent */ }
 }
-
 async function refreshHealth() {
   try {
     const d = await fetchJSON('/api/health/check');
     const svc = d.services || {};
     const items = Object.entries(svc).map(([k,v]) => {
-      const dot = v.healthy ? '<span class="status-dot online"></span>' : '<span class="status-dot offline"></span>';
-      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);">
-        <span>${dot} ${k}</span>
-        <span style="font-size:12px;color:var(--text-muted);">${v.detail || ''}</span>
-      </div>`;
+      const dot = v.healthy ? '<span class="dot online"></span>' : '<span class="dot offline"></span>';
+      return `<div class="diag-row"><span class="diag-name">${dot} ${k}</span><span class="diag-val">${v.detail||''}</span></div>`;
     }).join('');
     document.getElementById('healthContent').innerHTML = items || '<div class="empty">无服务信息</div>';
-  } catch(e) {
-    document.getElementById('healthContent').innerHTML = '<div class="empty" style="color:var(--red);">健康检查失败</div>';
-  }
+    const allOk = Object.values(svc).every(v => v.healthy);
+    document.getElementById('hbDot').className = 'dot ' + (allOk ? 'online' : 'offline');
+    document.getElementById('hbText').textContent = allOk ? '系统正常' : '存在异常服务';
+  } catch(e) { document.getElementById('healthContent').innerHTML = '<div class="empty" style="color:var(--red)">健康检查失败</div>'; }
 }
 
-
-// ── Page switching ──
-function switchPage(name, el) {
-  document.querySelectorAll('#mainNav .tab').forEach(t => t.classList.remove('active'));
-  el.classList.add('active');
-  document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
-  document.getElementById('page-' + name).classList.add('active');
-  if (name === 'growth') refreshGrowthPage();
-  if (name === 'knowledge') { document.getElementById('kbSearchResults').innerHTML = '<div class="empty">输入问题描述，点击"AI 匹配"开始分析...</div>'; document.getElementById('kbMatchInfo').style.display = 'none'; }
-  if (name === 'projects') refreshProjects();
-  if (name === 'ops') { refreshOpsPage(); refreshInterceptLogs(); }
-  if (name === 'reports') refreshReportsPage();
-  if (name === 'suggestions') refreshSuggestionsPage();
-}
-
-// ── Trends chart ──
+/* ── Trends ── */
 async function refreshTrends() {
   try {
     const d = await fetchJSON('/api/trends/system');
-    const ts = d.timestamps || [];
-    const ss = d.sessions || [];
+    const ts = d.timestamps || [], ss = d.sessions || [];
     const maxVal = Math.max(...ss, 1);
-    let html = '<div class="trend-bar-chart">';
+    let html = '';
     ts.forEach((t, i) => {
-      const h = Math.max(4, Math.round((ss[i] / maxVal) * 100));
-      html += `<div style="flex:1;text-align:center;"><div class="trend-bar" style="height:${h}px;" title="${t}: ${ss[i]} 个会话"></div><div class="trend-bar-label">${t}</div></div>`;
+      const h = Math.max(4, Math.round((ss[i]/maxVal)*100));
+      html += `<div class="bar" style="height:${h}px" title="${t}: ${ss[i]} 个会话"></div>`;
     });
-    html += '</div>';
-    document.getElementById('trendContent').innerHTML = html || '<div class="empty">无趋势数据</div>';
+    document.getElementById('trendContent').innerHTML = html
+      ? '<div class="trend">'+html+'</div><div class="heat-labels">'+ts.map(t=>'<span>'+t+'</span>').join('')+'</div>'
+      : '<div class="empty">无趋势数据</div>';
   } catch(e) { document.getElementById('trendContent').innerHTML = '<div class="empty">趋势数据获取失败</div>'; }
 }
 
-// ── Growth page ──
+/* ── Overview aggregate ── */
+async function refreshOverview() {
+  await Promise.all([refreshSystemStatus(), refreshTrends(), refreshDiagnostics()]);
+}
+
+/* ── Growth ── */
 async function refreshGrowthPage() {
   await Promise.all([refreshUserOverview(), refreshSkillRadar(), refreshHeatmap(), refreshTimeline()]);
 }
 async function refreshUserOverview() {
   try {
     const d = await fetchJSON('/api/growth/user-overview');
-    document.getElementById('ugTotalSkills').textContent = d.total_skills ?? '-';
-    document.getElementById('ugAvgMastery').textContent = (d.avg_mastery ?? 0) + '%';
-    document.getElementById('ugMasteryBar').style.width = (d.avg_mastery ?? 0) + '%';
-    document.getElementById('ugStreakDays').textContent = d.streak_days ?? '-';
-    document.getElementById('ugWeekNew').textContent = d.this_week_new ?? '-';
-    document.getElementById('ugEfficiency').textContent = Math.round((d.learning_efficiency ?? 0) * 100) + '%';
-    document.getElementById('ugEffBar').style.width = Math.round((d.learning_efficiency ?? 0) * 100) + '%';
-    document.getElementById('ugTopDomain').textContent = d.top_domain || '-';
-    document.getElementById('ugLastUpdate').textContent = '最后更新: ' + (d.last_updated || '-');
+    const tiles = [
+      { label: '技能总数', value: d.total_skills ?? '-', sub: '覆盖领域 ' + (d.top_domain||'-'), accent: true },
+      { label: '平均掌握度', value: (d.avg_mastery ?? 0) + '%', sub: '持续上升', pct: d.avg_mastery ?? 0 },
+      { label: '连续学习', value: d.streak_days ?? '-', sub: '天', pct: Math.min((d.streak_days||0)*5,100) },
+      { label: '本周新增', value: d.this_week_new ?? '-', sub: '效率 ' + Math.round((d.learning_efficiency||0)*100) + '%', pct: Math.round((d.learning_efficiency||0)*100) },
+    ];
+    document.getElementById('ugStats').innerHTML = tiles.map(s =>
+      `<div class="card stat"><div class="label">${s.label}</div><div class="value ${s.accent?'accent':''}">${s.value}</div>` +
+      `<div class="meter" style="margin-top:8px"><span style="width:${s.pct||0}%"></span></div>` +
+      `<div class="sub" style="margin-top:6px">${s.sub}</div></div>`).join('');
     const domains = d.skills_by_domain || [];
-    if (domains.length > 0) {
-      const maxCount = Math.max(...domains.map(dd => dd.count), 1);
+    if (domains.length) {
+      const maxCount = Math.max(...domains.map(dd=>dd.count),1);
       document.getElementById('domainDistContent').innerHTML = domains.map(dd => {
-        const skillsList = (dd.skills || []).slice(0, 12).map(s => '<span class="tag" style="background:rgba(99,102,241,0.1);color:var(--text);margin:2px 3px 2px 0;display:inline-block;font-size:11px;">' + escHtml(s) + '</span>').join('');
-        const more = (dd.skills || []).length > 12 ? '<span style="font-size:11px;color:var(--text-muted);"> +' + (dd.skills.length - 12) + '...</span>' : '';
-        return '<div style="margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--border);">'
-          + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'
-          + '<span style="font-size:13px;font-weight:600;color:var(--accent);">' + escHtml(dd.domain) + '</span>'
-          + '<span style="font-size:12px;color:var(--text-muted);">' + dd.count + ' 项 | 掌握度 ' + dd.avg_mastery + '%</span>'
-          + '</div>'
-          + '<div class="progress-bar" style="margin-bottom:4px;"><div class="fill accent" style="width:' + Math.round((dd.count/maxCount)*100) + '%;"></div></div>'
-          + '<div style="line-height:1.8;">' + skillsList + more + '</div>'
-          + '</div>';
+        const skills = (dd.skills||[]).slice(0,12).map(s => '<span class="tag" style="margin:2px 3px 2px 0">'+escHtml(s)+'</span>').join('');
+        const more = (dd.skills||[]).length>12 ? '<span style="font-size:11px;color:var(--text-muted)"> +'+(dd.skills.length-12)+'...</span>' : '';
+        return '<div style="margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--border-soft)">' +
+          '<div class="row-flex" style="justify-content:space-between"><span style="font-weight:600;color:var(--accent-2)">'+escHtml(dd.domain)+'</span>' +
+          '<span style="font-size:12px;color:var(--text-muted)">'+dd.count+' 项 | 掌握度 '+dd.avg_mastery+'%</span></div>' +
+          '<div class="meter" style="margin:6px 0"><span style="width:'+Math.round(dd.count/maxCount*100)+'%"></span></div>' +
+          '<div>'+skills+more+'</div></div>';
       }).join('');
     }
   } catch(e) { /* silent */ }
@@ -1109,21 +1071,15 @@ async function refreshUserOverview() {
 async function refreshSkillRadar() {
   try {
     const d = await fetchJSON('/api/growth/skill-radar');
-    const dims = d.dimensions || [];
-    const curr = d.current_scores || [];
+    const dims = d.dimensions || [], curr = d.current_scores || [];
     const hist = d.historical_scores || d.thirty_days_ago_scores || [];
-    if (dims.length > 0) {
-      document.getElementById('radarContent').innerHTML = dims.map((dim, i) => {
-        const c = curr[i] || 0;
-        const h = hist[i] || 0;
-        const diff = c - h;
-        const cls = diff > 0 ? 'up' : (diff < 0 ? 'down' : '');
-        return `<div class="skill-row">
-          <span class="s-name">${escHtml(dim)}</span>
-          <div class="s-bar"><div class="s-fill" style="width:${c}%;background:var(--accent);"></div></div>
-          <span class="s-val">${c}</span>
-          <span class="metric-change ${cls}" style="width:50px;text-align:right;">${diff > 0 ? '+' + diff : diff}</span>
-        </div>`;
+    if (dims.length) {
+      document.getElementById('radarContent').innerHTML = dims.map((dim,i) => {
+        const c = curr[i]||0, h = hist[i]||0, diff = c-h;
+        const cls = diff>0?'diag-ok':(diff<0?'diag-err':'');
+        return `<div class="diag-row"><span class="diag-name">${escHtml(dim)}</span>` +
+          `<span class="meter" style="flex:1;max-width:160px"><span style="width:${c}%"></span></span>` +
+          `<span class="diag-val ${cls}">${c} (${diff>0?'+':''}${diff})</span></div>`;
       }).join('');
     }
   } catch(e) { /* silent */ }
@@ -1131,19 +1087,18 @@ async function refreshSkillRadar() {
 async function refreshHeatmap() {
   try {
     const d = await fetchJSON('/api/growth/activity-heatmap');
-    document.getElementById('heatActiveDays').textContent = '活跃 ' + (d.active_days || 0) + ' 天';
-    document.getElementById('heatPeak').textContent = (d.peak_intensity ?? 0).toFixed(1);
-    document.getElementById('heatAvg').textContent = (d.avg_intensity ?? 0).toFixed(1);
+    document.getElementById('heatActiveDays').textContent = '活跃 ' + (d.active_days||0) + ' 天';
+    document.getElementById('heatPeak').textContent = '峰值 ' + (d.peak_intensity??0).toFixed(1);
+    document.getElementById('heatAvg').textContent = '均值 ' + (d.avg_intensity??0).toFixed(1);
     const labels = d.labels || ['一','二','三','四','五','六','日'];
-    document.getElementById('heatLabels').innerHTML = labels.map(l => '<span>' + l + '</span>').join('');
+    document.getElementById('heatLabels').innerHTML = labels.map(l=>'<span>'+l+'</span>').join('');
     const daily = d.daily_data || [];
-    if (daily.length > 0) {
-      const maxV = Math.max(...daily.map(dd => dd.intensity || 0), 0.1);
+    if (daily.length) {
+      const maxV = Math.max(...daily.map(dd=>dd.intensity||0),0.1);
       document.getElementById('heatGrid').innerHTML = daily.map(dd => {
-        const v = dd.intensity || 0;
-        const alpha = v / maxV;
-        const color = alpha > 0.7 ? 'var(--accent)' : (alpha > 0.4 ? 'rgba(99,102,241,0.7)' : (alpha > 0.05 ? 'rgba(99,102,241,0.4)' : '#1a1d27'));
-        return '<div class="heatmap-cell" style="background:' + color + ';" title="' + dd.date + ': ' + v.toFixed(1) + '"></div>';
+        const v = dd.intensity||0, a = v/maxV;
+        const color = a>0.7?'var(--accent)':(a>0.4?'rgba(99,102,241,0.7)':(a>0.05?'rgba(99,102,241,0.4)':'var(--panel-2)'));
+        return '<div class="cell" style="background:'+color+'" title="'+dd.date+': '+v.toFixed(1)+'"></div>';
       }).join('');
     }
   } catch(e) { /* silent */ }
@@ -1153,38 +1108,26 @@ async function refreshTimeline() {
     const d = await fetchJSON('/api/growth/timeline?limit=30');
     document.getElementById('tlTotal').textContent = d.total_events ?? 0;
     const events = d.events || [];
-    if (events.length > 0) {
-      document.getElementById('timelineContent').innerHTML = events.map(e => `
-        <div class="timeline-item">
-          <span class="tl-icon">${e.icon || '•'}</span>
-          <span class="tl-time">${fmtTime(e.time)}</span>
-          <span class="tl-content">${escHtml(e.content || '')}</span>
-          <span class="tl-delta">${escHtml(e.delta || e.impact || '')}</span>
-        </div>
-      `).join('');
-    }
+    document.getElementById('timelineContent').innerHTML = events.length ? events.map(e =>
+      `<div class="diag-row"><span class="diag-name">${e.icon||'•'} ${escHtml(e.content||'')}</span>` +
+      `<span class="diag-val">${fmtTime(e.time)} ${escHtml(e.delta||e.impact||'')}</span></div>`).join('')
+      : '<div class="empty">暂无事件</div>';
   } catch(e) { /* silent */ }
 }
 
-// ── Knowledge page ──
+/* ── Knowledge ── */
 function renderKbItems(items) {
-  if (!items || items.length === 0) return '<div class="empty">未找到匹配结果</div>';
-  let html = '<table class="kb-table"><thead><tr><th>标题</th><th>领域</th><th>分类</th><th>置信度</th><th>使用</th></tr></thead><tbody>';
+  if (!items || !items.length) return '<div class="empty">未找到匹配结果</div>';
+  let html = '<table><thead><tr><th>标题</th><th>领域</th><th>分类</th><th>置信度</th><th>使用</th></tr></thead><tbody>';
   items.forEach(item => {
-    const summary = (item.summary || item.content || '').slice(0, 120);
-    html += '<tr>'
-      + '<td class="kb-title" title="' + escHtml(item.title || '') + '">'
-      + escHtml((item.title || '').slice(0, 50))
-      + (summary ? '<div class="kb-summary">' + escHtml(summary) + '</div>' : '')
-      + '</td>'
-      + '<td><span class="tag" style="background:rgba(99,102,241,0.1);color:var(--accent);">' + escHtml(item.domain || '-') + '</span></td>'
-      + '<td style="font-size:11px;color:var(--text-muted);">' + escHtml(item.category || '-') + '</td>'
-      + '<td style="font-size:11px;">' + (item.confidence != null ? (item.confidence * 100).toFixed(0) + '%' : '-') + '</td>'
-      + '<td style="font-size:11px;">' + (item.usage_count || 0) + '</td>'
-      + '</tr>';
+    const summary = (item.summary||item.content||'').slice(0,120);
+    html += '<tr><td>'+escHtml((item.title||'').slice(0,50))+(summary?'<div style="font-size:11px;color:var(--text-muted)">'+escHtml(summary)+'</div>':'')+'</td>' +
+      '<td><span class="tag" style="background:var(--accent-soft);color:var(--accent-2)">'+escHtml(item.domain||'-')+'</span></td>' +
+      '<td style="font-size:11px;color:var(--text-muted)">'+escHtml(item.category||'-')+'</td>' +
+      '<td style="font-size:11px">'+(item.confidence!=null?(item.confidence*100).toFixed(0)+'%':'-')+'</td>' +
+      '<td style="font-size:11px">'+(item.usage_count||0)+'</td></tr>';
   });
-  html += '</tbody></table>';
-  return html;
+  return html + '</tbody></table>';
 }
 async function matchKnowledge() {
   const q = document.getElementById('kbSearchInput').value.trim();
@@ -1192,16 +1135,16 @@ async function matchKnowledge() {
   document.getElementById('kbSearchResults').innerHTML = '<div class="empty">AI 分析中...</div>';
   document.getElementById('kbMatchInfo').style.display = 'none';
   try {
-    const res = await fetch('/api/knowledge/match', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: q }) });
+    const res = await fetch('/api/knowledge/match', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({query:q}) });
     const d = await res.json();
-    const infoEl = document.getElementById('kbMatchInfo');
     if (d.matched_domain) {
-      infoEl.style.display = 'block';
-      infoEl.innerHTML = '🎯 匹配领域: <b>' + escHtml(d.matched_domain) + '</b>' + (d.match_reason ? ' — ' + escHtml(d.match_reason) : '');
+      const info = document.getElementById('kbMatchInfo');
+      info.style.display = 'block';
+      info.innerHTML = '🎯 匹配领域: <b>'+escHtml(d.matched_domain)+'</b>' + (d.match_reason?' — '+escHtml(d.match_reason):'');
     }
     document.getElementById('kbListTotal').textContent = d.count || 0;
     document.getElementById('kbSearchResults').innerHTML = renderKbItems(d.items);
-  } catch(e) { document.getElementById('kbSearchResults').innerHTML = '<div class="empty">AI 匹配失败: ' + e.message + '</div>'; }
+  } catch(e) { document.getElementById('kbSearchResults').innerHTML = '<div class="empty">AI 匹配失败: '+e.message+'</div>'; }
 }
 async function searchKnowledge() {
   const q = document.getElementById('kbSearchInput').value.trim();
@@ -1213,638 +1156,289 @@ async function searchKnowledge() {
     const items = d.data?.items || d.data || [];
     document.getElementById('kbListTotal').textContent = items.length;
     document.getElementById('kbSearchResults').innerHTML = renderKbItems(items);
-  } catch(e) { document.getElementById('kbSearchResults').innerHTML = '<div class="empty">搜索失败: ' + e.message + '</div>'; }
+  } catch(e) { document.getElementById('kbSearchResults').innerHTML = '<div class="empty">搜索失败: '+e.message+'</div>'; }
 }
 
-// ── Projects page ──
+/* ── Projects ── */
 async function refreshProjects() {
   try {
     const d = await fetchJSON('/api/projects/list');
     const projects = d.projects || [];
     document.getElementById('projCount').textContent = projects.length;
     const sel = document.getElementById('projSelect');
-    const names = projects.map(p => p.name).filter(n => n);
-    sel.innerHTML = '<option value="">-- 选择项目 --</option>' + names.map(n => '<option value="' + escHtml(n) + '">' + escHtml(n) + '</option>').join('');
-    if (projects.length > 0) {
-      let html = '<table><thead><tr><th>#</th><th>项目名称</th><th>类型</th><th>操作</th></tr></thead><tbody>';
-      projects.forEach((p, i) => {
-        const sysType = p.system_type ? ('<span class="tag" style="font-size:10px;background:rgba(99,102,241,0.1);color:var(--accent);">' + escHtml(p.system_type) + '</span>') : '<span style="color:var(--text-muted);font-size:11px;">-</span>';
-        html += '<tr>'
-          + '<td style="color:var(--text-muted);font-size:11px;">' + (i + 1) + '</td>'
-          + '<td><a href="javascript:void(0)" onclick="selectProject(\'' + escHtml(p.name) + '\')" style="color:var(--accent);text-decoration:none;font-weight:500;">' + escHtml(p.name) + '</a></td>'
-          + '<td>' + sysType + '</td>'
-          + '<td><button onclick="selectProject(\'' + escHtml(p.name) + '\')" style="padding:2px 8px;border-radius:4px;border:1px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer;font-size:11px;">选择</button></td>'
-          + '</tr>';
-      });
-      html += '</tbody></table>';
-      document.getElementById('projContent').innerHTML = html;
+    sel.innerHTML = '<option value="">-- 选择项目 --</option>' + projects.map(p=>'<option value="'+escHtml(p.name)+'">'+escHtml(p.name)+'</option>').join('');
+    if (projects.length) {
+      document.getElementById('projContent').innerHTML = '<table><thead><tr><th>#</th><th>项目名称</th><th>类型</th><th>操作</th></tr></thead><tbody>' +
+        projects.map((p,i) => {
+          const st = p.system_type ? '<span class="tag" style="background:var(--accent-soft);color:var(--accent-2)">'+escHtml(p.system_type)+'</span>' : '<span style="color:var(--text-muted)">-</span>';
+          return '<tr><td style="color:var(--text-muted)">'+(i+1)+'</td>' +
+            '<td><a href="javascript:void(0)" onclick="selectProject(\''+escHtml(p.name)+'\')" style="color:var(--accent-2);text-decoration:none">'+escHtml(p.name)+'</a></td>' +
+            '<td>'+st+'</td><td><button class="btn sm" onclick="selectProject(\''+escHtml(p.name)+'\')">选择</button></td></tr>';
+        }).join('') + '</tbody></table>';
     } else {
-      document.getElementById('projContent').innerHTML = '<div class="empty">暂无对接项目，等待 CodeBuddy 等客户端连接后自动注册</div>';
+      document.getElementById('projContent').innerHTML = '<div class="empty">暂无对接项目，等待客户端连接后自动注册</div>';
     }
   } catch(e) { /* silent */ }
 }
-function selectProject(name) {
-  document.getElementById('projSelect').value = name;
-  queryProject();
-}
-
+function selectProject(name) { document.getElementById('projSelect').value = name; queryProject(); }
 async function queryProject() {
   const project = document.getElementById('projSelect').value;
   const question = document.getElementById('projQueryInput').value.trim();
   if (!question && !project) return;
   try {
-    const body = { question, project_name: project || '', limit: 10 };
-    const res = await fetch('/api/projects/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (!res.ok) { document.getElementById('projQueryResult').innerHTML = '<div class="empty" style="color:var(--red);">查询失败: HTTP ' + res.status + '</div>'; return; }
+    const res = await fetch('/api/projects/query', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({question, project_name: project||'', limit:10}) });
+    if (!res.ok) { document.getElementById('projQueryResult').innerHTML = '<div class="empty" style="color:var(--red)">查询失败: HTTP '+res.status+'</div>'; return; }
     const d = await res.json();
     const items = d.results || d.data || [];
-    if (items.length > 0) {
-      document.getElementById('projQueryResult').innerHTML = items.map(item => `
-        <div class="growth-item">
-          <div class="g-header">
-            <span class="g-title">${escHtml(item.title || '')}</span>
-            <span class="tag low">${escHtml(item.domain || '')}</span>
-          </div>
-          <div class="g-body">${escHtml((item.content || '').slice(0, 200))}</div>
-        </div>
-      `).join('');
-    } else {
-      document.getElementById('projQueryResult').innerHTML = '<div class="empty">未找到结果</div>';
-    }
-  } catch(e) { document.getElementById('projQueryResult').innerHTML = '<div class="empty">查询失败: ' + e.message + '</div>'; }
+    document.getElementById('projQueryResult').innerHTML = items.length ? items.map(item =>
+      `<div class="sg-card"><div class="sg-card-header"><span class="sg-card-title">${escHtml(item.title||'')}</span>` +
+      `<span class="tag" style="background:var(--accent-soft);color:var(--accent-2)">${escHtml(item.domain||'')}</span></div>` +
+      `<div class="sg-card-desc">${escHtml((item.content||'').slice(0,200))}</div></div>`).join('')
+      : '<div class="empty">未找到结果</div>';
+  } catch(e) { document.getElementById('projQueryResult').innerHTML = '<div class="empty">查询失败: '+e.message+'</div>'; }
 }
 
-// ── Ops page ──
+/* ── Ops page ── */
 async function refreshOpsPage() {
-  await Promise.all([refreshSysDiagnose(), checkLlmStatus(), refreshInterceptLogs()]);
+  await Promise.all([refreshSysDiagnose(), checkLlmStatus(), refreshInterceptLogs(), refreshTaskOps(),
+    refreshHandlers(), refreshMemory(), refreshCallbacks(), refreshHealth()]);
 }
 async function refreshSysDiagnose() {
   try {
     const d = await fetchJSON('/api/system/diagnose');
-    const checks = d.checks || d;
-    const issues = d.issues || [];
-    const items = Object.entries(checks);
-    const icon = v => /^healthy/.test(v) ? '✅' : /^error|^unhealthy/.test(v) ? '❌' : '⚠️';
-    document.getElementById('sysDiagContent').innerHTML =
-      items.map(([k, v]) => {
-        let displayVal = v;
-        if (v !== null && typeof v === 'object') {
-          displayVal = Object.entries(v).map(([tk, tv]) => tk + ': ' + tv).join(', ');
-        } else {
-          displayVal = String(v);
-        }
-        const statusCls = /^healthy/.test(displayVal) ? 'diag-ok' : /^error|^unhealthy/.test(displayVal) ? 'diag-err' : 'diag-warn';
-        return '<div class="diag-row"><div class="diag-name">' + escHtml(k) + '</div><div class="diag-val ' + statusCls + '">' + icon(displayVal) + ' ' + escHtml(displayVal) + '</div></div>';
-      }).join('') +
-      (issues.length ? '<div class="diag-issues"><b>⚠ 问题清单</b>' + issues.map(i => '<div class="diag-issue">• ' + escHtml(i) + '</div>').join('') + '</div>' : '') ||
-      '<div class="empty">无诊断数据</div>';
+    const checks = d.checks || d, issues = d.issues || [];
+    const icon = v => /^healthy/.test(v) ? '✅' : (/^error|^unhealthy/.test(v) ? '❌' : '⚠️');
+    let html = Object.entries(checks).map(([k,v]) => {
+      let dv = v; if (v!==null && typeof v==='object') dv = Object.entries(v).map(([tk,tv])=>tk+': '+tv).join(', '); else dv = String(v);
+      const cls = /^healthy/.test(dv)?'diag-ok':(/^error|^unhealthy/.test(dv)?'diag-err':'diag-warn');
+      return '<div class="diag-row"><span class="diag-name">'+escHtml(k)+'</span><span class="diag-val '+cls+'">'+icon(dv)+' '+escHtml(dv)+'</span></div>';
+    }).join('');
+    if (issues.length) html += '<div class="diag-issues"><b>⚠ 问题清单</b>'+issues.map(i=>'<div>• '+escHtml(i)+'</div>').join('')+'</div>';
+    document.getElementById('sysDiagContent').innerHTML = html || '<div class="empty">无诊断数据</div>';
   } catch(e) { document.getElementById('sysDiagContent').innerHTML = '<div class="empty">诊断失败</div>'; }
 }
 async function checkIntegrity() {
-  document.getElementById('sysIntegrityContent').innerHTML = '<div class="empty">检查中...</div>';
+  const el = document.getElementById('sysIntegrityContent'); el.innerHTML = '<div class="empty">检查中...</div>';
   try {
     const d = await fetchJSON('/api/system/check-integrity');
-    const renderItem = (label, val, ok) => {
-      const dot = ok ? '<span class="status-dot online"></span>' : (ok === false ? '<span class="status-dot offline"></span>' : '');
-      return '<div class="diag-row"><div class="diag-name">' + dot + escHtml(label) + '</div><div class="diag-val">' + escHtml(String(val)) + '</div></div>';
-    };
-    let html = '';
-    // overall status
-    const status = d.status || (d.success ? 'healthy' : 'warning');
-    const statusIcon = status === 'healthy' ? '✅' : status === 'warning' ? '⚠️' : '❌';
-    html += '<div class="integrity-summary ' + (status === 'healthy' ? 'diag-ok' : 'diag-warn') + '">' + statusIcon + ' 整体状态: <b>' + escHtml(status) + '</b></div>';
-    // details
-    if (d.issues && d.issues.length) {
-      html += '<div class="diag-issues"><b>发现问题</b>' + d.issues.map(i => '<div class="diag-issue">• ' + escHtml(i) + '</div>').join('') + '</div>';
-    }
-    // write_stats
-    if (d.write_stats && typeof d.write_stats === 'object' && d.write_stats !== null) {
+    const status = d.status || (d.success?'healthy':'warning');
+    const statusIcon = status==='healthy'?'✅':(status==='warning'?'⚠️':'❌');
+    let html = '<div class="integrity-summary '+(status==='healthy'?'diag-ok':'diag-warn')+'">'+statusIcon+' 整体状态: <b>'+escHtml(status)+'</b></div>';
+    if (d.issues && d.issues.length) html += '<div class="diag-issues"><b>发现问题</b>'+d.issues.map(i=>'<div>• '+escHtml(i)+'</div>').join('')+'</div>';
+    if (d.write_stats && typeof d.write_stats==='object') {
       const entries = Object.entries(d.write_stats);
-      if (entries.length > 0) {
-        html += '<div style="margin-top:10px;font-size:12px;color:var(--accent);">📊 写入统计（服务重启后清零）</div>';
-        html += entries.map(([k, v]) => {
-          if (v === null || typeof v !== 'object') {
-            return '<div class="diag-row"><div class="diag-name">' + escHtml(k) + '</div><div class="diag-val">' + escHtml(String(v)) + '</div></div>';
-          }
-          const rate = v.success_rate != null ? v.success_rate : (v.success !== undefined && v.total ? (v.success / v.total * 100).toFixed(1) + '%' : '-');
-          return '<div class="diag-row"><div class="diag-name">' + escHtml(k) + '</div><div class="diag-val">成功率: ' + escHtml(rate) + ' | 成功: ' + (v.success ?? '-') + ' | 失败: ' + (v.failure ?? '-') + '</div></div>';
+      if (entries.length) {
+        html += '<div style="margin-top:10px;font-size:12px;color:var(--accent-2)">📊 写入统计</div>';
+        html += entries.map(([k,v]) => {
+          if (v===null || typeof v!=='object') return '<div class="diag-row"><span class="diag-name">'+escHtml(k)+'</span><span class="diag-val">'+escHtml(String(v))+'</span></div>';
+          const rate = v.success_rate!=null ? v.success_rate : (v.success!==undefined&&v.total?(v.success/v.total*100).toFixed(1)+'%':'-');
+          return '<div class="diag-row"><span class="diag-name">'+escHtml(k)+'</span><span class="diag-val">成功率: '+escHtml(rate)+' | 成功: '+(v.success??'-')+' | 失败: '+(v.failure??'-')+'</span></div>';
         }).join('');
-      } else {
-        html += '<div style="margin-top:10px;font-size:12px;color:var(--accent);">📊 写入统计（服务重启后清零）</div>';
-        html += '<div class="empty" style="color:var(--yellow);">暂无写入记录 — 服务刚启动或尚未有对话操作触发写入</div>';
-      }
-    } else {
-      html += '<div style="margin-top:10px;font-size:12px;color:var(--accent);">📊 写入统计</div>';
-      html += '<div class="empty" style="color:var(--text-muted);">WriteTracker 未激活</div>';
+      } else html += '<div class="empty" style="color:var(--yellow)">暂无写入记录</div>';
     }
-    // db_stats
-    if (d.db_stats && typeof d.db_stats === 'object') {
-      html += '<div style="margin-top:10px;font-size:12px;color:var(--accent);">🗄️ 数据库表统计</div>';
-      for (const [tbl, cnt] of Object.entries(d.db_stats)) {
-        html += '<div class="diag-row"><div class="diag-name">' + escHtml(tbl) + '</div><div class="diag-val">' + escHtml(String(cnt)) + ' 行</div></div>';
-      }
+    if (d.db_stats && typeof d.db_stats==='object') {
+      html += '<div style="margin-top:10px;font-size:12px;color:var(--accent-2)">🗄️ 数据库表统计</div>';
+      for (const [tbl,cnt] of Object.entries(d.db_stats)) html += '<div class="diag-row"><span class="diag-name">'+escHtml(tbl)+'</span><span class="diag-val">'+escHtml(String(cnt))+' 行</span></div>';
     }
-    // summary
-    if (d.summary) {
-      html += '<div class="diag-row"><div class="diag-name">汇总</div><div class="diag-val">' + escHtml(String(d.summary)) + '</div></div>';
-    }
-    // fallback: raw keys
-    if (!html) {
-      html = Object.entries(d).filter(([k]) => k !== 'success').map(([k, v]) => renderItem(k, (v !== null && typeof v === 'object') ? JSON.stringify(v) : v, true)).join('');
-    }
-    document.getElementById('sysIntegrityContent').innerHTML = html || '<div class="empty">无数据</div>';
-  } catch(e) { document.getElementById('sysIntegrityContent').innerHTML = '<div class="empty">检查失败: ' + e.message + '</div>'; }
+    if (d.summary) html += '<div class="diag-row"><span class="diag-name">汇总</span><span class="diag-val">'+escHtml(String(d.summary))+'</span></div>';
+    el.innerHTML = html || '<div class="empty">无数据</div>';
+  } catch(e) { el.innerHTML = '<div class="empty">检查失败: '+e.message+'</div>'; }
 }
 async function checkLlmStatus() {
-  document.getElementById('llmStatusContent').innerHTML = '<div class="empty">查询中...</div>';
+  const el = document.getElementById('llmStatusContent'); el.innerHTML = '<div class="empty">查询中...</div>';
   try {
     const d = await fetchJSON('/api/system/llm-status');
-    const renderItem = (label, val, icon) => {
-      return '<div class="diag-row"><div class="diag-name">' + (icon || '') + ' ' + escHtml(label) + '</div><div class="diag-val">' + escHtml(String(val)) + '</div></div>';
-    };
-    const available = d.available !== undefined ? d.available : (d.success ? true : false);
-    const statusIcon = available ? '<span class="status-dot online"></span>' : '<span class="status-dot offline"></span>';
+    const available = d.available!==undefined ? d.available : (d.success?true:false);
     const badge = document.getElementById('llmStatusBadge');
-    if (badge) {
-      badge.textContent = available ? '已连接' : '不可达';
-      badge.style.background = available ? 'var(--green)' : 'var(--red)';
-    }
-    let html = '<div class="integrity-summary ' + (available ? 'diag-ok' : 'diag-err') + '">' + statusIcon + ' Ollama: <b>' + (available ? '已连接' : '不可达') + '</b></div>';
-    const skip = ['success', 'available', 'preload_result'];
-    for (const [k, v] of Object.entries(d)) {
+    badge.textContent = available?'已连接':'不可达';
+    badge.style.background = available?'var(--green)':'var(--red)';
+    let html = '<div class="integrity-summary '+(available?'diag-ok':'diag-err')+'">'+(available?'✅ Ollama 已连接':'❌ Ollama 不可达')+'</div>';
+    const skip = ['success','available','preload_result'];
+    for (const [k,v] of Object.entries(d)) {
       if (skip.includes(k)) continue;
-      if (v !== null && typeof v === 'object') {
-        html += '<div style="margin-top:8px;font-size:12px;color:var(--accent);font-weight:600;">' + escHtml(k) + '</div>';
-        for (const [sk, sv] of Object.entries(v)) {
-          html += renderItem(sk, sv !== null ? sv : '(空)', '');
-        }
-      } else {
-        html += renderItem(k, v !== null ? v : '(空)', '');
-      }
+      if (v!==null && typeof v==='object') {
+        html += '<div style="margin-top:8px;font-size:12px;color:var(--accent-2)">'+escHtml(k)+'</div>';
+        for (const [sk,sv] of Object.entries(v)) html += '<div class="diag-row"><span class="diag-name">'+escHtml(sk)+'</span><span class="diag-val">'+escHtml(sv!=null?sv:'(空)')+'</span></div>';
+      } else html += '<div class="diag-row"><span class="diag-name">'+escHtml(k)+'</span><span class="diag-val">'+escHtml(v!=null?v:'(空)')+'</span></div>';
     }
-    if (d.preload_result !== undefined) {
-      html += renderItem('预加载', d.preload_result ? '✅ 成功' : '❌ 失败', '');
-    }
-    // v9.5.2: 如果存在 load_error，显示一键重试按钮
-    if (d.load_error) {
-      html += '<div style="margin-top:10px;padding:8px;background:rgba(239,68,68,0.1);border:1px solid var(--red);border-radius:4px;">' +
-        '<div style="font-size:12px;color:var(--red);margin-bottom:6px;">⚠️ 上次预加载失败（可能为启动时序问题），点击重新验证：</div>' +
-        '<button onclick="recheckOllama()" style="background:var(--red);color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:12px;cursor:pointer;">🔄 重新验证</button>' +
-        '</div>';
-    }
-    document.getElementById('llmStatusContent').innerHTML = html || '<div class="empty">无状态数据</div>';
-  } catch(e) { document.getElementById('llmStatusContent').innerHTML = '<div class="empty">获取失败: ' + e.message + '</div>'; }
+    if (d.load_error) html += '<div style="margin-top:10px;padding:8px;background:var(--red-soft);border:1px solid var(--red);border-radius:var(--r-sm);font-size:12px;color:var(--red)">⚠️ 上次预加载失败，点击「重新验证」</div>';
+    el.innerHTML = html || '<div class="empty">无状态数据</div>';
+  } catch(e) { el.innerHTML = '<div class="empty">获取失败: '+e.message+'</div>'; }
 }
-
 async function recheckOllama() {
   document.getElementById('llmStatusContent').innerHTML = '<div class="empty">正在重新验证模型...</div>';
   try {
-    const res = await fetch('/api/ollama/recheck', { method: 'POST' });
+    const res = await fetch('/api/ollama/recheck', { method:'POST' });
     const d = await res.json();
-    if (d.success) {
-      // 验证成功，刷新状态展示
-      await checkLlmStatus();
-    } else {
-      document.getElementById('llmStatusContent').innerHTML =
-        '<div class="integrity-summary diag-err">❌ 验证失败: ' + escHtml(d.load_error || d.error || '未知错误') + '</div>' +
-        '<div style="margin-top:8px;font-size:11px;color:var(--text-muted);">请确认：1) Ollama 正在运行 2) ollama list 可看到模型 3) 模型名与 config.yaml 一致</div>';
-    }
-  } catch(e) {
-    document.getElementById('llmStatusContent').innerHTML = '<div class="empty">请求失败: ' + e.message + '</div>';
-  }
+    if (d.success) await checkLlmStatus();
+    else document.getElementById('llmStatusContent').innerHTML = '<div class="integrity-summary diag-err">❌ 验证失败: '+escHtml(d.load_error||d.error||'未知错误')+'</div>';
+  } catch(e) { document.getElementById('llmStatusContent').innerHTML = '<div class="empty">请求失败: '+e.message+'</div>'; }
 }
 async function reconnectOllama() {
-  const el = document.getElementById('llmStartResult');
-  el.style.display = 'block';
-  el.innerHTML = '<div class="empty">正在重新连接 Ollama 服务...</div>';
+  const el = document.getElementById('llmStartResult'); el.style.display='block'; el.innerHTML = '<div class="empty">正在重新连接 Ollama 服务...</div>';
   try {
-    const res = await fetch('/api/ollama/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ timeout: 30 }) });
+    const res = await fetch('/api/ollama/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({timeout:30}) });
     const d = await res.json();
     const ok = d.success;
-    el.innerHTML = '<div class="integrity-summary ' + (ok ? 'diag-ok' : 'diag-err') + '">' + (ok ? '✅ Ollama 重新连接成功' : '❌ 连接失败: ' + escHtml(d.error || '未知错误')) + '</div>';
-    if (d.logs && d.logs.length) {
-      el.innerHTML += '<div style="margin-top:6px;font-size:11px;color:var(--text-muted);">' + d.logs.map(l => escHtml('[' + l.level + '] ' + l.msg)).join('<br>') + '</div>';
-    }
-    // 连接后自动刷新状态
-    setTimeout(() => checkLlmStatus(), 500);
-  } catch(e) { el.innerHTML = '<div class="integrity-summary diag-err">❌ 请求失败: ' + e.message + '</div>'; }
+    el.innerHTML = '<div class="integrity-summary '+(ok?'diag-ok':'diag-err')+'">'+(ok?'✅ Ollama 重新连接成功':'❌ 连接失败: '+escHtml(d.error||'未知错误'))+'</div>';
+    if (d.logs && d.logs.length) el.innerHTML += '<div style="margin-top:6px;font-size:11px;color:var(--text-muted)">'+d.logs.map(l=>escHtml('['+l.level+'] '+l.msg)).join('<br>')+'</div>';
+    setTimeout(()=>checkLlmStatus(), 500);
+  } catch(e) { el.innerHTML = '<div class="integrity-summary diag-err">❌ 请求失败: '+e.message+'</div>'; }
 }
-// ════════════════════════════════════════════════
-// 拦截器调试面板 (v9.5.1)
-// ════════════════════════════════════════════════
 async function refreshInterceptLogs() {
   try {
     const d = await fetchJSON('/api/debug/intercept/logs?limit=50');
-    const enabled = d.enabled;
-    const logs = d.logs || [];
-    const badge = document.getElementById('interceptBadge');
-    const toggleBtn = document.getElementById('interceptToggleBtn');
-    const logCount = document.getElementById('interceptLogCount');
-    const content = document.getElementById('interceptLogContent');
-
-    // 更新开关状态
-    if (enabled) {
-      badge.textContent = 'ON';
-      badge.style.background = 'var(--green)';
-      toggleBtn.textContent = '⏸ 关闭拦截';
-      toggleBtn.style.color = 'var(--yellow)';
-      toggleBtn.style.borderColor = 'var(--yellow)';
-    } else {
-      badge.textContent = 'OFF';
-      badge.style.background = 'var(--red)';
-      toggleBtn.textContent = '⚡ 开启拦截';
-      toggleBtn.style.color = 'var(--green)';
-      toggleBtn.style.borderColor = 'var(--green)';
-    }
-    logCount.textContent = '日志: ' + (d.count || 0) + ' 条';
-
-    if (!logs.length) {
-      content.innerHTML = '<div class="empty">' + (enabled ? '拦截器已开启，等待 Ollama 请求...' : '拦截器已关闭，点击"开启拦截"开始捕获') + '</div>';
-      return;
-    }
-
-    let html = '<table><thead><tr><th>时间</th><th>模型</th><th>模式</th><th>状态</th><th>耗时</th><th>结果长度</th><th>请求 JSON</th></tr></thead><tbody>';
-    logs.forEach((log, idx) => {
-      const statusCls = log.status === '200 OK' ? 'color:var(--green);' : 'color:var(--red);';
-      const modeLabel = log.stream ? '流式' : '同步';
-      const modeCls = log.stream ? 'color:var(--accent);' : 'color:var(--text-muted);';
-      const elapsed = log.elapsed ? log.elapsed + 's' : '-';
-      const resultLen = log.result_len != null ? log.result_len : '-';
-      const reqJson = log.request_json;
-      const reqJsonStr = reqJson ? JSON.stringify(reqJson, null, 2) : '';
-      const promptLen = log.prompt_len || 0;
-      const modelName = escHtml(log.model || '-');
-      const rowId = 'intercept-row-' + idx;
-      const detailId = 'intercept-detail-' + idx;
-      html += '<tr id="' + rowId + '" style="cursor:pointer;" onclick="document.getElementById(\'' + detailId + '\').style.display = document.getElementById(\'' + detailId + '\').style.display === \'none\' ? \'\' : \'none\'">'
-        + '<td style="font-family:monospace;font-size:11px;">' + escHtml(log.timestamp || '-') + '</td>'
-        + '<td style="font-size:11px;">' + modelName + '</td>'
-        + '<td style="font-size:11px;' + modeCls + '">' + modeLabel + '</td>'
-        + '<td style="font-size:11px;' + statusCls + '">' + escHtml(log.status || '-') + '</td>'
-        + '<td style="font-size:11px;">' + elapsed + '</td>'
-        + '<td style="font-size:11px;">' + resultLen + '</td>'
-        + '<td style="font-size:11px;color:var(--accent);">📋 点击查看完整请求 JSON (prompt ' + promptLen + ' 字符)</td>'
-        + '</tr>'
-        + '<tr id="' + detailId + '" style="display:none;"><td colspan="7" style="padding:0;">'
-        + '<div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;margin:4px 0;padding:12px;font-family:monospace;font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:500px;overflow-y:auto;position:relative;">'
-        + '<button onclick="event.stopPropagation();navigator.clipboard.writeText(this.nextElementSibling.textContent);this.textContent=&#39;已复制!&#39;;setTimeout(()=>{this.textContent=&#39;📋 复制&#39;},1500)" style="position:sticky;top:0;float:right;background:var(--accent);color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer;z-index:1;">📋 复制</button>'
-        + '<code style="display:block;color:var(--text);">' + escHtml(reqJsonStr) + '</code>'
-        + (log.error ? '<div style="margin-top:8px;padding:6px;background:rgba(239,68,68,0.1);border-radius:4px;color:var(--red);font-size:10px;">❌ 错误: ' + escHtml(log.error.slice(0, 300)) + '</div>' : '')
-        + '</div></td></tr>';
+    const enabled = d.enabled, logs = d.logs || [];
+    const badge = document.getElementById('interceptBadge'), btn = document.getElementById('interceptToggleBtn');
+    if (enabled) { badge.textContent='ON'; badge.style.background='var(--green)'; btn.textContent='⏸ 关闭拦截'; btn.style.color='var(--yellow)'; }
+    else { badge.textContent='OFF'; badge.style.background='var(--red)'; btn.textContent='⚡ 开启拦截'; btn.style.color='var(--green)'; }
+    document.getElementById('interceptLogCount').textContent = '日志: ' + (d.count||0) + ' 条';
+    if (!logs.length) { document.getElementById('interceptLogContent').innerHTML = '<div class="empty">'+(enabled?'拦截器已开启，等待请求...':'拦截器已关闭')+'</div>'; return; }
+    let html = '<table><thead><tr><th>时间</th><th>模型</th><th>模式</th><th>状态</th><th>耗时</th><th>结果长度</th><th>请求</th></tr></thead><tbody>';
+    logs.forEach((log,idx) => {
+      const stCls = log.status==='200 OK'?'color:var(--green)':'color:var(--red)';
+      const reqJsonStr = log.request_json ? JSON.stringify(log.request_json,null,2) : '';
+      html += '<tr id="ir-'+idx+'" style="cursor:pointer" onclick="document.getElementById(\'id-'+idx+'\').style.display=document.getElementById(\'id-'+idx+'\').style.display===\'none\'?\'block\':\'none\'">' +
+        '<td class="mono">'+escHtml(log.timestamp||'-')+'</td><td>'+escHtml(log.model||'-')+'</td>' +
+        '<td style="'+(log.stream?'color:var(--accent-2)':'color:var(--text-muted)')+'">'+(log.stream?'流式':'同步')+'</td>' +
+        '<td style="'+stCls+'">'+escHtml(log.status||'-')+'</td><td>'+((log.elapsed||'-')+'s')+'</td><td>'+(log.result_len??'-')+'</td>' +
+        '<td style="color:var(--accent-2)">📋 点击查看 (prompt '+(log.prompt_len||0)+' 字符)</td></tr>' +
+        '<tr id="id-'+idx+'" style="display:none"><td colspan="7" style="padding:0">' +
+        '<div style="background:var(--bg);border:1px solid var(--border);border-radius:var(--r-sm);margin:4px 0;padding:12px;font-family:var(--mono);font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:500px;overflow:auto;position:relative">' +
+        '<button onclick="event.stopPropagation();navigator.clipboard.writeText(this.nextElementSibling.textContent);this.textContent=\'已复制!\';setTimeout(()=>this.textContent=\'📋 复制\',1500)" style="position:sticky;top:0;float:right;background:var(--accent);color:#fff;border:none;border-radius:4px;padding:2px 8px;font-size:10px;cursor:pointer">📋 复制</button>' +
+        '<code style="display:block">'+escHtml(reqJsonStr)+'</code>' +
+        (log.error?'<div style="margin-top:8px;padding:6px;background:var(--red-soft);border-radius:4px;color:var(--red);font-size:10px">❌ '+escHtml(log.error.slice(0,300))+'</div>':'') + '</div></td></tr>';
     });
-    html += '</tbody></table>';
-    content.innerHTML = html;
-  } catch(e) {
-    document.getElementById('interceptLogContent').innerHTML = '<div class="empty" style="color:var(--red);">获取失败: ' + escHtml(e.message) + '</div>';
-  }
+    document.getElementById('interceptLogContent').innerHTML = html + '</tbody></table>';
+  } catch(e) { document.getElementById('interceptLogContent').innerHTML = '<div class="empty" style="color:var(--red)">获取失败: '+escHtml(e.message)+'</div>'; }
 }
-
 async function toggleIntercept() {
-  try {
-    const res = await fetch('/api/debug/intercept/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
-    const d = await res.json();
-    await refreshInterceptLogs();
-  } catch(e) {
-    alert('切换失败: ' + e.message);
-  }
+  try { await fetch('/api/debug/intercept/toggle', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}) }); await refreshInterceptLogs(); }
+  catch(e) { toast('切换失败: '+e.message, 'err'); }
 }
-
 async function clearInterceptLogs() {
-  if (!confirm('确认清空所有拦截日志？')) return;
-  try {
-    await fetch('/api/debug/intercept/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ clear: true }) });
-    await refreshInterceptLogs();
-  } catch(e) {
-    alert('清空失败: ' + e.message);
-  }
+  if (!await confirmModal('确认清空所有拦截日志？')) return;
+  try { await fetch('/api/debug/intercept/toggle', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({clear:true}) }); await refreshInterceptLogs(); toast('已清空', 'ok'); }
+  catch(e) { toast('清空失败: '+e.message, 'err'); }
 }
-
 async function runCleanup(dryRun) {
   const scope = document.getElementById('cleanupScope').value;
-  const el = document.getElementById('cleanupResult');
-  el.style.display = 'block';
-  el.innerHTML = '<div class="empty">执行中...</div>';
+  const el = document.getElementById('cleanupResult'); el.style.display='block'; el.innerHTML = '<div class="empty">执行中...</div>';
   try {
-    const res = await fetch('/api/system/cleanup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope, dry_run: dryRun }) });
-    const d = await res.json();
-    const prefix = dryRun ? '🧪 预览模式' : '🧹 清理完成';
-    const conv = d.conversations;
-    const tasks = d.tasks;
-    let html = '<div class="integrity-summary diag-ok">' + prefix + ' | 范围: <b>' + escHtml(scope) + '</b></div>';
-    if (conv) {
-      html += '<div style="margin-top:8px;font-size:12px;color:var(--accent);font-weight:600;">会话清理</div>';
-      if (dryRun) {
-        // 预览模式：展示可清理/归档的会话数量
-        if (conv.warm_archivable != null) html += '<div class="diag-row"><div class="diag-name">可温归档 (7天前)</div><div class="diag-val">' + escHtml(conv.warm_archivable) + ' 条</div></div>';
-        if (conv.cold_archivable != null) html += '<div class="diag-row"><div class="diag-name">可冷归档 (30天前)</div><div class="diag-val">' + escHtml(conv.cold_archivable) + ' 条</div></div>';
-        if (conv.note) html += '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">' + escHtml(conv.note) + '</div>';
-        if (conv.error) html += '<div class="diag-row diag-err">' + escHtml(conv.error) + '</div>';
-      } else {
-        if (conv.deleted != null) html += '<div class="diag-row"><div class="diag-name">已删除</div><div class="diag-val">' + escHtml(conv.deleted) + '</div></div>';
-        if (conv.archived != null) html += '<div class="diag-row"><div class="diag-name">已归档</div><div class="diag-val">' + escHtml(conv.archived) + '</div></div>';
-        if (conv.errors != null) html += '<div class="diag-row"><div class="diag-name">错误</div><div class="diag-val">' + escHtml(conv.errors) + '</div></div>';
-      }
-    }
-    if (tasks) {
-      html += '<div style="margin-top:8px;font-size:12px;color:var(--accent);font-weight:600;">任务清理</div>';
-      if (tasks.deleted != null) html += '<div class="diag-row"><div class="diag-name">已删除</div><div class="diag-val">' + escHtml(tasks.deleted) + '</div></div>';
-      if (tasks.would_delete != null) html += '<div class="diag-row"><div class="diag-name">将删除</div><div class="diag-val">' + escHtml(tasks.would_delete) + '</div></div>';
-      if (tasks.soft_deleted_count != null) html += '<div class="diag-row"><div class="diag-name">软删除数</div><div class="diag-val">' + escHtml(tasks.soft_deleted_count) + '</div></div>';
-    }
-    // fallback
-    if (!conv && !tasks) {
-      html += '<div class="diag-row"><div class="diag-name">结果</div><div class="diag-val">' + escHtml(JSON.stringify(d)) + '</div></div>';
-    }
+    const d = await (await fetch('/api/system/cleanup', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({scope, dry_run:dryRun}) })).json();
+    const prefix = dryRun?'🧪 预览模式':'🧹 清理完成';
+    let html = '<div class="integrity-summary diag-ok">'+prefix+' | 范围: <b>'+escHtml(scope)+'</b></div>';
+    if (d.conversations) { const c=d.conversations; html+='<div style="margin-top:8px;font-size:12px;color:var(--accent-2)">会话</div>';
+      if (dryRun) { if(c.warm_archivable!=null) html+='<div class="diag-row"><span class="diag-name">可温归档</span><span class="diag-val">'+c.warm_archivable+'</span></div>'; if(c.cold_archivable!=null) html+='<div class="diag-row"><span class="diag-name">可冷归档</span><span class="diag-val">'+c.cold_archivable+'</span></div>'; }
+      else { if(c.deleted!=null) html+='<div class="diag-row"><span class="diag-name">已删除</span><span class="diag-val">'+c.deleted+'</span></div>'; if(c.archived!=null) html+='<div class="diag-row"><span class="diag-name">已归档</span><span class="diag-val">'+c.archived+'</span></div>'; } }
+    if (d.tasks) { const t=d.tasks; html+='<div style="margin-top:8px;font-size:12px;color:var(--accent-2)">任务</div>';
+      if(t.deleted!=null) html+='<div class="diag-row"><span class="diag-name">已删除</span><span class="diag-val">'+t.deleted+'</span></div>'; if(t.would_delete!=null) html+='<div class="diag-row"><span class="diag-name">将删除</span><span class="diag-val">'+t.would_delete+'</span></div>'; }
+    if (!d.conversations && !d.tasks) html+='<div class="diag-row"><span class="diag-name">结果</span><span class="diag-val">'+escHtml(JSON.stringify(d))+'</span></div>';
     el.innerHTML = html;
-  } catch(e) {
-    el.innerHTML = '<div class="diag-row diag-err">错误: ' + escHtml(e.message) + '</div>';
-  }
+  } catch(e) { el.innerHTML = '<div class="diag-err">错误: '+escHtml(e.message)+'</div>'; }
 }
 async function runArchive() {
-  const el = document.getElementById('archiveResult');
-  el.style.display = 'block';
-  el.innerHTML = '<div class="empty">执行中...</div>';
+  const el = document.getElementById('archiveResult'); el.style.display='block'; el.innerHTML='<div class="empty">执行中...</div>';
   try {
-    const res = await fetch('/api/archive/cleanup', { method: 'POST' });
-    const d = await res.json();
+    const d = await (await fetch('/api/archive/cleanup', { method:'POST' })).json();
     let html = '<div class="integrity-summary diag-ok">📦 归档完成</div>';
-    for (const [k, v] of Object.entries(d)) {
-      if (typeof v === 'object' && v !== null) {
-        html += '<div style="margin-top:8px;font-size:12px;color:var(--accent);font-weight:600;">' + escHtml(k) + '</div>';
-        for (const [sk, sv] of Object.entries(v)) {
-          html += '<div class="diag-row"><div class="diag-name">' + escHtml(sk) + '</div><div class="diag-val">' + escHtml(String(sv)) + '</div></div>';
-        }
-      } else {
-        html += '<div class="diag-row"><div class="diag-name">' + escHtml(k) + '</div><div class="diag-val">' + escHtml(String(v)) + '</div></div>';
-      }
+    for (const [k,v] of Object.entries(d)) {
+      if (typeof v==='object' && v!==null) { html+='<div style="margin-top:8px;font-size:12px;color:var(--accent-2)">'+escHtml(k)+'</div>'; for (const [sk,sv] of Object.entries(v)) html+='<div class="diag-row"><span class="diag-name">'+escHtml(sk)+'</span><span class="diag-val">'+escHtml(String(sv))+'</span></div>'; }
+      else html+='<div class="diag-row"><span class="diag-name">'+escHtml(k)+'</span><span class="diag-val">'+escHtml(String(v))+'</span></div>';
     }
     el.innerHTML = html;
-  } catch(e) {
-    el.innerHTML = '<div class="diag-row diag-err">错误: ' + escHtml(e.message) + '</div>';
-  }
+  } catch(e) { el.innerHTML = '<div class="diag-err">错误: '+escHtml(e.message)+'</div>'; }
 }
-
 async function runPendingCleanup(dryRun, cascade) {
   const hours = document.getElementById('pendingCleanupHours').value;
   const typesVal = document.getElementById('pendingCleanupTypes').value;
-  const taskTypes = typesVal === 'all' ? null : [typesVal];
-  const el = document.getElementById('pendingCleanupResult');
-  el.style.display = 'block';
-  const modeLabel = dryRun ? '🔍 预览中...' : (cascade ? '⚡ 级联清理中...' : '🗑️ 清理中...');
-  el.innerHTML = '<div class="empty">' + modeLabel + '</div>';
+  const taskTypes = typesVal==='all'?null:[typesVal];
+  const el = document.getElementById('pendingCleanupResult'); el.style.display='block';
+  el.innerHTML = '<div class="empty">'+(dryRun?'🔍 预览中...':(cascade?'⚡ 级联清理中...':'🗑️ 清理中...'))+'</div>';
   try {
-    const res = await fetch('/api/tasks/cleanup-pending', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        before_hours: parseFloat(hours),
-        task_types: taskTypes,
-        dry_run: dryRun,
-        cascade: cascade
-      })
-    });
-    const d = await res.json();
-    const prefix = dryRun ? '🔍 预览结果' : '🗑️ 清理完成';
-    let html = '<div class="integrity-summary diag-ok">' + prefix + ' | 时间范围: <b>' + escHtml(hours) + 'h前</b> | 类型: <b>' + escHtml(typesVal) + '</b></div>';
-    html += '<div class="diag-row"><div class="diag-name">已取消</div><div class="diag-val">' + escHtml(d.cancelled) + ' 个任务</div></div>';
-    if (d.by_type && Object.keys(d.by_type).length > 0) {
-      html += '<div style="margin-top:8px;font-size:12px;color:var(--accent);font-weight:600;">按类型</div>';
-      for (const [k, v] of Object.entries(d.by_type)) {
-        html += '<div class="diag-row"><div class="diag-name">' + escHtml(k) + '</div><div class="diag-val">' + escHtml(v) + '</div></div>';
-      }
-    }
-    if (d.cascade) {
-      const c = d.cascade;
-      html += '<div style="margin-top:8px;font-size:12px;color:var(--yellow);font-weight:600;">级联清理</div>';
-      html += '<div class="diag-row"><div class="diag-name">失败对话</div><div class="diag-val">' + escHtml(c.failed_conversations) + ' 个</div></div>';
-      html += '<div class="diag-row"><div class="diag-name">取消 finalize</div><div class="diag-val">' + escHtml(c.cancelled_finalize_tasks) + ' 个</div></div>';
-    }
-    if (d.cancelled === 0 && (!d.cascade || d.cascade.cancelled_finalize_tasks === 0)) {
-      html += '<div class="diag-row" style="color:var(--text-muted);">没有找到符合条件的 pending 任务</div>';
-    }
-    el.innerHTML = html;
-    refreshTasks();
-    refreshTaskOps();
-  } catch(e) {
-    el.innerHTML = '<div class="diag-row diag-err">错误: ' + escHtml(e.message) + '</div>';
-  }
+    const d = await (await fetch('/api/tasks/cleanup-pending', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({before_hours:parseFloat(hours), task_types:taskTypes, dry_run:dryRun, cascade}) })).json();
+    let html = '<div class="integrity-summary diag-ok">'+(dryRun?'🔍 预览结果':'🗑️ 清理完成')+' | '+escHtml(hours)+'h前 | '+escHtml(typesVal)+'</div>';
+    html += '<div class="diag-row"><span class="diag-name">已取消</span><span class="diag-val">'+escHtml(d.cancelled)+' 个</span></div>';
+    if (d.by_type) { html+='<div style="margin-top:8px;font-size:12px;color:var(--accent-2)">按类型</div>'; for (const [k,v] of Object.entries(d.by_type)) html+='<div class="diag-row"><span class="diag-name">'+escHtml(k)+'</span><span class="diag-val">'+escHtml(v)+'</span></div>'; }
+    if (d.cascade) { const c=d.cascade; html+='<div style="margin-top:8px;font-size:12px;color:var(--yellow)">级联</div><div class="diag-row"><span class="diag-name">失败对话</span><span class="diag-val">'+escHtml(c.failed_conversations)+'</span></div><div class="diag-row"><span class="diag-name">取消 finalize</span><span class="diag-val">'+escHtml(c.cancelled_finalize_tasks)+'</span></div>'; }
+    el.innerHTML = html; refreshTaskOps();
+  } catch(e) { el.innerHTML = '<div class="diag-err">错误: '+escHtml(e.message)+'</div>'; }
 }
-
 async function refreshPendingStats() {
-  const el = document.getElementById('pendingStatsResult');
-  el.style.display = 'block';
-  el.innerHTML = '<div class="empty">统计中...</div>';
+  const el = document.getElementById('pendingStatsResult'); el.style.display='block'; el.innerHTML='<div class="empty">统计中...</div>';
   try {
-    const res = await fetch('/api/tasks/stats');
-    const stats = await res.json();
-    const listRes = await fetch('/api/tasks/list?limit=200');
-    const tasks = await listRes.json();
-    const pending = tasks.filter(t => t.status === 'pending' || t.status === 'queued');
-
-    // 按类型分组
-    const byType = {};
-    const byAge = {'<1h': 0, '1-6h': 0, '6-24h': 0, '>24h': 0};
-    const now = Date.now();
-    for (const t of pending) {
-      const tt = t.task_type || 'unknown';
-      byType[tt] = (byType[tt] || 0) + 1;
-      if (t.created_at) {
-        const age = (now - new Date(t.created_at).getTime()) / 3600000;
-        if (age < 1) byAge['<1h']++;
-        else if (age < 6) byAge['1-6h']++;
-        else if (age < 24) byAge['6-24h']++;
-        else byAge['>24h']++;
-      }
-    }
-
-    let html = '<div class="integrity-summary diag-ok">Pending/Queued: <b>' + pending.length + '</b> 个 | 运行中: <b>' + (stats.running_tasks || 0) + '</b> 个</div>';
-    html += '<div style="margin-top:8px;font-size:12px;color:var(--accent);font-weight:600;">按类型</div>';
-    if (Object.keys(byType).length === 0) {
-      html += '<div class="diag-row" style="color:var(--text-muted);">无 pending 任务</div>';
-    } else {
-      for (const [k, v] of Object.entries(byType)) {
-        html += '<div class="diag-row"><div class="diag-name">' + escHtml(k) + '</div><div class="diag-val">' + escHtml(v) + ' 个</div></div>';
-      }
-    }
-    html += '<div style="margin-top:8px;font-size:12px;color:var(--accent);font-weight:600;">按时长</div>';
-    for (const [k, v] of Object.entries(byAge)) {
-      html += '<div class="diag-row"><div class="diag-name">' + k + '</div><div class="diag-val">' + escHtml(v) + ' 个</div></div>';
-    }
+    const stats = await (await fetch('/api/tasks/stats')).json();
+    const tasks = await (await fetch('/api/tasks/list?limit=200')).json();
+    const pending = tasks.filter(t => t.status==='pending' || t.status==='queued');
+    const byType = {}; const byAge = {'<1h':0,'1-6h':0,'6-24h':0,'>24h':0}; const now = Date.now();
+    for (const t of pending) { const tt=t.task_type||'unknown'; byType[tt]=(byType[tt]||0)+1; if(t.created_at){ const age=(now-new Date(t.created_at).getTime())/3600000; if(age<1)byAge['<1h']++; else if(age<6)byAge['1-6h']++; else if(age<24)byAge['6-24h']++; else byAge['>24h']++; } }
+    let html = '<div class="integrity-summary diag-ok">Pending/Queued: <b>'+pending.length+'</b> | 运行中: <b>'+(stats.running_tasks||0)+'</b></div>';
+    html += '<div style="margin-top:8px;font-size:12px;color:var(--accent-2)">按类型</div>' + (Object.keys(byType).length?Object.entries(byType).map(([k,v])=>'<div class="diag-row"><span class="diag-name">'+escHtml(k)+'</span><span class="diag-val">'+v+'</span></div>').join(''):'<div class="diag-row" style="color:var(--text-muted)">无 pending</div>');
+    html += '<div style="margin-top:8px;font-size:12px;color:var(--accent-2)">按时长</div>' + Object.entries(byAge).map(([k,v])=>'<div class="diag-row"><span class="diag-name">'+k+'</span><span class="diag-val">'+v+'</span></div>').join('');
     el.innerHTML = html;
-  } catch(e) {
-    el.innerHTML = '<div class="diag-row diag-err">错误: ' + escHtml(e.message) + '</div>';
-  }
+  } catch(e) { el.innerHTML = '<div class="diag-err">错误: '+escHtml(e.message)+'</div>'; }
 }
 
-async function refreshAll() {
-  document.getElementById('lastUpdate').textContent = '刷新中...';
-  await Promise.all([
-    refreshSystemStatus(),
-    refreshTasks(),
-    refreshTaskOps(),
-    refreshDiagnostics(),
-    refreshHandlers(),
-    refreshMemory(),
-    refreshCallbacks(),
-    refreshHealth(),
-    refreshTrends(),
-  ]);
-  // 拦截器只在运维页刷新，不全局刷新
-  document.getElementById('lastUpdate').textContent = '最后更新: ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
-}
-
-refreshAll();
-setInterval(refreshAll, 30000);
-
-// ════════════════════════════════════════════════
-// 报告 Tab 页 (v8.5.8 — 统一入口 + 优化时间选择器)
-// ════════════════════════════════════════════════
-
-// 计算某日期所在 ISO 周范围
+/* ── Reports ── */
 function getWeekRange(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
-  const day = d.getDay() || 7; // 周日=7
-  const monday = new Date(d);
-  monday.setDate(d.getDate() - day + 1);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  const fmt = dt => dt.toISOString().slice(0, 10);
-  // 计算第几周（ISO 标准）
-  const jan1 = new Date(monday.getFullYear(), 0, 1);
-  const weekNum = Math.ceil(((monday - jan1) / 86400000 + jan1.getDay() + 1) / 7);
-  const monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
-  const startMonth = monthNames[monday.getMonth()];
-  const endMonth = monthNames[sunday.getMonth()];
-  const rangeLabel = (startMonth === endMonth)
-    ? startMonth + '第' + weekNum + '周 (' + fmt(monday) + ' ~ ' + fmt(sunday) + ')'
-    : startMonth + '-' + endMonth + ' 第' + weekNum + '周 (' + fmt(monday) + ' ~ ' + fmt(sunday) + ')';
-  return { start: fmt(monday), end: fmt(sunday), label: rangeLabel, weekNum: weekNum };
+  const day = d.getDay() || 7;
+  const monday = new Date(d); monday.setDate(d.getDate() - day + 1);
+  const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+  const fmt = dt => dt.toISOString().slice(0,10);
+  const jan1 = new Date(monday.getFullYear(),0,1);
+  const weekNum = Math.ceil(((monday - jan1)/86400000 + jan1.getDay() + 1)/7);
+  const m = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+  const sM = m[monday.getMonth()], eM = m[sunday.getMonth()];
+  const label = (sM===eM)? sM+'第'+weekNum+'周 ('+fmt(monday)+' ~ '+fmt(sunday)+')' : sM+'-'+eM+' 第'+weekNum+'周 ('+fmt(monday)+' ~ '+fmt(sunday)+')';
+  return { start: fmt(monday), end: fmt(sunday), label, weekNum };
 }
-
-// 初始化年份下拉框
 function initYearPicker() {
-  const sel = document.getElementById('reportTargetYear');
-  const now = new Date().getFullYear();
-  sel.innerHTML = '';
-  for (let y = now; y >= now - 5; y--) {
-    sel.innerHTML += '<option value="' + y + '"' + (y === now ? ' selected' : '') + '>' + y + ' 年</option>';
-  }
+  const sel = document.getElementById('reportTargetYear'); const now = new Date().getFullYear(); sel.innerHTML='';
+  for (let y=now; y>=now-5; y--) sel.innerHTML += '<option value="'+y+'"'+(y===now?' selected':'')+'>'+y+' 年</option>';
 }
-
-// 初始化周下拉框（最近2年的所有 ISO 周）
 function initWeekPicker() {
-  const sel = document.getElementById('reportTargetWeek');
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentWeekMonday = getWeekRange(now.toISOString().slice(0, 10)).start;
-  sel.innerHTML = '';
-
-  // 生成最近2年的所有周（从去年到今年）
-  for (let y = currentYear - 1; y <= currentYear; y++) {
-    // 找到该年的第一个周一
-    const jan1 = new Date(y, 0, 1);
-    const jan1Day = jan1.getDay() || 7;
-    const firstMonday = new Date(jan1);
-    firstMonday.setDate(jan1.getDate() - jan1Day + 1);
-    if (firstMonday.getFullYear() < y) firstMonday.setDate(firstMonday.getDate() + 7);
-
-    // 生成该年所有周（最多53周）
-    const yearEnd = new Date(y, 11, 31);
-    let weekMonday = new Date(firstMonday);
-    while (weekMonday <= yearEnd) {
-      const weekSunday = new Date(weekMonday);
-      weekSunday.setDate(weekMonday.getDate() + 6);
-      const fmt = dt => dt.toISOString().slice(0, 10);
-      const weekStart = fmt(weekMonday);
-
-      // 计算ISO周号
-      const jan1OfYear = new Date(y, 0, 1);
-      const weekNum = Math.ceil(((weekMonday - jan1OfYear) / 86400000 + jan1OfYear.getDay() + 1) / 7);
-
-      const label = y + '年第' + weekNum + '周 (' + weekStart + ' ~ ' + fmt(weekSunday) + ')';
-      const selected = (weekStart === currentWeekMonday) ? ' selected' : '';
-      sel.innerHTML += '<option value="' + weekStart + '"' + selected + '>' + label + '</option>';
-
-      weekMonday.setDate(weekMonday.getDate() + 7);
+  const sel = document.getElementById('reportTargetWeek'); const now = new Date();
+  const curYear = now.getFullYear(); const curMonday = getWeekRange(now.toISOString().slice(0,10)).start; sel.innerHTML='';
+  const fmt = dt => dt.toISOString().slice(0,10);
+  for (let y=curYear-1; y<=curYear; y++) {
+    const jan1 = new Date(y,0,1); const jan1Day = jan1.getDay()||7; const first = new Date(jan1); first.setDate(jan1.getDate()-jan1Day+1); if(first.getFullYear()<y) first.setDate(first.getDate()+7);
+    const yearEnd = new Date(y,11,31); let wm = new Date(first);
+    while (wm <= yearEnd) {
+      const ws = fmt(wm); const jan = new Date(y,0,1); const wn = Math.ceil(((wm - jan)/86400000 + jan.getDay() + 1)/7);
+      const label = y+'年第'+wn+'周 ('+ws+' ~ '+fmt(new Date(wm.getFullYear(),wm.getMonth(),wm.getDate()+6))+')';
+      sel.innerHTML += '<option value="'+ws+'"'+(ws===curMonday?' selected':'')+'>'+label+'</option>';
+      wm.setDate(wm.getDate()+7);
     }
   }
 }
-
-// 初始化月下拉框（最近2年的所有月）
 function initMonthPicker() {
-  const sel = document.getElementById('reportTargetMonth');
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentMonth = now.getMonth(); // 0-11
-  sel.innerHTML = '';
-
-  for (let y = currentYear - 1; y <= currentYear; y++) {
-    for (let m = 0; m < 12; m++) {
-      const value = y + '-' + String(m + 1).padStart(2, '0') + '-01';
-      const label = y + '年' + (m + 1) + '月';
-      const selected = (y === currentYear && m === currentMonth) ? ' selected' : '';
-      sel.innerHTML += '<option value="' + value + '"' + selected + '>' + label + '</option>';
-    }
+  const sel = document.getElementById('reportTargetMonth'); const now=new Date(); const cy=now.getFullYear(), cm=now.getMonth(); sel.innerHTML='';
+  for (let y=cy-1; y<=cy; y++) for (let mo=0; mo<12; mo++) {
+    const v = y+'-'+String(mo+1).padStart(2,'0')+'-01';
+    sel.innerHTML += '<option value="'+v+'"'+(y===cy&&mo===cm?' selected':'')+'>'+y+'年'+(mo+1)+'月</option>';
   }
 }
-
 function onReportTypeChange() {
   const type = document.getElementById('reportType').value;
-  const dailyPicker = document.getElementById('reportDailyPicker');
-  const weeklyPicker = document.getElementById('reportWeeklyPicker');
-  const monthlyPicker = document.getElementById('reportMonthlyPicker');
-  const yearPicker = document.getElementById('reportYearPicker');
-
-  // 全部隐藏
-  dailyPicker.style.display = 'none';
-  weeklyPicker.style.display = 'none';
-  monthlyPicker.style.display = 'none';
-  yearPicker.style.display = 'none';
-
-  if (type === 'daily') {
-    dailyPicker.style.display = 'flex';
-    if (!document.getElementById('reportTargetDate').value) {
-      document.getElementById('reportTargetDate').value = new Date().toISOString().slice(0, 10);
-    }
-  } else if (type === 'weekly') {
-    weeklyPicker.style.display = 'flex';
-    initWeekPicker();
-  } else if (type === 'monthly') {
-    monthlyPicker.style.display = 'flex';
-    initMonthPicker();
-  } else if (type === 'annual') {
-    yearPicker.style.display = 'flex';
-    initYearPicker();
-  }
+  document.getElementById('reportDailyPicker').style.display = type==='daily'?'flex':'none';
+  document.getElementById('reportWeeklyPicker').style.display = type==='weekly'?'flex':'none';
+  document.getElementById('reportMonthlyPicker').style.display = type==='monthly'?'flex':'none';
+  document.getElementById('reportYearPicker').style.display = type==='annual'?'flex':'none';
+  if (type==='weekly') initWeekPicker();
+  if (type==='monthly') initMonthPicker();
+  if (type==='annual') initYearPicker();
+  if (type==='daily' && !document.getElementById('reportTargetDate').value) document.getElementById('reportTargetDate').value = new Date().toISOString().slice(0,10);
   onReportDateChange();
 }
-
 function onReportDateChange() {
-  const type = document.getElementById('reportType').value;
-  const info = document.getElementById('reportPeriodInfo');
-
-  if (type === 'annual') {
-    const y = document.getElementById('reportTargetYear').value || new Date().getFullYear();
-    info.textContent = '📅 ' + y + ' 年';
-  } else if (type === 'daily') {
-    const d = document.getElementById('reportTargetDate').value || new Date().toISOString().slice(0, 10);
-    info.textContent = '📅 ' + d;
-  } else if (type === 'weekly') {
-    const sel = document.getElementById('reportTargetWeek');
-    const opt = sel.options[sel.selectedIndex];
-    info.textContent = '📅 ' + (opt ? opt.text : '--');
-  } else if (type === 'monthly') {
-    const sel = document.getElementById('reportTargetMonth');
-    const opt = sel.options[sel.selectedIndex];
-    info.textContent = '📅 ' + (opt ? opt.text : '--');
-  }
+  const type = document.getElementById('reportType').value; const info = document.getElementById('reportPeriodInfo');
+  if (type==='annual') info.textContent = '📅 ' + (document.getElementById('reportTargetYear').value||new Date().getFullYear()) + ' 年';
+  else if (type==='daily') info.textContent = '📅 ' + (document.getElementById('reportTargetDate').value||new Date().toISOString().slice(0,10));
+  else if (type==='weekly') { const o=document.getElementById('reportTargetWeek').selectedOptions[0]; info.textContent='📅 '+(o?o.text:'--'); }
+  else if (type==='monthly') { const o=document.getElementById('reportTargetMonth').selectedOptions[0]; info.textContent='📅 '+(o?o.text:'--'); }
 }
-
-async function refreshReportsPage() {
-  onReportTypeChange();
-  await loadReportList();
-}
-
+async function refreshReportsPage() { onReportTypeChange(); await loadReportList(); }
 async function loadReportList() {
   try {
     const d = await fetchJSON('/api/reports/list');
@@ -1852,283 +1446,155 @@ async function loadReportList() {
     document.getElementById('weeklyCount').textContent = d.totals.weekly;
     document.getElementById('monthlyCount').textContent = d.totals.monthly;
     document.getElementById('annualCount').textContent = d.totals.annual;
-
-    const renderList = (items, type) => {
-      if (!items || items.length === 0) return '<div class="empty">暂无报告</div>';
-      return items.slice(0, 20).map(it => {
-        const sizeKB = (it.size / 1024).toFixed(1);
-        return '<div class="diag-row" style="cursor:pointer;" onclick="previewReport(\'' + type + '\',\'' + escHtml(it.name) + '\')" title="点击查看">'
-          + '<div class="diag-name">' + escHtml(it.name) + '</div>'
-          + '<div class="diag-val" style="font-size:10px;color:var(--text-muted);">' + sizeKB + ' KB | ' + (it.modified || '').slice(0,10) + '</div>'
-          + '</div>';
+    const render = (items, type) => {
+      if (!items || !items.length) return '<div class="empty">暂无报告</div>';
+      return items.slice(0,20).map(it => {
+        const kb = (it.size/1024).toFixed(1);
+        return '<div class="diag-row" style="cursor:pointer" onclick="previewReport(\''+type+'\',\''+escHtml(it.name)+'\')" title="点击查看">' +
+          '<span class="diag-name">'+escHtml(it.name)+'</span><span class="diag-val" style="font-size:10px">'+kb+' KB | '+(it.modified||'').slice(0,10)+'</span></div>';
       }).join('');
     };
-
-    document.getElementById('dailyList').innerHTML = renderList(d.daily, 'daily');
-    document.getElementById('weeklyList').innerHTML = renderList(d.weekly, 'weekly');
-    document.getElementById('monthlyList').innerHTML = renderList(d.monthly, 'monthly');
-    document.getElementById('annualList').innerHTML = renderList(d.annual, 'annual');
+    document.getElementById('dailyList').innerHTML = render(d.daily,'daily');
+    document.getElementById('weeklyList').innerHTML = render(d.weekly,'weekly');
+    document.getElementById('monthlyList').innerHTML = render(d.monthly,'monthly');
+    document.getElementById('annualList').innerHTML = render(d.annual,'annual');
   } catch(e) {
-    ['dailyList','weeklyList','monthlyList','annualList'].forEach(id => {
-      document.getElementById(id).innerHTML = '<div class="empty" style="color:var(--red);">加载失败: ' + escHtml(e.message) + '</div>';
-    });
+    ['dailyList','weeklyList','monthlyList','annualList'].forEach(id => document.getElementById(id).innerHTML = '<div class="empty" style="color:var(--red)">加载失败: '+escHtml(e.message)+'</div>');
   }
 }
-
 async function previewReport(type, name) {
   document.getElementById('reportPreviewTitle').textContent = '加载中...';
   document.getElementById('reportPreviewContent').innerHTML = '<div class="empty">加载中...</div>';
   try {
-    const d = await fetchJSON('/api/reports/read?type=' + type + '&name=' + encodeURIComponent(name));
+    const d = await fetchJSON('/api/reports/read?type='+type+'&name='+encodeURIComponent(name));
     if (d.success) {
       document.getElementById('reportPreviewTitle').textContent = name + ' (' + type + ')';
-      let html = escHtml(d.content)
-        .replace(/^# (.+)$/gm, '<h3 style="margin:16px 0 8px;font-size:16px;">$1</h3>')
-        .replace(/^## (.+)$/gm, '<h4 style="margin:12px 0 6px;font-size:14px;">$1</h4>')
-        .replace(/^### (.+)$/gm, '<h5 style="margin:10px 0 4px;font-size:13px;">$1</h5>')
-        .replace(/^- (.+)$/gm, '<li style="margin-left:16px;">$1</li>')
+      // 安全渲染：先转义，再格式化 markdown 片段（防 XSS）
+      const html = escHtml(d.content)
+        .replace(/^# (.+)$/gm, '<h3 style="margin:16px 0 8px">$1</h3>')
+        .replace(/^## (.+)$/gm, '<h4 style="margin:12px 0 6px">$1</h4>')
+        .replace(/^### (.+)$/gm, '<h5 style="margin:10px 0 4px">$1</h5>')
+        .replace(/^- (.+)$/gm, '<li style="margin-left:16px">$1</li>')
         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\n\n/g, '<br/><br/>')
-        .replace(/\n/g, '<br/>');
+        .replace(/\n\n/g, '<br><br>').replace(/\n/g, '<br>');
       document.getElementById('reportPreviewContent').innerHTML = html;
-    } else {
-      document.getElementById('reportPreviewContent').innerHTML = '<div class="empty" style="color:var(--red);">' + escHtml(d.error) + '</div>';
-    }
-  } catch(e) {
-    document.getElementById('reportPreviewContent').innerHTML = '<div class="empty" style="color:var(--red);">加载失败: ' + escHtml(e.message) + '</div>';
-  }
+    } else document.getElementById('reportPreviewContent').innerHTML = '<div class="empty" style="color:var(--red)">'+escHtml(d.error)+'</div>';
+  } catch(e) { document.getElementById('reportPreviewContent').innerHTML = '<div class="empty" style="color:var(--red)">加载失败: '+escHtml(e.message)+'</div>'; }
 }
-
-// 统一生成入口：日/周/月/年 使用同一个 generate_report 逻辑
 async function generateReport() {
   const type = document.getElementById('reportType').value;
   const forceOverwrite = document.getElementById('reportForceOverwrite').checked;
-  const resultDiv = document.getElementById('reportGenResult');
-  const statusBadge = document.getElementById('reportGenStatus');
-
-  resultDiv.style.display = 'block';
-  resultDiv.textContent = '⏳ 正在生成 ' + type + ' 报告...';
-  statusBadge.textContent = '生成中...';
-
+  const resultDiv = document.getElementById('reportGenResult'); const statusBadge = document.getElementById('reportGenStatus');
+  resultDiv.style.display='block'; resultDiv.textContent = '⏳ 正在生成 ' + type + ' 报告...'; statusBadge.textContent = '生成中...';
   try {
-    let url = '/api/reports/generate';
-    let body = { type: type, force_overwrite: forceOverwrite };
-
-    if (type === 'annual') {
-      body.target_date = (document.getElementById('reportTargetYear').value || new Date().getFullYear()) + '-06-15';
-    } else if (type === 'daily') {
-      body.target_date = document.getElementById('reportTargetDate').value;
-    } else if (type === 'weekly') {
-      body.target_date = document.getElementById('reportTargetWeek').value;
-    } else if (type === 'monthly') {
-      body.target_date = document.getElementById('reportTargetMonth').value;
-    }
-
-    if (type === 'daily') {
-      url = '/api/reports/generate-daily';
-      body = { date: body.target_date || new Date().toISOString().slice(0,10), force_overwrite: forceOverwrite };
-    }
-
-    const d = await fetchJSON(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-
+    let url = '/api/reports/generate', body = { type, force_overwrite: forceOverwrite };
+    if (type==='annual') body.target_date = (document.getElementById('reportTargetYear').value||new Date().getFullYear())+'-06-15';
+    else if (type==='daily') body.target_date = document.getElementById('reportTargetDate').value;
+    else if (type==='weekly') body.target_date = document.getElementById('reportTargetWeek').value;
+    else if (type==='monthly') body.target_date = document.getElementById('reportTargetMonth').value;
+    if (type==='daily') { url='/api/reports/generate-daily'; body = { date: body.target_date||new Date().toISOString().slice(0,10), force_overwrite: forceOverwrite }; }
+    const d = await fetchJSON(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     if (d.success) {
-      const methodLabel = { llm: 'LLM 生成', pending: '已暂存（待清算）', skipped: '已跳过', none: '无数据', rules_fallback: '规则兜底', data_only: '仅返回原始数据', error: '生成失败' };
-      const method = methodLabel[d.method] || d.method;
-      resultDiv.style.color = (d.method === 'skipped' || d.method === 'rules_fallback' || d.method === 'data_only') ? 'var(--yellow)' : 'var(--green)';
-      resultDiv.textContent = '✅ ' + method + (d.file_path ? ' | 文件: ' + d.file_path.split('/').pop() : '') + (d.note ? ' | ' + d.note : '');
-      statusBadge.textContent = '已完成';
-      setTimeout(loadReportList, 1000);
-    } else {
-      resultDiv.style.color = 'var(--red)';
-      resultDiv.textContent = '❌ 生成失败: ' + (d.error || '未知错误');
-      statusBadge.textContent = '失败';
-    }
-  } catch(e) {
-    resultDiv.style.color = 'var(--red)';
-    resultDiv.textContent = '❌ 请求失败: ' + e.message;
-    statusBadge.textContent = '失败';
-  }
+      const map = { llm:'LLM 生成', pending:'已暂存（待清算）', skipped:'已跳过', none:'无数据', rules_fallback:'规则兜底', data_only:'仅返回原始数据', error:'生成失败' };
+      const method = map[d.method]||d.method;
+      resultDiv.style.color = (d.method==='skipped'||d.method==='rules_fallback'||d.method==='data_only')?'var(--yellow)':'var(--green)';
+      resultDiv.textContent = '✅ ' + method + (d.file_path?' | '+d.file_path.split('/').pop():'') + (d.note?' | '+d.note:'');
+      statusBadge.textContent = '已完成'; setTimeout(loadReportList, 1000);
+    } else { resultDiv.style.color='var(--red)'; resultDiv.textContent='❌ 生成失败: '+(d.error||'未知错误'); statusBadge.textContent='失败'; }
+  } catch(e) { resultDiv.style.color='var(--red)'; resultDiv.textContent='❌ 请求失败: '+e.message; statusBadge.textContent='失败'; }
 }
 
-// ── Suggestions page (growth_analysis 审核) ──
-async function refreshSuggestionsPage() {
-  await Promise.all([refreshSgStats(), refreshSgList()]);
-}
-
+/* ── Suggestions ── */
+async function refreshSuggestionsPage() { await Promise.all([refreshSgStats(), refreshSgList()]); }
 async function refreshSgStats() {
   try {
-    // 获取各状态计数
     const [pending, approved, rejected] = await Promise.all([
       fetchJSON('/api/growth/list?status=pending&limit=999'),
       fetchJSON('/api/growth/list?status=approved&limit=999'),
-      fetchJSON('/api/growth/list?status=rejected&limit=999'),
-    ]);
+      fetchJSON('/api/growth/list?status=rejected&limit=999') ]);
     document.getElementById('sgPending').textContent = pending.total ?? 0;
     document.getElementById('sgApproved').textContent = approved.total ?? 0;
     document.getElementById('sgRejected').textContent = rejected.total ?? 0;
-    // applied 从 approved 中统计
-    const appliedCount = (approved.items || []).filter(i => i.applied_at).length;
-    document.getElementById('sgApplied').textContent = appliedCount;
+    document.getElementById('sgApplied').textContent = (approved.items||[]).filter(i=>i.applied_at).length;
   } catch(e) { /* silent */ }
 }
-
 async function refreshSgList() {
   const status = document.getElementById('sgStatusFilter').value;
   const typeFilter = document.getElementById('sgTypeFilter').value;
   try {
-    const statusParam = status === 'all' ? '' : status;
-    const d = await fetchJSON('/api/growth/list?status=' + (statusParam || 'pending') + '&limit=200');
-    let items = d.items || [];
-    document.getElementById('sgTotal').textContent = items.length;
-
-    // 客户端类型筛选
-    if (typeFilter) {
-      items = items.filter(i => i.analysis_type === typeFilter);
-    }
-
-    if (!items.length) {
-      document.getElementById('sgList').innerHTML = '<div class="empty">暂无优化建议</div>';
-      return;
-    }
-
-    const typeLabels = {
-      prompt_optimize: 'Prompt 优化',
-      analysis_add: '新增分析',
-      knowledge_gap: '知识缺口',
-      user_profile_enhance: '用户画像增强',
-      skill_planning: '技能规划',
-      tech_trend: '技术趋势',
-      growth_path: '成长路径',
-      learning_advice: '学习建议',
-      data_quality: '数据质量',
-    };
-
-    const priorityLabels = { high: '🔴 高', medium: '🟡 中', low: '🟢 低' };
-
+    const d = await fetchJSON('/api/growth/list?status=' + (status==='all'?'pending':status) + '&limit=200');
+    let items = d.items || []; document.getElementById('sgTotal').textContent = items.length;
+    if (typeFilter) items = items.filter(i=>i.analysis_type===typeFilter);
+    if (!items.length) { document.getElementById('sgList').innerHTML = '<div class="empty">暂无优化建议</div>'; return; }
+    const tl = { prompt_optimize:'Prompt 优化', analysis_add:'新增分析', knowledge_gap:'知识缺口', user_profile_enhance:'用户画像增强', skill_planning:'技能规划', tech_trend:'技术趋势', growth_path:'成长路径', learning_advice:'学习建议', data_quality:'数据质量' };
+    const pl = { high:'🔴 高', medium:'🟡 中', low:'🟢 低' };
     document.getElementById('sgList').innerHTML = items.map(item => {
-      const typeLabel = typeLabels[item.analysis_type] || item.analysis_type;
-      const priorityLabel = priorityLabels[item.priority] || item.priority;
-      const isPending = item.status === 'pending';
-      const isApproved = item.status === 'approved';
-      const statusClass = item.status;
-
-      let actionsHtml = '';
-      if (isPending) {
-        actionsHtml = `
-          <button class="approve" onclick="reviewSuggestion(${item.id},'approved')">同意</button>
-          <button class="reject" onclick="showRejectFeedback(${item.id})">拒绝</button>`;
-      } else if (isApproved && !item.applied_at) {
-        actionsHtml = `<button class="apply" onclick="applySuggestion(${item.id})">标记已应用</button>`;
-      }
-
-      const feedbackHtml = isPending ? `
-        <div class="sg-feedback-area" id="sgFeedback${item.id}">
-          <textarea id="sgComment${item.id}" placeholder="审核意见（可选）..."></textarea>
-          <div class="btn-row">
-            <button class="btn" onclick="cancelFeedback(${item.id})">取消</button>
-            <button class="btn primary" onclick="confirmReject(${item.id})">确认拒绝</button>
-          </div>
-        </div>` : '';
-
-      const reviewInfo = item.reviewed_at ? `
-        <span>审核人: ${escHtml(item.reviewer || '-')}</span>
-        <span>时间: ${item.reviewed_at.slice(0,16).replace('T',' ')}</span>
-        ${item.review_comment ? `<span style="color:var(--yellow);">意见: ${escHtml(item.review_comment)}</span>` : ''}` : '';
-
-      return `
-        <div class="sg-card ${statusClass}">
-          <div class="sg-card-header">
-            <span class="sg-card-title">${escHtml(item.title || '未命名建议')}</span>
-            <div class="sg-card-meta">
-              <span class="tag ${statusClass === 'pending' ? 'pending' : (statusClass === 'approved' ? 'completed' : 'failed')}">${statusClass === 'pending' ? '待审核' : (statusClass === 'approved' ? '已通过' : '已拒绝')}</span>
-              <span class="tag" style="background:rgba(99,102,241,0.1);color:var(--accent);">${typeLabel}</span>
-              <span style="font-size:11px;">${priorityLabel}</span>
-            </div>
-          </div>
-          <div class="sg-card-desc">${escHtml(item.description || '')}</div>
-          ${item.suggestion ? `<div class="sg-card-suggestion">💡 ${escHtml(item.suggestion)}</div>` : ''}
-          <div class="sg-card-footer">
-            <div>
-              <span>来源: ${item.source_period || '-'}</span>
-              <span style="margin-left:12px;">${item.timestamp ? item.timestamp.slice(0,16).replace('T',' ') : '-'}</span>
-              ${reviewInfo}
-            </div>
-            <div class="sg-card-actions">${actionsHtml}</div>
-          </div>
-          ${feedbackHtml}
-        </div>`;
+      const isPending = item.status==='pending', isApproved = item.status==='approved';
+      let actions = '';
+      if (isPending) actions = '<button class="btn sm primary" onclick="reviewSuggestion('+item.id+',\'approved\')">同意</button><button class="btn sm danger" onclick="showRejectFeedback('+item.id+')">拒绝</button>';
+      else if (isApproved && !item.applied_at) actions = '<button class="btn sm" onclick="applySuggestion('+item.id+')">标记已应用</button>';
+      const feedback = isPending ? '<div class="sg-feedback-area" id="sgFeedback'+item.id+'" style="display:none"><textarea id="sgComment'+item.id+'" placeholder="审核意见（可选）..."></textarea><div class="btn-row"><button class="btn sm ghost" onclick="cancelFeedback('+item.id+')">取消</button><button class="btn sm primary" onclick="confirmReject('+item.id+')">确认拒绝</button></div></div>' : '';
+      const review = item.reviewed_at ? '<span>审核人: '+escHtml(item.reviewer||'-')+'</span><span style="margin-left:10px">'+item.reviewed_at.slice(0,16).replace('T',' ')+'</span>'+(item.review_comment?'<span style="color:var(--yellow);margin-left:10px">'+escHtml(item.review_comment)+'</span>':'') : '';
+      const cls = item.status;
+      return '<div class="sg-card '+cls+'"><div class="sg-card-header"><span class="sg-card-title">'+escHtml(item.title||'未命名建议')+'</span>' +
+        '<div class="sg-card-meta"><span class="tag '+(cls==='pending'?'pending':(cls==='approved'?'completed':'failed'))+'">'+(cls==='pending'?'待审核':(cls==='approved'?'已通过':'已拒绝'))+'</span>' +
+        '<span class="tag" style="background:var(--accent-soft);color:var(--accent-2)">'+(tl[item.analysis_type]||item.analysis_type)+'</span><span style="font-size:11px">'+((pl[item.priority]||item.priority))+'</span></div></div>' +
+        '<div class="sg-card-desc">'+escHtml(item.description||'')+'</div>' +
+        (item.suggestion?'<div class="sg-card-suggestion">💡 '+escHtml(item.suggestion)+'</div>':'') +
+        '<div class="sg-card-footer"><div><span>来源: '+(item.source_period||'-')+'</span><span style="margin-left:12px">'+(item.timestamp?item.timestamp.slice(0,16).replace('T',' '):'-')+'</span>'+review+'</div><div class="sg-card-actions">'+actions+'</div></div>' + feedback + '</div>';
     }).join('');
-  } catch(e) {
-    document.getElementById('sgList').innerHTML = '<div class="empty" style="color:var(--red);">加载失败: ' + e.message + '</div>';
-  }
+  } catch(e) { document.getElementById('sgList').innerHTML = '<div class="empty" style="color:var(--red)">加载失败: '+escHtml(e.message)+'</div>'; }
 }
-
 async function reviewSuggestion(id, action) {
-  try {
-    const d = await fetchJSON('/api/growth/review', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, action, reviewer: 'admin', comment: '' }),
-    });
-    if (d.success) {
-      refreshSuggestionsPage();
-    } else {
-      alert('操作失败: ' + (d.error || '未知错误'));
-    }
-  } catch(e) {
-    alert('请求失败: ' + e.message);
-  }
+  try { const d = await fetchJSON('/api/growth/review', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id, action, reviewer:'admin', comment:''}) });
+    if (d.success) refreshSuggestionsPage(); else toast('操作失败: '+(d.error||'未知错误'),'warn'); }
+  catch(e) { toast('请求失败: '+e.message,'err'); }
 }
-
-function showRejectFeedback(id) {
-  const area = document.getElementById('sgFeedback' + id);
-  if (area) area.style.display = 'block';
-}
-
-function cancelFeedback(id) {
-  const area = document.getElementById('sgFeedback' + id);
-  if (area) area.style.display = 'none';
-}
-
+function showRejectFeedback(id) { const a=document.getElementById('sgFeedback'+id); if(a) a.style.display='block'; }
+function cancelFeedback(id) { const a=document.getElementById('sgFeedback'+id); if(a) a.style.display='none'; }
 async function confirmReject(id) {
-  const comment = document.getElementById('sgComment' + id).value;
-  try {
-    const d = await fetchJSON('/api/growth/review', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, action: 'rejected', reviewer: 'admin', comment }),
-    });
-    if (d.success) {
-      refreshSuggestionsPage();
-    } else {
-      alert('操作失败: ' + (d.error || '未知错误'));
-    }
-  } catch(e) {
-    alert('请求失败: ' + e.message);
-  }
+  const comment = document.getElementById('sgComment'+id).value;
+  try { const d = await fetchJSON('/api/growth/review', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id, action:'rejected', reviewer:'admin', comment}) });
+    if (d.success) refreshSuggestionsPage(); else toast('操作失败: '+(d.error||'未知错误'),'warn'); }
+  catch(e) { toast('请求失败: '+e.message,'err'); }
 }
-
 async function applySuggestion(id) {
-  try {
-    const d = await fetchJSON('/api/growth/apply', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    });
-    if (d.success) {
-      refreshSuggestionsPage();
-    } else {
-      alert('操作失败: ' + (d.error || '未知错误'));
-    }
-  } catch(e) {
-    alert('请求失败: ' + e.message);
-  }
+  try { const d = await fetchJSON('/api/growth/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id}) });
+    if (d.success) refreshSuggestionsPage(); else toast('操作失败: '+(d.error||'未知错误'),'warn'); }
+  catch(e) { toast('请求失败: '+e.message,'err'); }
 }
 
+/* ── Global refresh + events ── */
+async function refreshAll() {
+  await Promise.all([refreshOverview(), refreshTasks(), refreshTaskOps(), refreshDiagnostics(),
+    refreshHandlers(), refreshMemory(), refreshCallbacks(), refreshHealth(), refreshTrends()]);
+}
+function refreshCurrent() {
+  const cur = document.querySelector('.nav-item[aria-current="page"]');
+  if (cur) switchPage(cur.dataset.page);
+}
+
+// nav
+document.querySelectorAll('.nav-item').forEach(n => n.addEventListener('click', () => switchPage(n.dataset.page)));
+document.getElementById('refreshBtn').addEventListener('click', refreshCurrent);
+document.getElementById('menuToggle').addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
+document.getElementById('helpBtn').addEventListener('click', () => document.getElementById('helpScrim').classList.add('open'));
+document.getElementById('helpClose').addEventListener('click', () => document.getElementById('helpScrim').classList.remove('open'));
+document.getElementById('globalSearch').addEventListener('keydown', e => { if(e.key==='Escape') e.target.blur(); });
+
+// keyboard shortcuts
+document.addEventListener('keydown', e => {
+  if (e.target.matches('input, textarea, select')) return;
+  if (e.key >= '1' && e.key <= '7') { const p = Object.keys(PAGES)[+e.key-1]; if(p) switchPage(p); }
+  else if (e.key === 'r' || e.key === 'R') refreshCurrent();
+  else if (e.key === '/') { e.preventDefault(); document.getElementById('globalSearch').focus(); }
+  else if (e.key === '?') document.getElementById('helpScrim').classList.add('open');
+  else if (e.key === 'Escape') { document.getElementById('confirmScrim').classList.remove('open'); document.getElementById('helpScrim').classList.remove('open'); }
+});
+
+// boot
+refreshAll();
+setInterval(refreshAll, 30000);
 </script>
 </body>
 </html>

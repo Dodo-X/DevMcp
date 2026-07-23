@@ -1,13 +1,15 @@
 """Append new panels to dashboard.html — fixed version."""
-import os
-BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HTML_PATH = os.path.join(BASE, "devpartner_agent", "dashboard.html")
 
-with open(HTML_PATH, "r", encoding="utf-8") as f:
+import os
+
+BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HTML_PATH = os.path.join(BASE, "backend", "api_gateway", "dashboard.html")
+
+with open(HTML_PATH, encoding="utf-8") as f:
     html = f.read()
 
 # ── 1. Insert nav tabs after refresh-bar ──
-nav_html = '''
+nav_html = """
   <!-- 导航标签 -->
   <div class="nav-tabs" id="mainNav">
     <div class="tab active" onclick="switchPage('overview',this)">总览</div>
@@ -17,13 +19,13 @@ nav_html = '''
     <div class="tab" onclick="switchPage('ops',this)">系统运维</div>
   </div>
   <div class="tab-page active" id="page-overview">
-'''
-old_refresh = '</button>\n  </div>\n\n  <!-- 核心指标 -->'
-new_refresh = '</button>\n  </div>\n' + nav_html + '\n  <!-- 核心指标 -->'
+"""
+old_refresh = "</button>\n  </div>\n\n  <!-- 核心指标 -->"
+new_refresh = "</button>\n  </div>\n" + nav_html + "\n  <!-- 核心指标 -->"
 html = html.replace(old_refresh, new_refresh)
 
 # ── 2. Close page-overview div before review-dialog, insert new pages ──
-new_pages = '''  </div><!-- end page-overview -->
+new_pages = """  </div><!-- end page-overview -->
 
   <!-- ==================== 用户成长 ==================== -->
   <div class="tab-page" id="page-growth">
@@ -162,12 +164,15 @@ new_pages = '''  </div><!-- end page-overview -->
     </div>
   </div>
 
-'''
+"""
 # Insert before review-dialog
-html = html.replace('\n  <!-- 审核对话框 -->\n  <div class="review-dialog"', new_pages + '\n  <!-- 审核对话框 -->\n  <div class="review-dialog"')
+html = html.replace(
+    '\n  <!-- 审核对话框 -->\n  <div class="review-dialog"',
+    new_pages + '\n  <!-- 审核对话框 -->\n  <div class="review-dialog"',
+)
 
 # ── 3. Add new CSS ──
-new_css = '''
+new_css = """
   .nav-tabs{display:flex;gap:8px;margin-bottom:24px;border-bottom:1px solid var(--border);padding-bottom:0;flex-wrap:wrap;}
   .nav-tabs .tab{padding:8px 16px;border-radius:6px 6px 0 0;font-size:13px;cursor:pointer;color:var(--text-muted);border:1px solid transparent;border-bottom:none;transition:all 0.2s;white-space:nowrap;}
   .nav-tabs .tab:hover{color:var(--text);}
@@ -197,12 +202,12 @@ new_css = '''
   .trend-bar-label{font-size:9px;color:var(--text-muted);text-align:center;margin-top:4px;}
   .ops-action-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;}
   .ops-result{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;font-family:monospace;font-size:11px;max-height:300px;overflow-y:auto;white-space:pre-wrap;line-height:1.5;color:var(--text-muted);}
-'''
-old_css_end = '@media (max-width:768px)'
-html = html.replace(old_css_end, new_css + '\n  ' + old_css_end)
+"""
+old_css_end = "@media (max-width:768px)"
+html = html.replace(old_css_end, new_css + "\n  " + old_css_end)
 
 # ── 4. Add JS for new panels ──
-new_js = '''
+new_js = """
 // ── Page switching ──
 function switchPage(name, el) {
   document.querySelectorAll('#mainNav .tab').forEach(t => t.classList.remove('active'));
@@ -474,10 +479,10 @@ async function runArchive() {
     el.textContent = '错误: ' + e.message;
   }
 }
-'''
+"""
 
-old_js_refreshAll = 'async function refreshAll() {'
-html = html.replace(old_js_refreshAll, new_js + '\n' + old_js_refreshAll)
+old_js_refreshAll = "async function refreshAll() {"
+html = html.replace(old_js_refreshAll, new_js + "\n" + old_js_refreshAll)
 
 # ── 5. Add new refresh calls to refreshAll ──
 old_refresh_all_body = "    refreshGrowth(),\n  ]);"
