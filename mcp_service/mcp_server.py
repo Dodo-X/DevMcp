@@ -53,6 +53,7 @@ from foundation.config.app_settings import get_project_version
 VERSION = get_project_version()
 
 _diag_logger = logging.getLogger("devpartner.diag")
+logger = logging.getLogger(__name__)
 _diag_logger.setLevel(logging.INFO)
 
 _mcp_logger = logging.getLogger("devpartner.mcp")
@@ -98,7 +99,7 @@ def _register_rest_routes():
 
         register_rest_routes(mcp)
     except Exception as e:
-        print(f"[WARN] 注册 REST 路由失败: {e}")
+        logger.warning(f"注册 REST 路由失败: {e}")
 
 
 def _register_prompts():
@@ -165,7 +166,7 @@ def _register_prompts():
 
     _prompts_count += 1
 
-    print(f"  [OK] prompts: {_prompts_count} 个 Prompt 已注册")
+    logger.info(f"  prompts: {_prompts_count} 个 Prompt 已注册")
 
 
 def _register_task_handlers():
@@ -175,7 +176,7 @@ def _register_task_handlers():
 
         register_task_handlers()
     except Exception as e:
-        print(f"[WARN] 注册对话任务处理器失败: {e}")
+        logger.warning(f"注册对话任务处理器失败: {e}")
 
     try:
         from backend.business.vault_export.vault_exporter import (
@@ -184,7 +185,7 @@ def _register_task_handlers():
 
         register_vault()
     except Exception as e:
-        print(f"[WARN] 注册 Vault 导出任务处理器失败: {e}")
+        logger.warning(f"注册 Vault 导出任务处理器失败: {e}")
 
     try:
         from backend.business.data_cleanup.cleanup_service import (
@@ -193,7 +194,7 @@ def _register_task_handlers():
 
         register_cleanup()
     except Exception as e:
-        print(f"[WARN] 注册清理任务处理器失败: {e}")
+        logger.warning(f"注册清理任务处理器失败: {e}")
 
     try:
         from backend.business.task_handlers.daily_engine import (
@@ -202,7 +203,7 @@ def _register_task_handlers():
 
         register_daily()
     except Exception as e:
-        print(f"[WARN] 注册日报任务处理器失败: {e}")
+        logger.warning(f"注册日报任务处理器失败: {e}")
 
 
 @mcp.tool()
@@ -390,14 +391,13 @@ if __name__ == "__main__":
 
     agent_ok = ensure_ready()
     print("")
-    print(f"  MCP工具: {_tools_count + 3} 个 (3核心 + 0通用)")
-    print(f"  Prompts: {_prompts_count} 个 Prompt 已注册")
-    print(f"  管家层: {'已加载' if agent_ok else '降级模式'}")
-    print(f"  LLM并行: OLLAMA_NUM_PARALLEL={_os.environ.get('OLLAMA_NUM_PARALLEL', '1')}")
+    logger.info(f"  MCP工具: {_tools_count + 3} 个 (3核心 + 0通用)")
+    logger.info(f"  Prompts: {_prompts_count} 个 Prompt 已注册")
+    logger.info(f"  管家层: {'已加载' if agent_ok else '降级模式'}")
+    logger.info(f"  LLM并行: OLLAMA_NUM_PARALLEL={_os.environ.get('OLLAMA_NUM_PARALLEL', '1')}")
     print("")
 
     def _run_mcp_service(port):
-
         is_docker = _os.path.exists("/.dockerenv")
         is_modelscope = _os.environ.get("MODELSCOPE_ENVIRONMENT") == "true"
 
@@ -437,9 +437,9 @@ if __name__ == "__main__":
 
                 _ST._validate_accept_header = _patched_validate
                 _ST._validate_accept_header._patched = True
-                print("[INFO] Accept header 检查已禁用")
+                logger.info("Accept header 检查已禁用")
         except Exception as _e:
-            print(f"[WARN] Accept header 补丁失败: {_e}")
+            logger.warning(f"Accept header 补丁失败: {_e}")
 
         mcp.run(
             transport="streamable-http",
@@ -464,17 +464,17 @@ if __name__ == "__main__":
         if arg.isdigit():
             port = int(arg)
             if port not in ALLOWED_PORTS:
-                print(f"[ERROR] 不允许的端口 {port}，仅支持: {sorted(ALLOWED_PORTS)}")
+                logger.error(f"不允许的端口 {port}，仅支持: {sorted(ALLOWED_PORTS)}")
                 sys.exit(1)
             _run_mcp_service(port)
         elif arg.lower() == "streamable":
             port = int(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_PORT
             if port not in ALLOWED_PORTS:
-                print(f"[ERROR] 不允许的端口 {port}，仅支持: {sorted(ALLOWED_PORTS)}")
+                logger.error(f"不允许的端口 {port}，仅支持: {sorted(ALLOWED_PORTS)}")
                 sys.exit(1)
             _run_mcp_service(port)
         else:
-            print(f"[ERROR] 未知参数: {arg}")
+            logger.error(f"未知参数: {arg}")
             print("")
             print("  用法:")
             print("    python server.py 7860          # 启动 MCP 服务（推荐）")

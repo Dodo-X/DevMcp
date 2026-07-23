@@ -21,9 +21,9 @@
     # 注册回调
     reg_id = registry.register(
         conversation_id="conv_abc",
-        on_complete=lambda result: print(f"Done: {result}"),
-        on_progress=lambda pct: print(f"Progress: {pct}%"),
-        on_error=lambda err: print(f"Error: {err}"),
+        on_complete=lambda result: logger.info(f"Done: {result}"),
+        on_progress=lambda pct: logger.info(f"Progress: {pct}%"),
+        on_error=lambda err: logger.error(f"Error: {err}"),
     )
 
     # 触发回调

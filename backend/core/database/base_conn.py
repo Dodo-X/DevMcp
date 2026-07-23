@@ -52,7 +52,7 @@ class Database:
             # v9.5.5: 检测旧 schema — 如果数据库存在但包含废弃列，删除重建
             actual_path = db_path
             if Path(db_path).exists() and self._check_schema_incompatible(db_path):
-                print("[DB] 检测到旧 schema 数据库，尝试删除重建...")
+                logger.info("检测到旧 schema 数据库，尝试删除重建...")
                 deleted = False
                 try:
                     Path(db_path).unlink()
@@ -64,17 +64,17 @@ class Database:
                     actual_path = str(
                         Path(db_path).parent / f"devpartner_v955_{uuid.uuid4().hex[:8]}.db"
                     )
-                    print(f"[DB] 旧文件被占用，使用新数据库: {actual_path}")
-                    print("[DB] 提示: 下次重启前请手动删除旧文件 data/databases/devpartner.db")
+                    logger.info(f"旧文件被占用，使用新数据库: {actual_path}")
+                    logger.info("提示: 下次重启前请手动删除旧文件 data/databases/devpartner.db")
                 except Exception as e:
-                    print(f"[DB] 删除旧数据库失败: {e}，使用新数据库")
+                    logger.warning(f"删除旧数据库失败: {e}，使用新数据库")
                     import uuid
 
                     actual_path = str(
                         Path(db_path).parent / f"devpartner_v955_{uuid.uuid4().hex[:8]}.db"
                     )
                 if deleted:
-                    print("[DB] 旧数据库已删除，将创建全新数据库")
+                    logger.info("旧数据库已删除，将创建全新数据库")
 
             self._local_conn = sqlite3.connect(actual_path, check_same_thread=False)
             self._local_conn.row_factory = sqlite3.Row
@@ -92,7 +92,7 @@ class Database:
 
             current_version = get_project_version()
             self._set_schema_version(current_version)
-            print(f"[DB] Schema 初始化完成 → {current_version}")
+            logger.info(f"Schema 初始化完成 → {current_version}")
 
     def _check_schema_incompatible(self, db_path: str) -> bool:
         """
@@ -1162,7 +1162,7 @@ class Database:
         now = datetime.now().isoformat()
 
         sql = """
-            INSERT INTO user_skills 
+            INSERT INTO user_skills
             (timestamp, skill_domain, skill_name, skill_level, sub_skills, evidence,
              conversation_ids, hours_spent, growth_trend, last_updated,
              confidence, first_seen, last_seen, evidence_count,
@@ -1223,7 +1223,7 @@ class Database:
         import json as _json
 
         sql = """
-            INSERT INTO improvement_log 
+            INSERT INTO improvement_log
             (timestamp, category, suggestion, priority, conversations_id, dimensions)
             VALUES (?, ?, ?, ?, ?, ?)
         """

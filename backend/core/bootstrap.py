@@ -195,12 +195,12 @@ def apply_patches():
                 return None
 
         MemoryObjectSendStream.send = _safe_send
-        print("[INFO] MemoryObjectSendStream.send ClosedResourceError 保护已注入")
+        logger.info("MemoryObjectSendStream.send ClosedResourceError 保护已注入")
 
     except ImportError:
-        print("[WARN] 无法导入 anyio，跳过 MemoryObjectSendStream 补丁")
+        logger.warning("无法导入 anyio，跳过 MemoryObjectSendStream 补丁")
     except Exception as e:
-        print(f"[WARN] MemoryObjectSendStream 补丁应用失败: {e}")
+        logger.warning(f"MemoryObjectSendStream 补丁应用失败: {e}")
 
 
 def ensure_ready():
@@ -222,7 +222,7 @@ def ensure_ready():
             db = get_db()
             cursor = db._local_conn.cursor()
             cursor.execute("""
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_conversation_id_unique 
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_conversation_id_unique
                 ON conversations(conversation_id)
             """)
             db._local_conn.commit()
@@ -240,17 +240,17 @@ def ensure_ready():
             )
             if cfg.data_lifecycle.auto_cleanup:
                 scheduler.start(interval_hours=cleanup_interval)
-                print(f"[INFO] 自动清理调度器已启动，间隔 {cleanup_interval} 小时")
+                logger.info(f"自动清理调度器已启动，间隔 {cleanup_interval} 小时")
         except Exception as e:
-            print(f"[WARN] 自动清理调度器启动失败: {e}")
+            logger.warning(f"自动清理调度器启动失败: {e}")
 
         try:
             from backend.business.data_cleanup.cleanup_service import get_cleanup_service
 
             cs = get_cleanup_service()
-            print("[INFO] 任务数据清理服务已启动 (v7.0)")
+            logger.info("任务数据清理服务已启动 (v7.0)")
         except Exception as e:
-            print(f"[WARN] 任务数据清理服务启动失败: {e}")
+            logger.warning(f"任务数据清理服务启动失败: {e}")
 
         try:
             if cfg.llm.enabled and cfg.llm.preload:
@@ -261,12 +261,14 @@ def ensure_ready():
 
                 llm = get_llm_engine()
                 if llm.preload():
-                    print(f"[INFO] Ollama LLM 已就绪: {getattr(cfg.llm, 'ollama_model', 'qwen3')}")
+                    logger.info(f"Ollama LLM 已就绪: {getattr(cfg.llm, 'ollama_model', 'qwen3')}")
                 elif llm.is_enabled():
                     status = llm.get_status()
-                    print(f"[WARN] 本地 LLM 预加载跳过: {status.get('load_error') or '模型不可用'}")
+                    logger.warning(
+                        f"本地 LLM 预加载跳过: {status.get('load_error') or '模型不可用'}"
+                    )
         except Exception as e:
-            print(f"[WARN] 本地 LLM 初始化失败: {e}")
+            logger.warning(f"本地 LLM 初始化失败: {e}")
 
         try:
             from backend.core.task_queue_kernel.queue_client import get_task_queue
@@ -277,35 +279,35 @@ def ensure_ready():
             recovered = recovery_result.get("recovered", 0)
             pipeline = recovery_result.get("pipeline_stats", {})
             if recovered > 0 or pipeline.get("scanned", 0) > 0:
-                print(
-                    f"[INFO] 启动恢复: DB加载 {recovered} 个 | 流水线扫描 {pipeline.get('scanned', 0)} → 入队 {pipeline.get('enqueued', 0)}"
+                logger.info(
+                    f"启动恢复: DB加载 {recovered} 个 | 流水线扫描 {pipeline.get('scanned', 0)} → 入队 {pipeline.get('enqueued', 0)}"
                 )
         except Exception as e:
-            print(f"[WARN] 任务队列恢复失败: {e}")
+            logger.warning(f"任务队列恢复失败: {e}")
 
         try:
             from backend.core.scheduler import get_timeout_scheduler
 
             timeout_scheduler = get_timeout_scheduler()
             timeout_scheduler.start()
-            print("[INFO] 任务超时巡检调度器已启动 (扫描间隔 300s, 任务超时 10800s/3h)")
+            logger.info("任务超时巡检调度器已启动 (扫描间隔 300s, 任务超时 10800s/3h)")
         except Exception as e:
-            print(f"[WARN] 任务超时巡检调度器启动失败: {e}")
+            logger.warning(f"任务超时巡检调度器启动失败: {e}")
 
         try:
             from backend.core.scheduler import get_scheduler
 
             profile_scheduler = get_scheduler()
             profile_scheduler.start()
-            print("[INFO] 每日总结调度器已启动 (每日 17:30 触发)")
+            logger.info("每日总结调度器已启动 (每日 17:30 触发)")
         except Exception as e:
-            print(f"[WARN] 每日总结调度器启动失败: {e}")
+            logger.warning(f"每日总结调度器启动失败: {e}")
 
         _core_initialized = True
         return True
     except Exception as e:
-        print(f"[WARN] 核心模块初始化失败: {e}")
-        print("[WARN] Agent 将以降级模式运行（仅基础功能可用）")
+        logger.warning(f"核心模块初始化失败: {e}")
+        logger.warning("Agent 将以降级模式运行（仅基础功能可用）")
         return False
 
 
