@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 DevPartner v7.3 - Ollama 服务检查脚本
 
@@ -26,8 +25,8 @@ DevPartner v7.3 - Ollama 服务检查脚本
 import json
 import os
 import sys
-import urllib.request
 import urllib.error
+import urllib.request
 from pathlib import Path
 
 # ============================================================
@@ -173,7 +172,7 @@ def main(strict_mode: bool = False):
     env_names = {
         "local": "🖥️ 本地开发环境",
         "docker": "🐳 Docker 容器",
-        "modelscope": "☁️ ModelScope 云端"
+        "modelscope": "☁️ ModelScope 云端",
     }
     print(f"  运行环境: {env_names.get(env, '❓ 未知环境')}")
     print(f"  项目目录: {PROJECT_ROOT}")
@@ -184,9 +183,10 @@ def main(strict_mode: bool = False):
     model_name = _DEFAULT_MODEL
     try:
         sys.path.insert(0, str(PROJECT_ROOT))
-        from devpartner_agent.core.config import get_config
+        from foundation.config.app_settings import get_config
+
         cfg = get_config()
-        model_name = getattr(cfg.llm, 'ollama_model', _DEFAULT_MODEL)
+        model_name = getattr(cfg.llm, "ollama_model", _DEFAULT_MODEL)
     except Exception:
         pass
     print(f"  配置模型: {model_name}")
@@ -233,7 +233,7 @@ def main(strict_mode: bool = False):
         print(f"  ⚠️ 未找到模型 '{model_name}'，但发现相似模型:")
         for s in model_status["similar"]:
             print(f"    → {s}")
-        print(f"  可在 config.yaml 中修改 ollama_model 为以上任一名称。")
+        print("  可在 config.yaml 中修改 ollama_model 为以上任一名称。")
         print()
         if strict_mode:
             print("  🔴 严格模式：检查未通过")
@@ -267,5 +267,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n\n❌ 发生错误: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(2)

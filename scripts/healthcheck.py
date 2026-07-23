@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 DevPartner 健康检查脚本 v6.0.2
 用于 Docker HEALTHCHECK 指令
 支持 ModelScope 创空间和其他 Docker 环境
 """
 
-import urllib.request
 import sys
-import json
+import urllib.request
 
 
 def check_health():
     """检查服务健康状态 — 优先使用轻量 /health 端点"""
     endpoints = [
-        "http://localhost:7860/health",       # 快速健康检查（首选）
-        "http://localhost:7860/",             # 根路径
+        "http://localhost:7860/health",  # 快速健康检查（首选）
+        "http://localhost:7860/",  # 根路径
     ]
 
     for i, url in enumerate(endpoints):
@@ -38,5 +36,5 @@ def check_health():
     sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     check_health()

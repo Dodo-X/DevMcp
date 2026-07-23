@@ -12,14 +12,16 @@
 注意：knowledge_points 表可能没有 type 列（v7.4 迁移未执行），
      此时所有记录视为 skill 类型处理。
 """
-import sys
+
 import os
 import sqlite3
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from devpartner_agent.core.skill_domain_standard import (
-    STANDARD_DOMAINS_SET, normalize_domain, is_standard_domain,
+from backend.core.skill_domain_standard import (
+    is_standard_domain,
+    normalize_domain,
 )
 
 
@@ -56,13 +58,15 @@ def fix_kp_domains(dry_run=True):
         if new_domain == "通用工程" and domain != "General":
             new_domain = normalize_domain(domain)
 
-        to_fix.append({
-            "id": row["id"],
-            "knowledge_id": row["knowledge_id"],
-            "title": title[:60],
-            "old_domain": domain,
-            "new_domain": new_domain,
-        })
+        to_fix.append(
+            {
+                "id": row["id"],
+                "knowledge_id": row["knowledge_id"],
+                "title": title[:60],
+                "old_domain": domain,
+                "new_domain": new_domain,
+            }
+        )
 
     print(f"📊 knowledge_points 共 {total} 条")
     print(f"🔧 需要修复: {len(to_fix)} 条\n")
@@ -76,17 +80,16 @@ def fix_kp_domains(dry_run=True):
         print(f"  {item['old_domain']:25s} → {item['new_domain']:10s} | {item['title']}")
 
     if dry_run:
-        print(f"\n🧪 预览模式。使用 --force 执行写入。")
+        print("\n🧪 预览模式。使用 --force 执行写入。")
         conn.close()
         return
 
     # 执行修复
-    print(f"\n🔧 开始修复...")
+    print("\n🔧 开始修复...")
     fixed = 0
     for item in to_fix:
         conn.execute(
-            "UPDATE knowledge_points SET domain = ?, updated_at = datetime('now') WHERE id = ?",
-            (item["new_domain"], item["id"])
+            "UPDATE knowledge_points SET domain = ? WHERE id = ?", (item["new_domain"], item["id"])
         )
         fixed += 1
 
@@ -121,5 +124,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n❌ 脚本执行失败: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

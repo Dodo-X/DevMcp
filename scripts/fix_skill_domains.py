@@ -15,16 +15,16 @@
 执行方式：
   python scripts/fix_skill_domains.py [--dry-run] [--force]
 """
-import sys
+
 import os
-import json
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # v9.3.1: 使用统一领域标准化模块（单一数据源）
-from devpartner_agent.core.skill_domain_standard import (
-    STANDARD_DOMAINS, STANDARD_DOMAINS_SET,
-    normalize_domain, is_standard_domain,
+from backend.core.skill_domain_standard import (
+    STANDARD_DOMAINS_SET,
+    normalize_domain,
 )
 
 LEVEL_ORDER = {"expert": 4, "advanced": 3, "intermediate": 2, "beginner": 1}
@@ -38,10 +38,15 @@ def classify_skill(skill_domain_value):
 def fix_skill_domains(dry_run=True, force=False):
     import sqlite3
     from pathlib import Path
-    from devpartner_agent.core.config import get_config
+
+    from foundation.config.app_settings import get_config
 
     cfg = get_config()
-    db_path = cfg.data.db_path if hasattr(cfg, 'data') and hasattr(cfg.data, 'db_path') else "data/databases/devpartner.db"
+    db_path = (
+        cfg.data.db_path
+        if hasattr(cfg, "data") and hasattr(cfg.data, "db_path")
+        else "data/databases/devpartner.db"
+    )
     db_path = str(Path(db_path))
     print(f"📂 数据库路径: {db_path}")
 
@@ -79,12 +84,14 @@ def fix_skill_domains(dry_run=True, force=False):
     groups = {}
     for row in all_skills:
         current = row["skill_domain"] or "其他"
-        new_domain = classify_skill(current) if (current not in STANDARD_DOMAINS_SET or force) else current
+        new_domain = (
+            classify_skill(current) if (current not in STANDARD_DOMAINS_SET or force) else current
+        )
         if new_domain not in groups:
             groups[new_domain] = []
         groups[new_domain].append(row)
 
-    print(f"\n【修复后领域分组】")
+    print("\n【修复后领域分组】")
     for dom in sorted(groups.keys()):
         rows = groups[dom]
         skills = [r["skill_domain"] for r in rows]
@@ -98,8 +105,10 @@ def fix_skill_domains(dry_run=True, force=False):
     total_update = len(needs_update)
     deleted = total_merge - len(needs_merge)  # 合并后删除的条数
 
-    print(f"\n📋 修复计划:")
-    print(f"  需要合并的领域: {len(needs_merge)} 个 (共 {total_merge} 条 → {len(needs_merge)} 条, 删除 {deleted} 条)")
+    print("\n📋 修复计划:")
+    print(
+        f"  需要合并的领域: {len(needs_merge)} 个 (共 {total_merge} 条 → {len(needs_merge)} 条, 删除 {deleted} 条)"
+    )
     for dom, rows in sorted(needs_merge.items()):
         skills = [r["skill_domain"] for r in rows]
         print(f"    - {dom}: {skills}")
@@ -109,12 +118,12 @@ def fix_skill_domains(dry_run=True, force=False):
             print(f"    - {r['skill_domain']} → {dom}")
 
     if dry_run:
-        print(f"\n🧪 预览模式，未实际修改。使用 --force 执行写入。")
+        print("\n🧪 预览模式，未实际修改。使用 --force 执行写入。")
         conn.close()
         return
 
     # 执行修复
-    print(f"\n🔧 开始修复...")
+    print("\n🔧 开始修复...")
 
     # 1. 删除 UNIQUE INDEX
     print("  [1/3] 删除 UNIQUE INDEX...")
@@ -131,7 +140,9 @@ def fix_skill_domains(dry_run=True, force=False):
     for domain, rows in needs_update.items():
         for row in rows:
             old_name = row["skill_domain"]
-            conn.execute("UPDATE user_skills SET skill_domain = ? WHERE id = ?", (domain, row["id"]))
+            conn.execute(
+                "UPDATE user_skills SET skill_domain = ? WHERE id = ?", (domain, row["id"])
+            )
             renamed += 1
             print(f"    {old_name} → {domain}")
     conn.commit()
@@ -143,7 +154,9 @@ def fix_skill_domains(dry_run=True, force=False):
     deleted = 0
     for domain, rows in sorted(needs_merge.items()):
         # 按 skill_level 排序，保留最高的一条
-        rows_sorted = sorted(rows, key=lambda r: LEVEL_ORDER.get(r["skill_level"] or "beginner", 1), reverse=True)
+        rows_sorted = sorted(
+            rows, key=lambda r: LEVEL_ORDER.get(r["skill_level"] or "beginner", 1), reverse=True
+        )
         keeper = rows_sorted[0]
         duplicates = rows_sorted[1:]
 
@@ -196,7 +209,15 @@ def fix_skill_domains(dry_run=True, force=False):
             "conversation_ids = ?, hours_spent = ?, evidence_count = ?, "
             "last_updated = datetime('now') "
             "WHERE id = ?",
-            (domain, merged_subs, merged_evidence, merged_conv_ids, total_hours, total_evidence, keeper["id"])
+            (
+                domain,
+                merged_subs,
+                merged_evidence,
+                merged_conv_ids,
+                total_hours,
+                total_evidence,
+                keeper["id"],
+            ),
         )
 
         # 删除重复记录
@@ -206,7 +227,9 @@ def fix_skill_domains(dry_run=True, force=False):
         merged += 1
         deleted += len(duplicates)
         skills_list = [r["skill_domain"] for r in rows_sorted]
-        print(f"    {domain}: {skills_list} → 合并为 1 条 (保留 ID:{keeper['id']}, 删除 {len(duplicates)} 条)")
+        print(
+            f"    {domain}: {skills_list} → 合并为 1 条 (保留 ID:{keeper['id']}, 删除 {len(duplicates)} 条)"
+        )
 
     conn.commit()
     print(f"  ✅ 合并完成: {merged} 个领域合并, {deleted} 条记录删除")
@@ -255,5 +278,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n❌ 脚本执行失败: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
