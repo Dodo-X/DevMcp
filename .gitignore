@@ -74,11 +74,16 @@ data/.evolution_history.json
 #   方式B: 上传到 ModelScope Dataset，通过 volume 挂载
 #   方式C: 打包进 Docker 镜像（镜像较大 ~6.5GB）
 #
-models/*.gguf           # GGUF 格式模型文件（llama-cpp-python 使用）
-models/*.bin            # 其他二进制模型文件
-models/*.safetensors    # HuggingFace safetensors 格式
-!models/.gitkeep        # 保留占位符文件（确保目录被跟踪）
-!models/README.md       # 保留模型说明文档
+# GGUF 格式模型文件（llama-cpp-python 使用）
+models/*.gguf
+# 其他二进制模型文件
+models/*.bin
+# HuggingFace safetensors 格式
+models/*.safetensors
+# 保留占位符文件（确保目录被跟踪）
+!models/.gitkeep
+# 保留模型说明文档
+!models/README.md
 
 # ===== IDE 配置 =====
 
