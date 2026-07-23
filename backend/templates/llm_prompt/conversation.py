@@ -59,6 +59,6 @@ TASK_CONVERSATION_ANALYSIS = AnalysisTask(
 2. 所有字段都必须填写，不确定的字段填默认值""",
     parser=_parse_conversation_analysis,
     max_tokens=1500,
-    input_truncate=8000,
+    input_truncate=32768,
     feature_flag="enhance_analysis",
 )

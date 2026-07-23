@@ -80,6 +80,6 @@ TASK_USER_PROFILE_ANALYSIS = AnalysisTask(
 3. skill_domain 必须从7个标准领域中选择，不要自创""",
     parser=_parse_user_profile,
     max_tokens=2048,
-    input_truncate=8000,
+    input_truncate=32768,
     feature_flag="enhance_analysis",
 )
