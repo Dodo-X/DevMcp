@@ -101,7 +101,18 @@ class ConversationEngine:
         user_raw_input: str = "",
         ai_analysis: str = "",
     ) -> dict:
-        """创建新会话，返回会话状态。"""
+        """创建新会话，返回会话状态。
+
+        v9.11: task_type 和 system_id 自动归一化，防止同义词/大小写漂移。
+        """
+        from backend.business.data_governance.normalizer import (
+            normalize_system_id,
+            normalize_task_type,
+        )
+
+        task_type = normalize_task_type(task_type)
+        system_id = normalize_system_id(system_id)
+
         conv_id = f"conv_{uuid.uuid4().hex[:16]}"
         timestamp = datetime.now().isoformat()
         db = self._get_db()

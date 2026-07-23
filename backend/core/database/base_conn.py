@@ -1546,10 +1546,18 @@ class Database:
         kp_type: str = "skill",
         aliases: list = None,
     ) -> str | None:
-        """创建知识点记录，返回 knowledge_id 或 None（v9.5.7 精简参数）"""
+        """创建知识点记录，返回 knowledge_id 或 None（v9.5.7 精简参数）
+
+        v9.11: domain 自动归一化到标准值，防止同义词漂移。
+        """
         import uuid
 
         try:
+            # v9.11: domain 归一化
+            from backend.business.data_governance.normalizer import normalize_domain
+
+            domain = normalize_domain(domain)
+
             kp_id = f"kp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
             now = datetime.now().isoformat()
             self.query_local(

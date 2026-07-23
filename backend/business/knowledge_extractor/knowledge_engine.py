@@ -119,6 +119,9 @@ class KnowledgeEngine:
         )
         if not rows:
             return {"error": f"知识点 {knowledge_id} 不存在"}
+
+        # v9.11: 访问计数递增
+        self._increment_usage(knowledge_id)
         return dict(rows[0])
 
     def match_knowledge(self, query: str, limit: int = 20) -> dict:
@@ -221,6 +224,18 @@ class KnowledgeEngine:
                     }
                 )
 
+        # v9.11: 批量递增匹配的知识点访问计数
+        matched_ids = [it["knowledge_id"] for it in items]
+        if matched_ids:
+            try:
+                placeholders = ",".join("?" for _ in matched_ids)
+                db.query_local(
+                    f"UPDATE knowledge_points SET usage_count = usage_count + 1 WHERE knowledge_id IN ({placeholders})",
+                    tuple(matched_ids),
+                )
+            except Exception:
+                pass  # 非关键操作
+
         return {
             "success": True,
             "query": query,
@@ -229,6 +244,17 @@ class KnowledgeEngine:
             "count": len(items),
             "items": items,
         }
+
+    def _increment_usage(self, knowledge_id: str):
+        """v9.11: 记录知识点被访问（usage_count += 1）"""
+        try:
+            db = self._get_db()
+            db.query_local(
+                "UPDATE knowledge_points SET usage_count = usage_count + 1 WHERE knowledge_id = ?",
+                (knowledge_id,),
+            )
+        except Exception:
+            pass  # 非关键操作，静默降级
 
     def _get_db(self):
         from backend.core.database.base_conn import get_db

@@ -238,6 +238,23 @@ def ensure_ready():
             logger.warning("ensure_ready: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
             pass
 
+        # v9.11: 数据治理 — 存量数据归一化 + 孤儿步骤修复
+        try:
+            from backend.business.data_governance.normalizer import (
+                fix_existing_data,
+                fix_orphan_steps,
+            )
+
+            db = get_db()
+            norm_result = fix_existing_data(db)
+            if any(v > 0 for v in norm_result.values()):
+                logger.info(f"数���归一化完成: {norm_result}")
+            orphan_result = fix_orphan_steps(db)
+            if orphan_result["orphaned_count"] > 0:
+                logger.warning(f"孤儿步骤已隔离: {orphan_result}")
+        except Exception:
+            logger.warning("数据治理初始化失败", exc_info=True)
+
         try:
             from backend.business.data_cleanup.cleanup_service import get_cleanup_scheduler
 
