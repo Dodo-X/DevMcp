@@ -23,7 +23,7 @@
 2. LLM 流式 `done` 检测失效 → 流式响应永不结束（已修复）
 3. 多处 `NameError`：`datetime` / `logger` / `chunk` 未定义（已修复 4 处）
 4. REST 日报接口引用未绑定变量 `profile_result` / `system_result`（已修复）
-5. 裸 `except:` + 78 处 `print()` 当日志 + 275 处 `except Exception`（已修裸 except；P-16 已落实：42 处核心库日志转 `logger`，其余为 CLI banner/用法/`__main__` 测试块等有意 stdout 输出，保留 `print`；P-17 列入清理 backlog）
+5. 裸 `except:` + 78 处 `print()` 当日志 + 泛 `except Exception` 静默吞（已修裸 `except`；P-16 已落实：42 处核心库 `print` 转 `logger`，其余为 CLI banner/用法/`__main__` 测试块等有意 stdout 输出，保留 `print`；P-17 已落实：154 处静默 `except Exception` 全部补齐 `logger.warning(..., exc_info=True)`，保留原降级行为）
 6. MCP 工具异常静默吞掉（已补齐 `_mcp_logger.exception`）
 7. 5 处乱码注释 `PONYTATIL:`（已全部清理为 `NOTE:`）
 
@@ -53,7 +53,7 @@
 | P-14 | 生命周期 | 缺需求分析模板（需求→设计 断点） | P1 | ✅ 已建 |
 | P-15 | 生命周期 | 缺运维手册/Runbook（部署→运维 断点） | P1 | ✅ 已建 |
 | P-16 | 代码质量 | 78 处 `print()` 当日志（核心库 42 处） | P2 | ✅ 已整改（42 处转 logger；banner/用法/测试块保留 print） |
-| P-17 | 代码质量 | 275 处 `except Exception`（部分静默吞） | P2 | 🔲 阶段收口 |
+| P-17 | 代码质量 | 泛 `except Exception` 静默吞异常（扫描 277 处，其中 154 处完全无日志/无 re-raise） | P2 | ✅ 已整改（154 处补齐 `logger.warning(..., exc_info=True)`；5 个缺 logger 模块补 `import logging` + `logger`） |
 | P-18 | 流程规范 | 版本控制卫生：v9.5.5 重构未入库；1GB+ 模型权重被 staged；临时脚本被 staged | P1 | ✅ 已执行（a63be98 纳入架构、b903b89 修正忽略规则） |
 | P-19 | 架构 | HTTP 与 MCP 响应信封不一致（`{code,message,data}` vs `{success,error}`） | P2 | 📌 已文档化契约，暂不改接口 |
 | P-20 | 代码质量 | Ruff 基线 824 → 余 41 条阶段性忽略规则 | P2 | 🔲 季度清理 |
@@ -71,6 +71,8 @@
 - P-19 响应信封双轨：已在 `ARCHITECTURE_DECISIONS.md` ADR-002 固化契约，避免调用方误用，暂不破坏接口兼容性。
 
 **结论**：架构得分高，重点放在纪律而非结构。
+
+**本次专项重构（用户要求）**：Markdown 对接模块由「单文件内联 DB 查询 + 解析 + 导出」重构为职责清晰的三层（`md_templates.py` 模板管理 / `md_data_loader.py` 数据装载 / `md_exporter.py`+`vault_exporter.py` 导出），三层经 data dict 契约通信，耦合度显著下降，见 R-18。
 
 ### 维度 2 · 流程规范性 ⚠️→✅ 已补齐
 
@@ -93,7 +95,7 @@
 
 ### 维度 4 · 代码质量把控 ⚠️→✅ 硬伤已修
 
-**评估**：架构干净，但存在**真实运行时 Bug**（P-01~P-07）与风格债（P-16/P-17/P-20）。
+**评估**：架构干净，但此前存在**真实运行时 Bug**（P-01~P-07）与风格债（P-16/P-17/P-20）。当前 P-16/P-17 已落实，仅剩 P-20（Ruff 41 条阶段性 ignore）按计划季度清理。
 
 **整改（in-place，已验证）**：见整改记录 R-01~R-08。
 - 全部 5 个真实 Bug 经 `pytest` 或 `ruff` 复现并修复。
@@ -130,6 +132,9 @@
 | R-14 | P-16 | `backend/core/*`、`mcp_service/mcp_server.py` | 42 处 `print()` 当日志 → `logger.info/warning/error`（去掉 `[INFO]/[WARN]/[ERROR]/[DB]` 冗余前缀）；`bootstrap.ensure_ready()` 接入 `setup_logging()` 确保启动日志可见 | ✅ 已整改 |
 | R-15 | P-18 | `foundation`/`backend`/`mcp_service`/`.github` 等 | Git 卫生：补录架构、解 stage 模型/脚本、移除废弃模块、修正 `.gitignore` 行内注释致忽略失效 | ✅ 已执行（a63be98 + b903b89） |
 | R-16 | P-20 | `pyproject.toml` | Ruff 阶段性忽略 41 条，文档化为技术债 | ✅ 已配置 |
+| R-17 | P-17 | `backend`/`foundation`/`mcp_service` 共 26 文件 | 为 154 处完全静默的 `except Exception` 块补齐 `logger.warning(..., exc_info=True)`（保留原 return/continue/break 降级逻辑）；5 个缺 logger 模块补 `import logging` + `logger` | ✅ 已整改（c773576） |
+| R-18 | 架构 | `backend/business/vault_export/` | Markdown 对接模块拆分为三层：`md_templates.py`(模板管理：定义/注册/选择)、`md_data_loader.py`(数据装载：DB 读取/JSON 归一化/仪表盘扫描，只产 dict)、`md_exporter.py`+`vault_exporter.py`(导出：取已装载数据→渲染→写文件)；三层经 data dict 契约通信 | ✅ 已整改（9176993） |
+| R-19 | 代码质量 | `backend/business/analytics/`(未跟踪 WIP) | 修复真实缺陷并纳入版本控制：`metrics.py` 未定义名 `avg_`(死代码分支)→直接返回元组、`set()` 生成器→集合推导、移除未用导入；`data_quality.py` 移除未用导入；`report_builder.py` 字符串内 ASCII 引号语法错误 | ✅ 已整改（c773576） |
 
 ---
 
@@ -138,7 +143,7 @@
 ### 立即（1 周内）
 1. ~~**Git 卫生（P-18）**~~ ✅ **已完成**：v9.5.5 架构已提交（a63be98），1GB 模型权重与一次性临时脚本已解除 stage（保留磁盘文件），废弃模块 `devpartner_agent`/`devpartner_tools`/`prompts` 已从索引移除，并修正 `.gitignore` 模型段行内注释导致忽略失效的问题（b903b89）。
 2. **全员启用 pre-commit**：`pre-commit install`，合并前强制通过。
-3. **清理静默吞异常（P-17）**：优先处理定时任务 / 调度中的 `except Exception`，补齐 `logger.exception`。
+3. ~~**清理静默吞异常（P-17）**~~ ✅ **已完成**：154 处静默 `except Exception` 全部补齐 `logger.warning(..., exc_info=True)`，保留原降级行为（c773576）。
 
 ### 短期（1 月）
 4. ~~`print()`→`logger` 批量替换（P-16）~~ ✅ 已完成：核心库 42 处转 `logger`，仅保留 CLI banner/用法/`__main__` 测试块等有意 `print`。
@@ -153,6 +158,11 @@
 ### 长期（文化）
 10. 双周 Tech Talk + 新人 onboarding（先读三份规范文档再碰代码）。
 11. 监视关键指标：CI 通过率、覆盖率、MCP 工具失败率、线上 MTTR。
+
+### 已知遗留（非本次范围，建议另立项）
+- `tests/test_web_mcp_integration.py` 收集失败：依赖 `httpx` 未安装（需加入 `requirements.txt` 或加 `pytest` 依赖标记）。
+- `tests/test_report_endpoints_anomaly.py` 收集失败：模块导入错误（L33），需确认被测对象路径。
+- 上述两项会让 CI 的 pytest 阶段报 collection error；修复前建议 CI 对这两个文件加 `ignore` 或在修复后纳入。
 
 ---
 
