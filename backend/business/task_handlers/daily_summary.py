@@ -427,6 +427,27 @@ def process_pending_analyses() -> dict:
                         "deprecated": True,
                         "note": f"{analysis_type} 已废弃，由 finalize 子任务替代",
                     }
+                # monthly_report / weekly_report / annual_report → 委托 reports 模块
+                elif analysis_type in ("monthly_report", "weekly_report", "annual_report"):
+                    from backend.business.task_handlers.reports import (
+                        generate_annual_report as _gen_annual,
+                    )
+                    from backend.business.task_handlers.reports import (
+                        generate_monthly_report as _gen_monthly,
+                    )
+                    from backend.business.task_handlers.reports import (
+                        generate_weekly_report as _gen_weekly,
+                    )
+                    _report_gen = {
+                        "monthly_report": _gen_monthly,
+                        "weekly_report": _gen_weekly,
+                        "annual_report": _gen_annual,
+                    }.get(analysis_type)
+                    try:
+                        _report_gen()
+                        sub_result = {"success": True, "note": f"{analysis_type} 委托 reports 模块生成"}
+                    except Exception as _re:
+                        sub_result = {"success": False, "error": str(_re)}
                 else:
                     sub_result = {"success": False, "error": f"未知分析类型: {analysis_type}"}
 
