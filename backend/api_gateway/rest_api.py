@@ -1542,6 +1542,8 @@ def register_rest_routes(mcp):
         import asyncio
 
         async def event_stream():
+            import json as _json
+
             from backend.core.database.base_conn import get_db
             from backend.core.task_queue_kernel.queue_client import get_task_queue
 
@@ -1550,7 +1552,7 @@ def register_rest_routes(mcp):
             while True:
                 try:
                     # 收集任务状态
-                    stats = tq.get_stats()
+                    stats = tq.get_queue_stats()
                     # 收集 pending analyses
                     pa = db.query_local(
                         "SELECT COUNT(*) as cnt FROM pending_analyses WHERE status = 'pending'"
@@ -1560,11 +1562,10 @@ def register_rest_routes(mcp):
                     data = {
                         "pending_tasks": stats.get("pending_tasks", 0),
                         "running_tasks": stats.get("running_tasks", 0),
-                        "completed_tasks": stats.get("completed_tasks", 0),
-                        "failed_tasks": stats.get("failed_tasks", 0),
+                        "completed_tasks": stats.get("total_completed", 0),
+                        "failed_tasks": stats.get("total_failed", 0),
                         "pending_analysis": pending_analysis,
                     }
-                    import json as _json
 
                     yield f"data: {_json.dumps(data)}\n\n"
                 except Exception:

@@ -372,7 +372,17 @@ class LLMEngine:
             except urllib.error.URLError as e:
                 logger.error(f"Ollama connection failed (attempt {attempt + 1}/{retries + 1}): {e}")
                 if attempt < retries and not (_effective_cancel and _effective_cancel.is_set()):
-                    time.sleep(3)
+                    time.sleep(3 * (attempt + 1))  # 指数退避: 3s, 6s, 9s
+                else:
+                    return None
+
+            except (ConnectionResetError, ConnectionAbortedError, ConnectionError) as e:
+                logger.error(
+                    f"Ollama connection reset (attempt {attempt + 1}/{retries + 1}): {e}"
+                    f" — prompt_len={len(prompt)}"
+                )
+                if attempt < retries and not (_effective_cancel and _effective_cancel.is_set()):
+                    time.sleep(5 * (attempt + 1))
                 else:
                     return None
 

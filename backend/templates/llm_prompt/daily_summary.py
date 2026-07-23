@@ -140,6 +140,6 @@ TASK_DAILY_SUMMARY = AnalysisTask(
 9. 只输出 JSON，无数据字段留空（用空字符串/空数组），禁止虚构细节""",
     parser=_parse_daily_summary,
     max_tokens=4000,
-    input_truncate=16000,
+    input_truncate=8000,
     feature_flag="enhance_daily_summary",
 )

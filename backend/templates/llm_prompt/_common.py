@@ -26,6 +26,34 @@ def compact_json(obj, max_chars: int = 0) -> str:
     return text
 
 
+def compact_for_llm(text: str, max_chars: int = 4000) -> str:
+    """将大段文本压缩为 LLM 友好的摘要格式。
+    用于日报/周报/月报输入数据过大的场景 — 在 build prompt 之前先压缩。
+    策略：保留前 max_chars 字符的完整内容，超出部分只保留前 200 字符作为摘要。
+    """
+    if not text:
+        return "(无数据)"
+    if len(text) <= max_chars:
+        return text
+    # 按段落切分，保留前 N 个段落的完整内容
+    paragraphs = text.split("\n\n")
+    result = []
+    total = 0
+    for i, p in enumerate(paragraphs):
+        if total + len(p) <= max_chars:
+            result.append(p)
+            total += len(p) + 2  # +2 for \n\n
+        else:
+            # 当前段落超限：保留开头作为摘要
+            remaining = max_chars - total
+            if remaining > 100:
+                result.append(p[:remaining] + "\n[... 摘要截断]")
+            break
+    if len(result) < len(paragraphs):
+        result.append(f"\n[... 共 {len(paragraphs)} 段数据, 已截断到 {max_chars} 字符 ...]")
+    return "\n\n".join(result)
+
+
 def smart_truncate(text: str, max_chars: int, min_chars: int = 0) -> str:
     """智能截断：优先按段落边界，其次按句子边界，最后按字符。
 
@@ -424,10 +452,20 @@ def run_analysis(
             return None
 
     try:
+        # 自动压缩大文本参数（在 format 之前，避免 HTTP body 过大断开连接）
+        budget = max(3000, task.input_truncate - 3000)  # 留 3000 给 prompt 模板
+        compressed = {}
+        for k, v in kwargs.items():
+            if isinstance(v, str) and len(v) > budget // 2:
+                compressed[k] = compact_for_llm(v, max(1000, budget // 3))
+            else:
+                compressed[k] = v
+        kwargs = compressed
+
         # 构造 prompt
         prompt = task.prompt_template.format(**kwargs)
 
-        # 智能截断：按语义边界截断，避免一刀切破坏数据完整性
+        # 二次截断保护
         if len(prompt) > task.input_truncate:
             logger.warning(
                 f"任务 {task.name} prompt 超长: {len(prompt)} > {task.input_truncate}，触发智能截断"
@@ -440,6 +478,7 @@ def run_analysis(
             prompt,
             task.max_tokens,
             timeout=timeout,
+            retries=2,  # 连接断开时最多重试 2 次（总计 3 次）
             on_progress=on_progress,
             cancel_event=cancel_event,
         )

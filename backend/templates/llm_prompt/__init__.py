@@ -1,5 +1,6 @@
 from backend.templates.llm_prompt._common import (
     AnalysisTask,
+    compact_for_llm,
     extract_behavior_signals,
     normalize_analysis,
     parse_json,
