@@ -152,7 +152,7 @@ class ConversationEngine:
         commands_executed: str = "",
     ) -> dict:
         """记录对话中的单个子任务步骤。"""
-        db = self._get_db()
+        self._get_db()
         queue = self._get_task_queue()
         dao = self.dao
 

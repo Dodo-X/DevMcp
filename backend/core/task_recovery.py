@@ -618,7 +618,7 @@ def _order_by_dependency(grouped: dict[str, list[dict]]) -> list[dict]:
     3. step_analysis 同层级内按 step_id 中的时间戳排序
     """
     all_tasks = []
-    for task_type, task_list in grouped.items():
+    for _task_type, task_list in grouped.items():
         for t in task_list:
             all_tasks.append(t)
 

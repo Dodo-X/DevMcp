@@ -256,7 +256,7 @@ def ensure_ready():
         try:
             from backend.business.data_cleanup.cleanup_service import get_cleanup_service
 
-            cs = get_cleanup_service()
+            get_cleanup_service()
             logger.info("任务数据清理服务已启动 (v7.0)")
         except Exception as e:
             logger.warning(f"任务数据清理服务启动失败: {e}")
