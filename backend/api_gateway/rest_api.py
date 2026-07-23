@@ -608,7 +608,7 @@ def register_rest_routes(mcp):
             from backend.core.database.base_conn import get_db
 
             db = get_db()
-            cur = db._local_conn
+            cur = db.get_raw_cursor()
             portrait = compute_portrait(cur)
 
             return JSONResponse(

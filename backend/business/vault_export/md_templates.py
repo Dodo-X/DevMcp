@@ -703,7 +703,7 @@ def register_all(assembler: MdAssembler = None):
 
 
 def _build_daily_footer(data: dict) -> list[str]:
-    """日报关联文档 footer"""
+    """日报关联文档 footer — 构建双向链接网络"""
     lines = ["## 🔗 关联文档", ""]
     rd = data.get("report_data", {})
     pa = rd.get("project_analysis", {})
@@ -716,7 +716,7 @@ def _build_daily_footer(data: dict) -> list[str]:
             pname = p.get("project_name", "")
             if pname:
                 safe = _safe_path(pname)
-                links.append(f"[[Efforts/{safe}/项目仪表盘]]")
+                links.append(f"[[Efforts/{safe}/项目仪表盘|{pname} 仪表盘]]")
         if links:
             lines.append(f"- **项目分析**: {'、'.join(links)}")
 
@@ -734,7 +734,37 @@ def _build_daily_footer(data: dict) -> list[str]:
         if len(kb_links) > 10:
             lines.append(f"  （共 {len(kb_links)} 张卡片）")
 
-    lines.extend(["", "---", "", "*本日报由 DevPartner AI 自动生成*", ""])
+    # 导航链接（始终存在，保证知识图谱最低连通性）
+    lines.extend(
+        [
+            "",
+            "## 🧭 导航",
+            "",
+            "- 📅 [[日历索引|所有日报]]",
+            "- 📊 [[../Reports/报告索引|所有报告]]",
+            "- 🗺️ [[../Atlas/图谱总览|知识图谱]]",
+            "- 🏠 [[../Home|首页]]",
+            "",
+        ]
+    )
+
+    # 连接同周期报告
+    date_str = data.get("date_str", "")
+    if date_str:
+        try:
+            d = datetime.strptime(date_str, "%Y-%m-%d")
+            week_label = d.strftime("%Y-W%W")
+            month_label = d.strftime("%Y-%m")
+            lines.append("## 📆 同期报告")
+            lines.append("")
+            lines.append(f"- 周报: [[../Reports/Weekly/{week_label}]]")
+            lines.append(f"- 月报: [[../Reports/Monthly/{month_label}]]")
+            lines.append(f"- 年报: [[../Reports/Annual/{d.year}]]")
+            lines.append("")
+        except ValueError:
+            pass
+
+    lines.extend(["---", "", "*本日报由 DevPartner AI 自动生成*", ""])
     return lines
 
 

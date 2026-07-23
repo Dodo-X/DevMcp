@@ -82,6 +82,16 @@ class VaultExporter:
             self._db = get_db()
         return self._db
 
+    @property
+    def calendar_dir(self) -> Path:
+        """日报日历目录（公共访问替代 _calendar_dir）"""
+        return self._calendar_dir
+
+    @property
+    def reports_dir(self) -> Path:
+        """报告输出根目录（含 Weekly/Monthly/Annual 子目录）"""
+        return self._reports_dir
+
     # ══════════════════════════════════════════════════════════
     # 公开方法
     # ══════════════════════════════════════════════════════════
@@ -363,10 +373,13 @@ class VaultExporter:
         # ── 关联链接 ──
         related_links = self._build_related_links(related_ids_raw)
 
-        # ── 来源引用（v2.1：不再链接到对话 MD，仅记录 source_id 文本）──
+        # ── 来源引用（v2.4：尝试链接到知识摘要，失败则仅记录 source_id）──
         source_ref = ""
         if source_id:
-            source_ref = f"`{source_id}`"
+            # 尝试从 source_id 推导对话 ID（直接为 conversation_id 时直接链接）
+            source_ref = (
+                f"[[Efforts/{self._sanitize_path(domain)}/知识摘要/{source_id.replace(':', '_').replace('/', '_')}|来源对话]]"
+            )
 
         # ── 构建 Frontmatter ──
         final_tags = (tags or []) + ["review"]
@@ -387,14 +400,20 @@ class VaultExporter:
         # ── 正文 ──
         parts = [f"# {title}", "", content]
         if related_links:
-            parts.append("\n## 关联")
+            parts.append("\n## 🔗 关联知识")
             for link in related_links:
                 parts.append(f"- {link}")
+        if source_ref:
+            parts.append(f"\n## 📎 来源\n- {source_ref}")
         if card_type == "skill":
-            parts.append("\n## 复习记录")
+            parts.append("\n## 📝 复习记录")
             parts.append("```dataviewjs")
             parts.append("// 使用 Spaced Repetition 插件管理复习")
             parts.append("```")
+        # 导航链接（保证知识图谱连通性）
+        parts.append("\n## 🧭 导航")
+        parts.append("- 📚 [[../Cards/知识卡片索引|知识卡片索引]]")
+        parts.append("- 🏠 [[../Home|首页]]")
 
         body = "\n".join(parts)
         self._write_markdown(file_path, frontmatter, body)
@@ -540,8 +559,21 @@ class VaultExporter:
                 "---",
                 "",
                 "## 🔗 关联",
-                "- 日报目录: [[Calendar/]]",
-                "- 知识卡片目录: [[Cards/]]",
+                "- 📅 [[../../Calendar/日历索引|日报索引]]",
+                "- 📚 [[../../Cards/知识卡片索引|知识卡片索引]]",
+                "- 🗺️ [[../../Atlas/图谱总览|知识图谱]]",
+                "- 📊 [[../../Reports/报告索引|报告中心]]",
+                "- 🏠 [[../../Home|首页]]",
+                "",
+                "---",
+                "",
+                "## 📈 Dataview 查询",
+                "",
+                "```dataview",
+                "TABLE date, productivity_score, learning_score, focus_score",
+                "FROM [[Efforts/" + safe_project + "/项目仪表盘]]",
+                "SORT date DESC",
+                "```",
                 "",
             ]
         )

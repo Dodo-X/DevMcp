@@ -3,7 +3,6 @@
 # v9.11: 统一管理 domain/task_type/system_id 的归一化映射，
 # 确保知识提取和对话管理的口径一致，避免同义词漂移污染分析层。
 
-import json
 import logging
 
 logger = logging.getLogger(__name__)

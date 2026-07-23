@@ -140,93 +140,6 @@ class TaskTimeoutScheduler:
         except Exception as e:
             logger.error(f"❌ exceeded retries 扫描失败: {e}")
 
-    def _scan_pending_retry_steps(self):
-        """扫描 pending_retry 步骤 → 尝试重新提交任务到队列（v8.5.6 新增）"""
-        try:
-            from backend.core.database.base_conn import get_db
-
-            db = get_db()
-            rows = db.query_local("""
-                SELECT step_id, conversation_id, input_data
-                FROM conversation_steps
-                WHERE status = 'pending_retry'
-                  AND retry_count < max_retries
-                ORDER BY created_at ASC
-                LIMIT 10
-            """)
-            if not rows:
-                return
-
-            from backend.core.task_queue_kernel.queue_client import get_task_queue
-
-            queue = get_task_queue()
-            retried = 0
-
-            for row in rows:
-                step_id = row["step_id"]
-                conv_id = row["conversation_id"]
-                try:
-                    input_data = (
-                        json.loads(row["input_data"])
-                        if isinstance(row["input_data"], str)
-                        else (row["input_data"] or {})
-                    )
-                except Exception:
-                    logger.warning(
-                        "TaskTimeoutScheduler._scan_pending_retry_steps: 未预期的异常被静默捕获（P-17 收口）",
-                        exc_info=True,
-                    )
-                    input_data = {}
-
-                task_payload = {
-                    "conversation_id": conv_id,
-                    "step_id": step_id,
-                    "step_name": input_data.get("step_name", "pending_retry"),
-                    "step_type": input_data.get("step_type", "general"),
-                    "content": input_data.get("content", ""),
-                    "knowledge_points": input_data.get("knowledge_points", []),
-                    "files_changed": input_data.get("files_changed", []),
-                }
-
-                task_id = queue.submit_task(
-                    task_type="step_analysis",
-                    payload=task_payload,
-                    priority=5,
-                    estimated_memory_mb=100,
-                )
-
-                if task_id:
-                    db.query_local(
-                        """
-                        UPDATE conversation_steps SET
-                            status = 'pending',
-                            retry_count = retry_count + 1,
-                            error_message = 'Re-submitted by pending_retry scanner'
-                        WHERE step_id = ?
-                    """,
-                        (step_id,),
-                    )
-                    retried += 1
-                else:
-                    db.query_local(
-                        """
-                        UPDATE conversation_steps SET
-                            retry_count = retry_count + 1,
-                            error_message = 'pending_retry re-submit still failed'
-                        WHERE step_id = ?
-                    """,
-                        (step_id,),
-                    )
-
-            if retried > 0:
-                self._stats["pending_retry_resent"] = (
-                    self._stats.get("pending_retry_resent", 0) + retried
-                )
-                logger.info(f"📤 TaskTimeoutScheduler: {retried} 个 pending_retry 步骤重新入队")
-
-        except Exception as e:
-            logger.error(f"❌ pending_retry 扫描失败: {e}")
-
     @property
     def status(self) -> dict:
         return {
@@ -295,9 +208,43 @@ class ProfileScheduler:
             self._thread.join(timeout=5)
         logger.info("⏹️ 定时调度器已停止")
 
+    def _compensate_startup(self):
+        """启动时补偿检查：如果错过了本月/本年的报告触发窗口，立即触发"""
+        now = datetime.now()
+        month_str = now.strftime("%Y-%m")
+        year_str = str(now.year)
+
+        # 检查月报：如果已是当月 2 号以后且未记录本月已运行
+        if self._last_monthly_run is None:
+            monthly_target = now.replace(day=self.MONTHLY_DAY, hour=self.MONTHLY_HOUR,
+                                         minute=self.MONTHLY_MINUTE, second=0, microsecond=0)
+            if now >= monthly_target:
+                logger.info(f"📅 启动补偿: 触发 {month_str} 月报")
+                try:
+                    self._execute_monthly_report(now)
+                except Exception as e:
+                    logger.error(f"启动补偿月报失败: {e}")
+                self._last_monthly_run = month_str
+
+        # 检查年报：如果已在 12 月 31 日后且未记录本年已运行
+        if self._last_annual_run is None:
+            annual_target = now.replace(month=self.ANNUAL_MONTH, day=self.ANNUAL_DAY,
+                                        hour=self.ANNUAL_HOUR, minute=self.ANNUAL_MINUTE,
+                                        second=0, microsecond=0)
+            if now >= annual_target:
+                logger.info(f"📅 启动补偿: 触发 {year_str} 年报")
+                try:
+                    self._execute_annual_report(now)
+                except Exception as e:
+                    logger.error(f"启动补偿年报失败: {e}")
+                self._last_annual_run = year_str
+
     def _run_loop(self):
         """主循环：精确等待触发时间，无需轮询"""
         logger.debug("🔄 定时调度器主循环启动（精确触发模式）")
+
+        # 启动补偿：检查是否错过了本周期的月报/年报
+        self._compensate_startup()
 
         # ponytail: 每 60s 检查一次，简单可靠，上限: 60s 精度足够
         while self._running:

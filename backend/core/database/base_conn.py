@@ -1018,6 +1018,14 @@ class Database:
     def is_local_initialized(self) -> bool:
         return self._local_conn is not None
 
+    def get_raw_cursor(self):
+        """获取原始 sqlite3.Cursor（替代直接访问 _local_conn 私有属性）。
+        调用方应在查询后立即消费结果，避免跨线程共享游标。
+        """
+        if not self._local_conn:
+            raise RuntimeError("本地数据库未初始化，请先调用 init_local()")
+        return self._local_conn.cursor()
+
     def query_local(self, sql: str, params: tuple = ()) -> list[dict]:
         """
         执行本地数据库查询（v5.3: 读写锁分离）

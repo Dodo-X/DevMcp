@@ -241,7 +241,7 @@ def render_project_dimension(value: Any, data: dict, **kwargs) -> list[str]:
     lines = ["> 以下为今日各项目的简要归纳，完整分析见项目仪表盘。", ""]
     for p in value:
         pname = p.get("project_name", "未命名项目")
-        safe = re.sub(r'[\\/:*?"<>|]', "_", pname)
+        safe = re.sub(r'[<>:"/\\|?*]', "-", pname).strip()
         lines.append(f"### 📁 {pname}")
         lines.append("")
 

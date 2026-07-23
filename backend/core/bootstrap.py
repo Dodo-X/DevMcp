@@ -228,12 +228,10 @@ def ensure_ready():
 
         try:
             db = get_db()
-            cursor = db._local_conn.cursor()
-            cursor.execute("""
-                CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_conversation_id_unique
-                ON conversations(conversation_id)
-            """)
-            db._local_conn.commit()
+            db.query_local(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_conversations_conversation_id_unique "
+                "ON conversations(conversation_id)"
+            )
         except Exception:
             logger.warning("ensure_ready: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
             pass
