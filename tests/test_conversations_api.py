@@ -102,12 +102,26 @@ def _seed():
     id1 = f"conv-it-{suffix}-1"
     id2 = f"conv-it-{suffix}-2"
     dao.create_conversation(
-        id1, "2026-07-23T10:00:00", "codebuddy",
-        "集成测试会话主题", "general", "用户意图A", "default", "原始输入", "AI分析",
+        id1,
+        "2026-07-23T10:00:00",
+        "codebuddy",
+        "集成测试会话主题",
+        "general",
+        "用户意图A",
+        "default",
+        "原始输入",
+        "AI分析",
     )
     dao.create_conversation(
-        id2, "2026-07-23T11:00:00", "trae",
-        "另一个会话", "code", "用户意图B", "default", "原始输入2", "AI分析2",
+        id2,
+        "2026-07-23T11:00:00",
+        "trae",
+        "另一个会话",
+        "code",
+        "用户意图B",
+        "default",
+        "原始输入2",
+        "AI分析2",
     )
     return id1, id2
 

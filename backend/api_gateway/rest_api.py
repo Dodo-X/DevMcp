@@ -307,15 +307,17 @@ def register_rest_routes(mcp):
                     "SELECT analysis_type, source_date, missing_dimensions, status, created_at "
                     "FROM pending_analyses WHERE status = 'pending' ORDER BY created_at ASC LIMIT 20"
                 )
-                for r in (pa or []):
-                    notifications.append({
-                        "id": f"pa-{r['analysis_type']}-{r['source_date']}",
-                        "type": "analysis",
-                        "level": "warning",
-                        "title": f"待分析: {r['analysis_type']} ({r['source_date']})",
-                        "detail": f"缺失维度: {r.get('missing_dimensions', 'N/A')}",
-                        "time": r.get("created_at", ""),
-                    })
+                for r in pa or []:
+                    notifications.append(
+                        {
+                            "id": f"pa-{r['analysis_type']}-{r['source_date']}",
+                            "type": "analysis",
+                            "level": "warning",
+                            "title": f"待分析: {r['analysis_type']} ({r['source_date']})",
+                            "detail": f"缺失维度: {r.get('missing_dimensions', 'N/A')}",
+                            "time": r.get("created_at", ""),
+                        }
+                    )
             except Exception:
                 logger.warning("api_notifications: 查询 pending_analyses 失败", exc_info=True)
 
@@ -326,15 +328,17 @@ def register_rest_routes(mcp):
                     "FROM task_queue WHERE status IN ('failed', 'canceled') "
                     "ORDER BY created_at DESC LIMIT 10"
                 )
-                for r in (tq_rows or []):
-                    notifications.append({
-                        "id": f"tq-{r['task_id']}",
-                        "type": "task",
-                        "level": "error",
-                        "title": f"任务异常: {r['task_id'][:12]}",
-                        "detail": r.get("error_message", f"状态: {r.get('status','')}"),
-                        "time": r.get("created_at", ""),
-                    })
+                for r in tq_rows or []:
+                    notifications.append(
+                        {
+                            "id": f"tq-{r['task_id']}",
+                            "type": "task",
+                            "level": "error",
+                            "title": f"任务异常: {r['task_id'][:12]}",
+                            "detail": r.get("error_message", f"状态: {r.get('status', '')}"),
+                            "time": r.get("created_at", ""),
+                        }
+                    )
             except Exception:
                 logger.warning("api_notifications: 查询 task_queue 失败", exc_info=True)
 
@@ -344,15 +348,17 @@ def register_rest_routes(mcp):
                     "SELECT id, title, category, status, created_at "
                     "FROM growth_items WHERE status = 'pending' ORDER BY created_at DESC LIMIT 10"
                 )
-                for r in (gs or []):
-                    notifications.append({
-                        "id": f"gs-{r['id']}",
-                        "type": "growth",
-                        "level": "info",
-                        "title": f"待审核: {r.get('title', r.get('category', '') or '建议')}",
-                        "detail": f"分类: {r.get('category', 'N/A')}",
-                        "time": r.get("created_at", ""),
-                    })
+                for r in gs or []:
+                    notifications.append(
+                        {
+                            "id": f"gs-{r['id']}",
+                            "type": "growth",
+                            "level": "info",
+                            "title": f"待审核: {r.get('title', r.get('category', '') or '建议')}",
+                            "detail": f"分类: {r.get('category', 'N/A')}",
+                            "time": r.get("created_at", ""),
+                        }
+                    )
             except Exception:
                 logger.debug("api_notifications: growth_items 表可能不存在, 跳过")
 
@@ -361,19 +367,23 @@ def register_rest_routes(mcp):
             total = len(notifications)
             notifications = notifications[:30]
 
-            return JSONResponse(content={
-                "code": 0,
-                "message": "ok",
-                "data": {
-                    "total": total,
-                    "items": notifications,
-                    "summary": {
-                        "analysis": sum(1 for n in notifications if n["type"] == "analysis"),
-                        "task_error": sum(1 for n in notifications if n["type"] == "task"),
-                        "growth_pending": sum(1 for n in notifications if n["type"] == "growth"),
+            return JSONResponse(
+                content={
+                    "code": 0,
+                    "message": "ok",
+                    "data": {
+                        "total": total,
+                        "items": notifications,
+                        "summary": {
+                            "analysis": sum(1 for n in notifications if n["type"] == "analysis"),
+                            "task_error": sum(1 for n in notifications if n["type"] == "task"),
+                            "growth_pending": sum(
+                                1 for n in notifications if n["type"] == "growth"
+                            ),
+                        },
                     },
-                },
-            })
+                }
+            )
         except Exception as e:
             logger.warning("api_notifications: 未预期的异常", exc_info=True)
             return JSONResponse(content={"error": str(e)}, status_code=500)
@@ -393,13 +403,14 @@ def register_rest_routes(mcp):
             return JSONResponse(content={"code": 0, "message": "ok", "data": settings})
         except Exception as e:
             logger.warning("api_settings_get 失败", exc_info=True)
-            return JSONResponse(content={"code": -1, "message": str(e), "data": {}}, status_code=500)
+            return JSONResponse(
+                content={"code": -1, "message": str(e), "data": {}}, status_code=500
+            )
 
     @mcp.custom_route("/api/settings", methods=["POST"])
     async def api_settings_update(request: Request) -> JSONResponse:
         """写入一个或多个设置项"""
         try:
-
             from backend.core.database.base_conn import get_db
 
             body = await request.json()
@@ -423,7 +434,9 @@ def register_rest_routes(mcp):
             return JSONResponse(content={"code": 0, "message": "ok", "data": {"updated": updated}})
         except Exception as e:
             logger.warning("api_settings_update 失败", exc_info=True)
-            return JSONResponse(content={"code": -1, "message": str(e), "data": {}}, status_code=500)
+            return JSONResponse(
+                content={"code": -1, "message": str(e), "data": {}}, status_code=500
+            )
 
     # ════════════════════════════════════════════════
     # 请求拦截调试 API (v9.5.1)
@@ -679,7 +692,6 @@ def register_rest_routes(mcp):
     async def api_knowledge_graph(request: Request) -> JSONResponse:
         """知识图谱数据（节点 + 边）"""
         try:
-
             from backend.core.database.base_conn import get_db
 
             db = get_db()
@@ -692,17 +704,19 @@ def register_rest_routes(mcp):
             nodes = []
             edges = []
             node_map = {}
-            for r in (rows or []):
+            for r in rows or []:
                 node_id = f"{r['domain']}|{r['category']}"
                 node_map[node_id] = len(nodes)
-                nodes.append({
-                    "id": node_id,
-                    "domain": r["domain"],
-                    "category": r["category"],
-                    "count": r["cnt"],
-                    "confidence": round(r["avg_conf"] or 0, 2),
-                    "usage": r["total_use"] or 0,
-                })
+                nodes.append(
+                    {
+                        "id": node_id,
+                        "domain": r["domain"],
+                        "category": r["category"],
+                        "count": r["cnt"],
+                        "confidence": round(r["avg_conf"] or 0, 2),
+                        "usage": r["total_use"] or 0,
+                    }
+                )
 
             # 同一 domain 下的 category 之间建边
             domain_groups = {}
@@ -1196,7 +1210,9 @@ def register_rest_routes(mcp):
                 if len(results) >= 50:
                     break
 
-            return JSONResponse(content={"success": True, "query": q, "count": len(results), "results": results})
+            return JSONResponse(
+                content={"success": True, "query": q, "count": len(results), "results": results}
+            )
         except Exception as e:
             logger.warning(
                 "register_rest_routes: /api/reports/search 未预期的异常被静默捕获（P-17 收口）",
@@ -2001,9 +2017,7 @@ def register_rest_routes(mcp):
                     },
                     status_code=404,
                 )
-            return JSONResponse(
-                content={"code": 0, "message": "ok", "data": status}
-            )
+            return JSONResponse(content={"code": 0, "message": "ok", "data": status})
         except Exception as e:
             logger.warning(
                 "register_rest_routes: /api/conversations/{{id}} 未预期的异常被静默捕获（P-17 收口）",
