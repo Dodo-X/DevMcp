@@ -471,7 +471,7 @@ class LLMEngine:
         req.add_header("Content-Type", "application/json")
         http_timeout = timeout if timeout > 0 else None
         try:
-            with urllib.request.urlopen(req, timeout=http_timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 body = resp.read().decode("utf-8")
                 if resp.status != 200:
                     self._intercept_log(
@@ -589,7 +589,7 @@ class LLMEngine:
         _heartbeat_thread.start()
 
         try:
-            with urllib.request.urlopen(req, timeout=http_timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 # v9.5.1: 检查 HTTP 状态码
                 if resp.status != 200:
                     body = resp.read().decode("utf-8")[:500]
