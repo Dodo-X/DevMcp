@@ -128,7 +128,8 @@ def _cleanup_old_growth_analysis(db, current_period: str):
 
 
 def generate_weekly_report(
-    trigger_time: datetime = None, target_date: str = None, force_overwrite: bool = False
+    trigger_time: datetime = None, target_date: str = None, force_overwrite: bool = False,
+    on_progress=None,
 ) -> dict:
     """
     生成周报（v8.0 — LLM 驱动 + MD 自包含）
@@ -201,6 +202,7 @@ def generate_weekly_report(
             daily_summaries_text += f"### {ds['file']}\n{ds['content']}\n\n"
 
         if not daily_summaries_text.strip():
+            if on_progress: on_progress(1.0, "", "本周无日报数据")
             result["success"] = True
             result["method"] = "none"
             result["note"] = "本周无日报数据"
@@ -237,6 +239,15 @@ def generate_weekly_report(
 
         from backend.templates.llm_prompt import TASK_WEEKLY_REPORT, run_analysis
 
+        if on_progress:
+            # 桥接 run_analysis 的 on_progress → 任务进度回调
+            def _w_progress(partial_text, pct):
+                stage_progress = 0.25 + pct * 0.45
+                on_progress(stage_progress, partial_text[:200], "LLM 分析中...")
+            _w_progress("", 0.0)
+        else:
+            _w_progress = None
+
         llm_result = run_analysis(
             TASK_WEEKLY_REPORT,
             period_start=period_start,
@@ -244,9 +255,11 @@ def generate_weekly_report(
             daily_summaries=daily_summaries_text[:8000],
             user_profile_snapshot=user_snapshot[:2000],
             project_profile_snapshot=project_snapshot[:2000],
+            on_progress=_w_progress,
         )
 
         if llm_result and isinstance(llm_result, dict) and "summary" in llm_result:
+            if on_progress: on_progress(0.80, "", "正在导出周报文件...")
             file_path = exporter.export_weekly_report(period_start, period_end, llm_result)
             result["success"] = True
             result["method"] = "llm"
@@ -283,7 +296,8 @@ def generate_weekly_report(
 
 
 def generate_monthly_report(
-    trigger_time: datetime = None, target_date: str = None, force_overwrite: bool = False
+    trigger_time: datetime = None, target_date: str = None, force_overwrite: bool = False,
+    on_progress=None,
 ) -> dict:
     """
     生成月报（v8.0 — LLM 驱动 + MD 自包含）
@@ -396,6 +410,14 @@ def generate_monthly_report(
 
         from backend.templates.llm_prompt import TASK_MONTHLY_REPORT, run_analysis
 
+        if on_progress:
+            def _m_progress(partial_text, pct):
+                stage_progress = 0.25 + pct * 0.45
+                on_progress(stage_progress, partial_text[:200], "LLM 分析中...")
+            _m_progress("", 0.0)
+        else:
+            _m_progress = None
+
         llm_result = run_analysis(
             TASK_MONTHLY_REPORT,
             period_start=period_start,
@@ -403,9 +425,11 @@ def generate_monthly_report(
             weekly_summaries=weekly_summaries_text[:10000],
             user_profile_snapshot=user_snapshot[:2000],
             project_profile_snapshot=project_snapshot[:2000],
+            on_progress=_m_progress,
         )
 
         if llm_result and isinstance(llm_result, dict) and "summary" in llm_result:
+            if on_progress: on_progress(0.80, "", "正在导出月报文件...")
             file_path = exporter.export_monthly_report(period_start, period_end, llm_result)
             result["success"] = True
             result["method"] = "llm"

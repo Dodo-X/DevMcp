@@ -26,14 +26,19 @@ def handle_daily_summary(payload: dict) -> dict:
     """
     from backend.business.task_handlers.daily_summary import generate_daily_summary
 
+    _progress = payload.get("_progress_callback", lambda p, t="", n="": None)
     date_str = payload.get("date", "")
     target_date = payload.get("target_date", date_str)
 
-    # Step 1: LLM 生成日报
+    # Stage 1: LLM 生成日报
+    _progress(0.05, "", "正在加载工作数据...")
     summary = generate_daily_summary(target_date)
 
     if not summary.get("success"):
+        _progress(1.0, "", "日报生成失败")
         return summary
+
+    _progress(0.65, summary.get("summary", {}).get("overview", "")[:200], "LLM 分析完成")
 
     if summary.get("analysis_method") != "llm":
         logger.info(
@@ -42,6 +47,7 @@ def handle_daily_summary(payload: dict) -> dict:
         return summary
 
     # Step 2: 导出 Calendar/{date}.md（唯一持久化）
+    _progress(0.75, "", "正在导出 Markdown 报告...")
     try:
         from backend.business.vault_export.vault_exporter import get_vault_exporter
 
@@ -54,6 +60,7 @@ def handle_daily_summary(payload: dict) -> dict:
         logger.warning(f"日报 [{target_date}] MD 导出失败: {e}")
 
     # Step 3: 结构化指标/心理落库（P1，使分数可聚合/趋势/环比）
+    _progress(0.88, "", "正在存储指标数据...")
     if summary.get("analysis_method") == "llm":
         try:
             from backend.business.task_handlers.daily_summary import _store_daily_report_metrics

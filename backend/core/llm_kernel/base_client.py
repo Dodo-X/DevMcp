@@ -642,7 +642,7 @@ class LLMEngine:
                         token_count += 1
 
                         # 每 10 个 token 回调一次进度
-                        if token_count - last_callback_at >= 10:
+                        if on_progress and token_count - last_callback_at >= 10:
                             partial = "".join(full_text)
                             progress = min(token_count / max(1, max_tokens), 0.99)
                             try:
@@ -676,7 +676,8 @@ class LLMEngine:
             )
             # 最终回调
             try:
-                on_progress(full, 1.0)
+                if on_progress:
+                    on_progress(full, 1.0)
             except Exception:
                 logger.warning(
                     "LLMEngine._infer_stream: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
