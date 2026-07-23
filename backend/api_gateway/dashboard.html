@@ -569,6 +569,13 @@
             <div id="timelineContent" style="max-height:340px;overflow:auto"><div class="empty">加载中...</div></div>
           </div>
         </div>
+        <div class="card" style="margin-top:16px">
+          <h3>能力画像 <span class="pill" id="profileMomentum">-</span></h3>
+          <div class="grid cols-2" id="profileContent">
+            <div><div class="empty">加载中...</div></div>
+            <div><div class="empty">加载中...</div></div>
+          </div>
+        </div>
       </section>
 
       <!-- ══ Knowledge ══ -->
@@ -1269,7 +1276,7 @@ async function refreshOverview() {
 
 /* ── Growth ── */
 async function refreshGrowthPage() {
-  await Promise.all([refreshUserOverview(), refreshSkillRadar(), refreshHeatmap(), refreshTimeline()]);
+  await Promise.all([refreshUserOverview(), refreshSkillRadar(), refreshHeatmap(), refreshTimeline(), refreshProfile()]);
 }
 async function refreshUserOverview() {
   try {
@@ -1344,6 +1351,42 @@ async function refreshTimeline() {
       `<span class="diag-val">${fmtTime(e.time)} ${escHtml(e.delta||e.impact||'')}</span></div>`).join('')
       : '<div class="empty">暂无事件</div>';
   } catch(e) { /* silent */ }
+}
+
+async function refreshProfile() {
+  try {
+    const d = await fetchJSON('/api/profile');
+    const data = d.data || {};
+    const prof = data.profile || [], plans = data.plans || [];
+    const mom = data.momentum || 0;
+    const conf = data.portrait_conf;
+    document.getElementById('profileMomentum').textContent = (mom ? '+'+mom+'%' : '-') + ' 势能·置信度 ' + (conf ? (conf*100).toFixed(0)+'%' : 'N/A');
+
+    // Left: 能力维度（画像）
+    const dims = prof.slice(0, 8);
+    let left = '<h4 style="margin:0 0 8px;font-size:13px;color:var(--text-2)">能力维度</h4>';
+    if (!dims.length) left += '<div class="empty">暂无画像数据</div>';
+    else left += dims.map(p => {
+      const trend = p.trend === 'rising' ? '↑' : p.trend === 'falling' ? '↓' : '→';
+      const tc = p.trend === 'rising' ? 'var(--green)' : p.trend === 'falling' ? 'var(--red)' : 'var(--text-muted)';
+      return `<div class="diag-row">
+        <span class="diag-name">${escHtml(p.dimension || '')}</span>
+        <span style="font-size:12px;color:var(--text-2);margin-right:8px">${p.value || ''}</span>
+        <span style="color:${tc};font-weight:700">${trend}</span>
+        </div>`;
+    }).join('');
+
+    // Right: 学习计划
+    let right = '<h4 style="margin:0 0 8px;font-size:13px;color:var(--text-2)">学习计划</h4>';
+    if (!plans.length) right += '<div class="empty">暂无计划</div>';
+    else right += plans.slice(0, 8).map(p =>
+      `<div class="diag-row">
+        <span class="diag-name">${escHtml(p.goal || p.skill_domain || '')}</span>
+        <span class="tag ${p.status==='done'?'green':p.status==='active'?'blue':'muted'}">${p.status||'pending'}</span>
+        </div>`).join('');
+
+    document.getElementById('profileContent').innerHTML = '<div>'+left+'</div><div>'+right+'</div>';
+  } catch(e) { document.getElementById('profileContent').innerHTML = '<div class="empty">画像数据获取失败</div>'; }
 }
 
 /* ── Knowledge ── */

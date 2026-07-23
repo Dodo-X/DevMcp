@@ -538,6 +538,39 @@ def register_rest_routes(mcp):
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     # ════════════════════════════════════════════════
+    # 用户画像 API
+    # ════════════════════════════════════════════════
+    @mcp.custom_route("/api/profile", methods=["GET"])
+    async def api_profile(request: Request) -> JSONResponse:
+        """开发者画像与能力模型"""
+        try:
+            from backend.business.analytics.profiling import compute_portrait
+            from backend.core.database.base_conn import get_db
+
+            db = get_db()
+            cur = db._local_conn
+            portrait = compute_portrait(cur)
+
+            return JSONResponse(
+                content={
+                    "code": 0,
+                    "message": "ok",
+                    "data": {
+                        "profile": portrait.get("profile", []),
+                        "skills": portrait.get("skills", []),
+                        "plans": portrait.get("plans", []),
+                        "momentum": portrait.get("momentum", 0),
+                        "portrait_conf": portrait.get("portrait_conf"),
+                    },
+                }
+            )
+        except Exception as e:
+            logger.warning("api_profile 失败", exc_info=True)
+            return JSONResponse(
+                content={"code": -1, "message": str(e), "data": {}}, status_code=500
+            )
+
+    # ════════════════════════════════════════════════
     # Growth Analysis API (v8.3 — Dashboard 审核)
     # ════════════════════════════════════════════════
     @mcp.custom_route("/api/growth/list", methods=["GET"])
