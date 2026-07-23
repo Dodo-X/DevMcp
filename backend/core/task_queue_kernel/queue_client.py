@@ -115,7 +115,6 @@ class TaskQueue:
     # 大型汇总报告 — 同一时间只允许一个执行（防止 Ollama 资源争抢断开）
     REPORT_TYPES = {
         "daily_summary",
-        "daily_export",
         "weekly_report",
         "monthly_report",
         "annual_report",

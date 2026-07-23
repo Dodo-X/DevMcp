@@ -12,7 +12,6 @@ v9.5.4: LLM 分析成功自动闭环 — 保存到 DB + 导出 Calendar/{date}.m
 """
 
 import logging
-from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -68,23 +67,8 @@ def handle_daily_summary(payload: dict) -> dict:
 
 
 def handle_daily_export(payload: dict) -> dict:
-    """异步生成日报并导出到 Vault"""
-    from backend.business.task_handlers.daily_summary import generate_daily_summary
-
-    date_str = payload.get("date", "")
-    summary = generate_daily_summary(date_str)
-
-    if summary.get("success"):
-        from backend.business.vault_export.vault_exporter import get_vault_exporter
-
-        exporter = get_vault_exporter()
-        path = exporter.export_daily_report(
-            date_str=date_str or datetime.now().strftime("%Y-%m-%d"),
-            report_data=summary,
-        )
-        summary["vault_path"] = path
-
-    return summary
+    """v9.11: 统一到 handle_daily_summary（日报 gen+export 合并为单 handler）"""
+    return handle_daily_summary(payload)
 
 
 def register_task_handlers():

@@ -39,7 +39,7 @@ def compact_for_llm(text: str, max_chars: int = 4000) -> str:
     paragraphs = text.split("\n\n")
     result = []
     total = 0
-    for i, p in enumerate(paragraphs):
+    for p in paragraphs:
         if total + len(p) <= max_chars:
             result.append(p)
             total += len(p) + 2  # +2 for \n\n

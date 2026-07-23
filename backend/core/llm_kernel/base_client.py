@@ -325,14 +325,14 @@ class LLMEngine:
 
         cfg = self._get_config()
         model_name = getattr(cfg.llm, "ollama_model", "qwen3")
-        base_timeout = timeout if timeout is not None else getattr(cfg.llm, "ollama_timeout", 300)
         start_time = time.time()
 
-        # 固定超时：如果配置为 0（无限），使用 600s 作为兜底
-        http_timeout = base_timeout if base_timeout > 0 else 600
+        # 长任务模式：撤销 HTTP 超时，由 cancel_event 主动控制生命周期
+        # Ollama stream 模式下 3 小时连续生成不超时，依赖心跳机制确认活性
+        http_timeout = None  # 无限制 — 长报告可达 3 小时
 
-        # 如果有进度回调，使用流式模式；否则用非流式（兼容旧行为）
-        use_stream = on_progress is not None
+        # 统一走 stream 模式：强制 Ollama 持续推送，天然心跳 + 不超时
+        use_stream = True
 
         for attempt in range(retries + 1):
             # 检查取消信号
@@ -561,6 +561,33 @@ class LLMEngine:
         full_text = []
         token_count = 0
         last_callback_at = 0
+        _heartbeat_stop = threading.Event()
+        _heartbeat_last_full = [""]
+        _heartbeat_last_count = [0]
+
+        def _heartbeat():
+            """心跳线程：每 60s 确认 Ollama 仍在活跃生成，防止误判为卡死"""
+            while not _heartbeat_stop.is_set():
+                _heartbeat_stop.wait(60)
+                if _heartbeat_stop.is_set():
+                    break
+                partial = "".join(full_text)
+                if partial != _heartbeat_last_full[0] or token_count > _heartbeat_last_count[0]:
+                    _heartbeat_last_full[0] = partial
+                    _heartbeat_last_count[0] = token_count
+                    progress = min(token_count / max(1, max_tokens), 0.99)
+                    try:
+                        if on_progress:
+                            on_progress(partial, progress)
+                    except Exception:
+                        pass
+                else:
+                    logger.warning(
+                        f"⚠️ Ollama 心跳: 过去 60s 无新 token (已产出 {token_count} tokens)"
+                    )
+
+        _heartbeat_thread = threading.Thread(target=_heartbeat, daemon=True, name="ollama_heartbeat")
+        _heartbeat_thread.start()
 
         try:
             with urllib.request.urlopen(req, timeout=http_timeout) as resp:
@@ -621,6 +648,7 @@ class LLMEngine:
                     except json.JSONDecodeError:
                         continue
 
+            _heartbeat_stop.set()  # 停止心跳线程
             full = "".join(full_text)
             self._intercept_log(
                 model_name,
@@ -643,6 +671,7 @@ class LLMEngine:
             return full
 
         except Exception as e:
+            _heartbeat_stop.set()
             self._intercept_log(
                 model_name,
                 prompt,
