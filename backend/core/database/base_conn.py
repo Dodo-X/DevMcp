@@ -116,6 +116,10 @@ class Database:
             conn.close()
             return False
         except Exception:
+            logger.warning(
+                "Database._check_schema_incompatible: 未预期的异常被静默捕获（P-17 收口）",
+                exc_info=True,
+            )
             return False  # 数据库可能损坏，让后续建表流程处理
 
     def init_shared(self, db_path: str):
@@ -125,6 +129,9 @@ class Database:
                 self._shared_conn = sqlite3.connect(db_path, check_same_thread=False)
                 self._shared_conn.row_factory = sqlite3.Row
         except Exception:
+            logger.warning(
+                "Database.init_shared: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             self._shared_conn = None
 
     def _create_local_tables(self):
@@ -566,14 +573,25 @@ class Database:
                 try:
                     cursor.execute(f"ALTER TABLE knowledge_points DROP COLUMN {_col}")
                 except Exception:
+                    logger.warning(
+                        "Database._create_local_tables: 未预期的异常被静默捕获（P-17 收口）",
+                        exc_info=True,
+                    )
                     pass
             # 删除废弃索引
             for _idx in ("idx_knowledge_points_source", "idx_kp_source_session"):
                 try:
                     cursor.execute(f"DROP INDEX IF EXISTS {_idx}")
                 except Exception:
+                    logger.warning(
+                        "Database._create_local_tables: 未预期的异常被静默捕获（P-17 收口）",
+                        exc_info=True,
+                    )
                     pass
         except Exception:
+            logger.warning(
+                "Database._create_local_tables: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             pass
 
         # ════════════════════════════════════════════════════════════════
@@ -838,6 +856,9 @@ class Database:
             row = cursor.fetchone()
             return row["value"] if row else "0.0.0"
         except Exception:
+            logger.warning(
+                "Database._get_schema_version: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return "0.0.0"
 
     def _set_schema_version(self, version: str):
@@ -908,6 +929,10 @@ class Database:
                     orphaned_fks[table] = count
                     issues.append(f"{table}: {count} 条记录指向不存在的 conversations")
             except Exception:
+                logger.warning(
+                    "Database.validate_conversation_integrity: 未预期的异常被静默捕获（P-17 收口）",
+                    exc_info=True,
+                )
                 pass
 
         status = "error" if orphaned_fks else ("warning" if issues else "ok")

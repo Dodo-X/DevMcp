@@ -31,6 +31,7 @@ def track_write(operation: str, success: bool) -> None:
         else:
             tracker.record_failure(operation)
     except Exception:
+        logger.warning("track_write: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
         pass
 
 

@@ -216,6 +216,10 @@ def handle_conversation_finalize(engine, payload: dict) -> dict:
                                 exporter = get_vault_exporter()
                                 exporter.export_project_to_vault(system_id, proj_row)
                         except Exception:
+                            logger.warning(
+                                "handle_conversation_finalize: 未预期的异常被静默捕获（P-17 收口）",
+                                exc_info=True,
+                            )
                             pass
         except Exception as e:
             logger.warning(f"project_description 评审失败（非致命）: {e}")

@@ -93,6 +93,9 @@ def _run_growth_analysis(
                     (datetime.now().isoformat(), json.dumps(summary, ensure_ascii=False)[:500]),
                 )
             except Exception:
+                logger.warning(
+                    "_run_growth_analysis: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+                )
                 pass
 
         if count > 0:

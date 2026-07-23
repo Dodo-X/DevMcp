@@ -76,6 +76,7 @@ def _get_free_memory_gb() -> float:
         ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
         return m.ullAvailPhys / (1024**3)
     except Exception:
+        logger.warning("_get_free_memory_gb: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
         return -1.0  # 无法获取时跳过检查
 
 
@@ -124,6 +125,9 @@ class LLMEngine:
                 if resp.status != 200:
                     return False
         except Exception:
+            logger.warning(
+                "LLMEngine.is_available: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return False
 
         # 快速模式到此为止
@@ -582,6 +586,10 @@ class LLMEngine:
                             try:
                                 on_progress(partial, progress)
                             except Exception:
+                                logger.warning(
+                                    "LLMEngine._infer_stream: 未预期的异常被静默捕获（P-17 收口）",
+                                    exc_info=True,
+                                )
                                 pass  # 回调失败不中断推理
                             last_callback_at = token_count
 
@@ -607,6 +615,9 @@ class LLMEngine:
             try:
                 on_progress(full, 1.0)
             except Exception:
+                logger.warning(
+                    "LLMEngine._infer_stream: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+                )
                 pass
             return full
 
@@ -1018,6 +1029,10 @@ class LLMEngine:
                     }
                 )
             except Exception:
+                logger.warning(
+                    "LLMEngine.apply_user_traits: 未预期的异常被静默捕获（P-17 收口）",
+                    exc_info=True,
+                )
                 pass
 
         # 学习进度（如有）

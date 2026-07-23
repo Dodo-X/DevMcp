@@ -141,6 +141,9 @@ def get_user_growth_overview() -> str:
         return json.dumps(result, ensure_ascii=False, indent=2)
 
     except Exception as e:
+        logger.warning(
+            "get_user_growth_overview: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+        )
         return json.dumps(
             {
                 "status": "error",
@@ -362,6 +365,9 @@ def get_system_evolution_stats() -> str:
         return json.dumps(result, ensure_ascii=False, indent=2)
 
     except Exception as e:
+        logger.warning(
+            "get_system_evolution_stats: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+        )
         return json.dumps(
             {
                 "status": "error",
@@ -500,6 +506,7 @@ def get_user_skill_radar() -> str:
         return json.dumps(result, ensure_ascii=False, indent=2)
 
     except Exception as e:
+        logger.warning("get_user_skill_radar: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
         return json.dumps(
             {
                 "status": "error",
@@ -642,6 +649,7 @@ def get_learning_timeline(limit: int = 20) -> str:
         return json.dumps(result, ensure_ascii=False, indent=2)
 
     except Exception as e:
+        logger.warning("get_learning_timeline: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
         return json.dumps(
             {
                 "status": "error",
@@ -766,6 +774,9 @@ def get_user_activity_heatmap() -> str:
         return json.dumps(result, ensure_ascii=False, indent=2)
 
     except Exception as e:
+        logger.warning(
+            "get_user_activity_heatmap: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+        )
         return json.dumps(
             {
                 "status": "error",
@@ -813,6 +824,9 @@ def _calculate_learning_streak(db) -> int:
         return streak
 
     except Exception:
+        logger.warning(
+            "_calculate_learning_streak: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+        )
         return 0
 
 
@@ -853,6 +867,9 @@ def _calculate_learning_efficiency(db) -> float:
             return 0.5 if recent_count > 0 else 0.0
 
     except Exception:
+        logger.warning(
+            "_calculate_learning_efficiency: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+        )
         return 0.0
 
 

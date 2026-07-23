@@ -4,6 +4,11 @@ MCP 工具统一装饰器
 消除 74 个裸函数中重复的 try/except + json.dumps 样板代码。
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 import functools
 import json
 from collections.abc import Callable
@@ -42,6 +47,7 @@ def mcp_tool_handler(func: Callable) -> Callable:
                 return json.dumps(result, ensure_ascii=False, indent=2, default=str)
             return result
         except Exception as e:
+            logger.warning("mcp_tool_handler: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
             return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
 
     return wrapper

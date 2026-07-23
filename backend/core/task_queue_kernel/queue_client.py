@@ -135,6 +135,7 @@ class TaskQueue:
             _cfg = get_config()
             _num_parallel = _cfg.llm.ollama_num_parallel
         except Exception:
+            logger.warning("TaskQueue.__init__: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
             _num_parallel = 2
 
         self._max_concurrent: int = _num_parallel
@@ -601,6 +602,10 @@ class TaskQueue:
                         ("db_unavailable", task_id),
                     )
                 except Exception:
+                    logger.warning(
+                        "TaskQueue._execute_task_wrapper: 未预期的异常被静默捕获（P-17 收口）",
+                        exc_info=True,
+                    )
                     pass
 
             if task_id in self._futures:
@@ -627,6 +632,10 @@ class TaskQueue:
 
                 bind_cancel_event(cancel_event)
             except Exception:
+                logger.warning(
+                    "TaskQueue._execute_with_timeout: 未预期的异常被静默捕获（P-17 收口）",
+                    exc_info=True,
+                )
                 pass
             try:
                 r = self._dispatch_task_execution(task_meta)
@@ -634,6 +643,10 @@ class TaskQueue:
                     result_container["result"] = r
                     result_container["done"] = True
             except Exception as e:
+                logger.warning(
+                    "TaskQueue._execute_with_timeout: 未预期的异常被静默捕获（P-17 收口）",
+                    exc_info=True,
+                )
                 with lock:
                     result_container["error"] = e
                     result_container["done"] = True
@@ -643,6 +656,10 @@ class TaskQueue:
 
                     unbind_cancel_event()
                 except Exception:
+                    logger.warning(
+                        "TaskQueue._execute_with_timeout: 未预期的异常被静默捕获（P-17 收口）",
+                        exc_info=True,
+                    )
                     pass
 
         t = threading.Thread(
@@ -732,6 +749,10 @@ class TaskQueue:
                         (new_retry_count, error_msg, next_retry, task_id),
                     )
                 except Exception:
+                    logger.warning(
+                        "TaskQueue._handle_task_failure: 未预期的异常被静默捕获（P-17 收口）",
+                        exc_info=True,
+                    )
                     pass
 
             def requeue():
@@ -758,6 +779,10 @@ class TaskQueue:
                         (error_msg, datetime.now().isoformat(), task_id),
                     )
                 except Exception:
+                    logger.warning(
+                        "TaskQueue._handle_task_failure: 未预期的异常被静默捕获（P-17 收口）",
+                        exc_info=True,
+                    )
                     pass
 
             with self._stats_lock:
@@ -879,6 +904,9 @@ class TaskQueue:
                     (task_id,),
                 )
             except Exception:
+                logger.warning(
+                    "TaskQueue.retry_task: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+                )
                 pass
 
         with self._queue_lock:
@@ -1000,6 +1028,9 @@ class TaskQueue:
                 "UPDATE task_queue SET last_heartbeat = ? WHERE task_id = ?", (now, task_id)
             )
         except Exception:
+            logger.warning(
+                "TaskQueue.update_heartbeat: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             pass
 
     def update_task_progress(
@@ -1041,6 +1072,9 @@ class TaskQueue:
                 ),
             )
         except Exception:
+            logger.warning(
+                "TaskQueue.update_task_progress: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             pass
 
     def get_running_tasks_with_progress(self) -> list:
@@ -1104,6 +1138,10 @@ class TaskQueue:
                         try:
                             payload = _json.loads(payload)
                         except Exception:
+                            logger.warning(
+                                "TaskQueue.list_tasks: 未预期的异常被静默捕获（P-17 收口）",
+                                exc_info=True,
+                            )
                             payload = {}
                     tasks.append(
                         {
@@ -1347,6 +1385,10 @@ class TaskQueue:
                     try:
                         payload = json.loads(payload)
                     except Exception:
+                        logger.warning(
+                            "TaskQueue._recover_interrupted_tasks: 未预期的异常被静默捕获（P-17 收口）",
+                            exc_info=True,
+                        )
                         payload = {}
                 task_meta = {
                     "task_id": task_id,
@@ -1429,6 +1471,10 @@ class TaskQueue:
                             cleaned += 1
                         continue
                     except Exception:
+                        logger.warning(
+                            "TaskQueue._auto_cleanup_zombies: 未预期的异常被静默捕获（P-17 收口）",
+                            exc_info=True,
+                        )
                         pass
 
                 # fallback: 用 started_at 判断
@@ -1442,6 +1488,10 @@ class TaskQueue:
                         self._mark_zombie(db, row["task_id"], age_s, now)
                         cleaned += 1
                 except Exception:
+                    logger.warning(
+                        "TaskQueue._auto_cleanup_zombies: 未预期的异常被静默捕获（P-17 收口）",
+                        exc_info=True,
+                    )
                     pass
 
             if cleaned > 0:
@@ -1468,6 +1518,9 @@ class TaskQueue:
             try:
                 self._futures[task_id].cancel()
             except Exception:
+                logger.warning(
+                    "TaskQueue._mark_zombie: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+                )
                 pass
             del self._futures[task_id]
 
@@ -1543,6 +1596,10 @@ class TaskQueue:
                             (f"Zombie cleanup after {age_seconds:.1f}s", now.isoformat(), task_id),
                         )
                     except Exception:
+                        logger.warning(
+                            "TaskQueue.force_cleanup_zombie_tasks: 未预期的异常被静默捕获（P-17 收口）",
+                            exc_info=True,
+                        )
                         pass
 
                     if task_id in self._futures:

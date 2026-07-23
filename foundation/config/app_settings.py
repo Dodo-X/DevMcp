@@ -7,6 +7,11 @@ DevPartner Agent 配置管理系统
 - v6.0: pyproject.toml 作为版本号单一来源
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,6 +47,7 @@ def get_project_version() -> str:
                     version = line.split("=", 1)[1].strip().strip('"').strip("'")
                     return version
     except Exception:
+        logger.warning("get_project_version: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
         pass
 
     return "0.0.0"
@@ -212,6 +218,9 @@ class ConfigManager:
                     config = self._merge_yaml(config, yaml_data)
                     break
                 except Exception:
+                    logger.warning(
+                        "ConfigManager.load: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+                    )
                     pass
 
         # 2. 环境变量覆盖

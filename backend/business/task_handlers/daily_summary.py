@@ -117,6 +117,7 @@ def get_daily_work_data(date_str: str = None, fallback_to_log: bool = False) -> 
         result["stats"] = db.get_daily_stats(date_str)
 
     except Exception as e:
+        logger.warning("get_daily_work_data: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
         result["db_error"] = str(e)
 
     return result
@@ -140,6 +141,9 @@ def get_weekly_work_data() -> dict:
             day_data["conversation_count"] = stats.get("total", 0)
             day_data["tasks"] = stats.get("by_type", {})
         except Exception:
+            logger.warning(
+                "get_weekly_work_data: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             pass
 
         days.append(day_data)
@@ -236,6 +240,7 @@ def generate_daily_summary(date_str: str = "", use_llm: bool = True) -> dict:
         return result
 
     except Exception as e:
+        logger.warning("generate_daily_summary: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
         return {
             "success": False,
             "error": str(e),
@@ -261,6 +266,7 @@ def _check_llm_available(feature_flag: str = "enhance_daily_summary") -> tuple:
             return False, f"feature flag {feature_flag} 未开启"
         return True, ""
     except Exception as e:
+        logger.warning("_check_llm_available: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
         return False, f"LLM 检查异常: {e}"
 
 
@@ -493,6 +499,9 @@ def archive_and_cleanup_data() -> dict:
                     f"📋 标记 {len(failed_rows)} 条 pending_analyses 为 failed（超过最大重试次数）"
                 )
         except Exception as e:
+            logger.warning(
+                "archive_and_cleanup_data: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             result["errors"].append(f"pending清理失败: {e}")
 
         # ── 2. 温数据归档：30-180天，压缩 steps 详情 ──
@@ -537,6 +546,10 @@ def archive_and_cleanup_data() -> dict:
                         )
                         archived_count += 1
                     except Exception:
+                        logger.warning(
+                            "archive_and_cleanup_data: 未预期的异常被静默捕获（P-17 收口）",
+                            exc_info=True,
+                        )
                         pass
 
                 result["warm_archived"] = archived_count
@@ -546,6 +559,9 @@ def archive_and_cleanup_data() -> dict:
                         f"📦 温数据归档完成: {archived_count} 个对话已压缩, {skipped_count} 个跳过（MD未导出）"
                     )
         except Exception as e:
+            logger.warning(
+                "archive_and_cleanup_data: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             result["errors"].append(f"温数据归档失败: {e}")
 
         # ── 3. 冷数据归档：超过180天，标记为 'archived'（v9.2: 不再使用 archived_conversations 表）──
@@ -568,6 +584,9 @@ def archive_and_cleanup_data() -> dict:
                 result["cold_archived"] = cold_count
                 logger.info(f"🗄️ 冷数据归档完成: {cold_count} 个对话标记为 'archived'")
         except Exception as e:
+            logger.warning(
+                "archive_and_cleanup_data: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             result["errors"].append(f"冷数据归档失败: {e}")
 
         # ── 4. 深度清理：超过365天，直接删除（v9.2: MD 为唯一完整数据源）──
@@ -593,6 +612,9 @@ def archive_and_cleanup_data() -> dict:
                 result["deep_cleaned"] = len(deep_rows)
                 logger.info(f"🗑️ 深度清理完成: {len(deep_rows)} 条对话已删除（MD为唯一数据源）")
         except Exception as e:
+            logger.warning(
+                "archive_and_cleanup_data: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             result["errors"].append(f"深度清理失败: {e}")
 
         # ── 5. 清理过期的 improvement_log / evolution_log ──
@@ -613,6 +635,9 @@ def archive_and_cleanup_data() -> dict:
                         (log_cutoff,),
                     )
             except Exception:
+                logger.warning(
+                    "archive_and_cleanup_data: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+                )
                 pass
 
             el_count = 0
@@ -628,6 +653,9 @@ def archive_and_cleanup_data() -> dict:
                         (log_cutoff,),
                     )
             except Exception:
+                logger.warning(
+                    "archive_and_cleanup_data: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+                )
                 pass
 
             result["logs_cleaned"] = il_count + el_count
@@ -636,6 +664,9 @@ def archive_and_cleanup_data() -> dict:
                     f"🧹 日志清理完成: improvement_log {il_count}条, evolution_log {el_count}条"
                 )
         except Exception as e:
+            logger.warning(
+                "archive_and_cleanup_data: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             result["errors"].append(f"日志清理失败: {e}")
 
     except Exception as e:
@@ -663,6 +694,9 @@ def _get_user_profile_snapshot(db) -> str:
             )
         return "\n".join(parts)
     except Exception:
+        logger.warning(
+            "_get_user_profile_snapshot: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+        )
         return "用户画像获取失败"
 
 
@@ -683,6 +717,9 @@ def _get_project_profile_snapshot(db) -> str:
             parts.append(f"- 成熟度: {row.get('maturity', 'unknown')}")
         return "\n".join(parts)
     except Exception:
+        logger.warning(
+            "_get_project_profile_snapshot: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+        )
         return "项目画像获取失败"
 
 
@@ -729,6 +766,7 @@ def _read_md_reports(
             content = f.read_text(encoding="utf-8", errors="replace")[:2000]
             reports.append({"file": f.name, "content": content})
         except Exception:
+            logger.warning("_read_md_reports: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
             pass
 
         if len(reports) >= limit:

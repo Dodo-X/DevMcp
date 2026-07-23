@@ -99,6 +99,10 @@ def handle_finalize_user_profile(engine, payload: dict) -> dict:
             try:
                 dao.set_skill_plan(domain=str(area), goal=f"提升 {area}")
             except Exception:
+                logger.warning(
+                    "handle_finalize_user_profile: 未预期的异常被静默捕获（P-17 收口）",
+                    exc_info=True,
+                )
                 pass
 
         results["success"] = True

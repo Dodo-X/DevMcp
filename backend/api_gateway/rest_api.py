@@ -125,6 +125,9 @@ def register_rest_routes(mcp):
             llm = get_llm_engine()
             llm_available = llm.is_available() if llm else False
         except Exception:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             llm_available = False
         return JSONResponse(
             {
@@ -204,6 +207,9 @@ def register_rest_routes(mcp):
                 running_tasks = ts.get("running_tasks", 0)
                 completed_tasks = ts.get("total_completed", 0)
             except Exception:
+                logger.warning(
+                    "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+                )
                 pass
 
             kb_size = 0
@@ -211,6 +217,9 @@ def register_rest_routes(mcp):
                 kb = db.query_local("SELECT COUNT(*) as cnt FROM knowledge_points")
                 kb_size = kb[0]["cnt"] if kb else 0
             except Exception:
+                logger.warning(
+                    "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+                )
                 pass
 
             today_knowledge = 0
@@ -221,6 +230,9 @@ def register_rest_routes(mcp):
                 )
                 today_knowledge = kt[0]["cnt"] if kt else 0
             except Exception:
+                logger.warning(
+                    "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+                )
                 pass
 
             callback_registrations = callback_triggers = 0
@@ -232,6 +244,9 @@ def register_rest_routes(mcp):
                 callback_registrations = cs.get("total_registrations", 0)
                 callback_triggers = cs.get("total_triggered", 0)
             except Exception:
+                logger.warning(
+                    "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+                )
                 pass
 
             pending_analyses_count = 0
@@ -252,6 +267,9 @@ def register_rest_routes(mcp):
                         }
                     )
             except Exception:
+                logger.warning(
+                    "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+                )
                 pass
 
             return JSONResponse(
@@ -270,6 +288,9 @@ def register_rest_routes(mcp):
                 }
             )
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     # ════════════════════════════════════════════════
@@ -290,6 +311,9 @@ def register_rest_routes(mcp):
                 }
             )
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/debug/intercept/toggle", methods=["POST"])
@@ -322,6 +346,9 @@ def register_rest_routes(mcp):
                 }
             )
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/debug/intercept/logs", methods=["GET"])
@@ -340,6 +367,9 @@ def register_rest_routes(mcp):
                 }
             )
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/pending-analyses/process", methods=["POST"])
@@ -351,6 +381,9 @@ def register_rest_routes(mcp):
             result = process_pending_analyses()
             return JSONResponse(content=result)
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     # ════════════════════════════════════════════════
@@ -366,6 +399,9 @@ def register_rest_routes(mcp):
             diag = tq.get_diagnostics()
             return JSONResponse(content=diag)
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     # ════════════════════════════════════════════════
@@ -393,6 +429,9 @@ def register_rest_routes(mcp):
                     getattr(cfg.llm, "ollama_model", "qwen3") if hasattr(cfg, "llm") else "qwen3"
                 )
             except Exception:
+                logger.warning(
+                    "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+                )
                 model_name = "qwen3"
 
             return JSONResponse(
@@ -408,6 +447,9 @@ def register_rest_routes(mcp):
                 }
             )
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     # ════════════════════════════════════════════════
@@ -460,6 +502,9 @@ def register_rest_routes(mcp):
 
             return JSONResponse(content={"total": len(result), "items": result})
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     # ════════════════════════════════════════════════
@@ -501,6 +546,9 @@ def register_rest_routes(mcp):
                             }
                         )
             except Exception:
+                logger.warning(
+                    "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+                )
                 pass
 
             # 回退: 如果 connected_systems 为空，用当前工作目录名
@@ -594,6 +642,10 @@ def register_rest_routes(mcp):
                     try:
                         tags = _json.loads(tags)
                     except Exception:
+                        logger.warning(
+                            "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）",
+                            exc_info=True,
+                        )
                         tags = [tags]
                 content = row.get("content") or ""
                 results.append(
@@ -639,6 +691,9 @@ def register_rest_routes(mcp):
             result = engine.check_data_integrity()
             return JSONResponse(content=result)
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     # ════════════════════════════════════════════════
@@ -679,6 +734,9 @@ def register_rest_routes(mcp):
 
             return JSONResponse(content=result)
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/reports/generate-daily", methods=["POST"])
@@ -743,6 +801,9 @@ def register_rest_routes(mcp):
                 }
             )
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/reports/list", methods=["GET"])
@@ -765,6 +826,10 @@ def register_rest_routes(mcp):
                             if first_line.startswith("# "):
                                 title = first_line[2:].strip()
                         except Exception:
+                            logger.warning(
+                                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）",
+                                exc_info=True,
+                            )
                             pass
                         items.append(
                             {
@@ -799,6 +864,9 @@ def register_rest_routes(mcp):
                 }
             )
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/reports/read", methods=["GET"])
@@ -849,6 +917,9 @@ def register_rest_routes(mcp):
                 }
             )
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
     # ════════════════════════════════════════════════
@@ -865,6 +936,9 @@ def register_rest_routes(mcp):
             result = generate_daily_summary(date)
             return JSONResponse(content={"success": True, "data": result})
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     # ════════════════════════════════════════════════
@@ -885,6 +959,9 @@ def register_rest_routes(mcp):
             result = engine.list_points(domain, category, limit, offset)
             return JSONResponse(content={"success": True, "data": result})
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     # ════════════════════════════════════════════════
@@ -925,6 +1002,9 @@ def register_rest_routes(mcp):
                 content={"success": True, "data": {"items": items, "total": len(items)}}
             )
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/knowledge/match", methods=["POST"])
@@ -942,6 +1022,9 @@ def register_rest_routes(mcp):
             # 前端直接使用 d.matched_domain / d.count / d.items，扁平化返回
             return JSONResponse(content=result)
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/knowledge/get", methods=["GET"])
@@ -955,6 +1038,9 @@ def register_rest_routes(mcp):
             result = engine.get_point(knowledge_id)
             return JSONResponse(content={"success": True, "data": result})
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     # ════════════════════════════════════════════════
@@ -972,6 +1058,9 @@ def register_rest_routes(mcp):
             tasks = tq.list_tasks(limit=limit)
             return JSONResponse(content=[dict(t) for t in tasks])
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/tasks/stats", methods=["GET"])
@@ -984,6 +1073,9 @@ def register_rest_routes(mcp):
             stats = tq.get_queue_stats()
             return JSONResponse(content=stats)
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/tasks/cancel", methods=["POST"])
@@ -1000,6 +1092,9 @@ def register_rest_routes(mcp):
             result = tq.cancel_task(task_id)
             return JSONResponse(content=result)
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/tasks/retry", methods=["POST"])
@@ -1016,6 +1111,9 @@ def register_rest_routes(mcp):
             result = tq.retry_task(task_id)
             return JSONResponse(content=result)
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/tasks/handlers", methods=["GET"])
@@ -1028,6 +1126,9 @@ def register_rest_routes(mcp):
             handlers = tq.get_handlers()
             return JSONResponse(content={"total": len(handlers), "handlers": handlers})
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/tasks/recover", methods=["POST"])
@@ -1053,6 +1154,9 @@ def register_rest_routes(mcp):
                 }
             )
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/tasks/progress", methods=["GET"])
@@ -1065,6 +1169,9 @@ def register_rest_routes(mcp):
             tasks = tq.get_running_tasks_with_progress()
             return JSONResponse(content={"tasks": tasks})
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/tasks/job-status", methods=["GET"])
@@ -1078,6 +1185,9 @@ def register_rest_routes(mcp):
             status = tq.get_task_status(task_id)
             return JSONResponse(content=status)
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/tasks/cleanup-pending", methods=["POST"])
@@ -1119,6 +1229,9 @@ def register_rest_routes(mcp):
                 result["cascade"] = cascade_result
             return JSONResponse(content=result)
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     # ════════════════════════════════════════════════
@@ -1151,6 +1264,9 @@ def register_rest_routes(mcp):
                 }
             )
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/system/diagnose", methods=["GET"])
@@ -1163,6 +1279,9 @@ def register_rest_routes(mcp):
             result = engine.system_diagnose()
             return JSONResponse(content=result)
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/system/health", methods=["GET"])
@@ -1175,6 +1294,9 @@ def register_rest_routes(mcp):
             result = engine.get_system_health()
             return JSONResponse(content=result)
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/system/llm-status", methods=["GET", "POST"])
@@ -1188,6 +1310,9 @@ def register_rest_routes(mcp):
             result = engine.llm_status(action)
             return JSONResponse(content=result)
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/system/cleanup", methods=["POST"])
@@ -1203,6 +1328,9 @@ def register_rest_routes(mcp):
             result = engine.cleanup_data(scope=scope, dry_run=dry_run)
             return JSONResponse(content=result)
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     # ════════════════════════════════════════════════
@@ -1219,6 +1347,9 @@ def register_rest_routes(mcp):
             stats = cr.get_stats()
             return JSONResponse(content=stats)
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/health/check", methods=["GET"])
@@ -1236,6 +1367,9 @@ def register_rest_routes(mcp):
             }
             return JSONResponse(content={"services": services})
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/trends/system", methods=["GET"])
@@ -1255,6 +1389,9 @@ def register_rest_routes(mcp):
             sessions = [r["cnt"] for r in (rows or [])]
             return JSONResponse(content={"timestamps": timestamps, "sessions": sessions})
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     # ════════════════════════════════════════════════
@@ -1282,6 +1419,9 @@ def register_rest_routes(mcp):
             )
             return JSONResponse(content={"success": True})
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/growth/apply", methods=["POST"])
@@ -1301,6 +1441,9 @@ def register_rest_routes(mcp):
             )
             return JSONResponse(content={"success": True})
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     # ════════════════════════════════════════════════
@@ -1317,6 +1460,9 @@ def register_rest_routes(mcp):
             result = scheduler.run_now()
             return JSONResponse(content=result)
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/ollama/start", methods=["POST"])
@@ -1335,9 +1481,15 @@ def register_rest_routes(mcp):
                     llm = get_llm_engine()
                     llm.recheck()  # v9.5.2: 用 recheck 清除陈旧 load_error
                 except Exception:
+                    logger.warning(
+                        "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+                    )
                     pass
             return JSONResponse(content=result)
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/ollama/recheck", methods=["POST"])
@@ -1354,6 +1506,9 @@ def register_rest_routes(mcp):
             result = llm.recheck()
             return JSONResponse(content=result)
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
     @mcp.custom_route("/api/ollama/stop", methods=["POST"])
@@ -1377,6 +1532,9 @@ def register_rest_routes(mcp):
         except FileNotFoundError:
             return JSONResponse(content={"success": False, "error": "ollama 命令未找到"})
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"success": False, "error": str(e)}, status_code=500)
 
     # ════════════════════════════════════════════════
@@ -1397,4 +1555,7 @@ def register_rest_routes(mcp):
                 return JSONResponse(content={"found": False, "conversation_id": conversation_id})
             return JSONResponse(content={"found": True, **status})
         except Exception as e:
+            logger.warning(
+                "register_rest_routes: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             return JSONResponse(content={"error": str(e)}, status_code=500)

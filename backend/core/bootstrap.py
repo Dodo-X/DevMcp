@@ -96,6 +96,9 @@ def _ensure_ollama_running(timeout: int = 30) -> bool:
             _ollama_log(f"连接 Ollama 失败: {e.reason}", "WARN")
             return False
         except Exception as e:
+            logger.warning(
+                "_ensure_ollama_running: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             _ollama_log(f"检查 Ollama 异常: {e}", "WARN")
             return False
 
@@ -118,6 +121,7 @@ def _ensure_ollama_running(timeout: int = 30) -> bool:
         _ollama_log("ollama 命令未找到，请确保已安装 Ollama: https://ollama.com/download", "ERROR")
         return False
     except Exception as e:
+        logger.warning("_ensure_ollama_running: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
         _ollama_log(f"检查 ollama 命令失败: {e}", "ERROR")
         return False
 
@@ -147,11 +151,15 @@ def _ensure_ollama_running(timeout: int = 30) -> bool:
                         if line.strip():
                             _ollama_log(f"[ollama ERR] {line.strip()}", "WARN")
             except Exception:
+                logger.warning(
+                    "_ensure_ollama_running: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+                )
                 pass
 
         t = threading.Thread(target=_read_ollama_output, daemon=True)
         t.start()
     except Exception as e:
+        logger.warning("_ensure_ollama_running: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
         _ollama_log(f"启动 Ollama 失败: {e}", "ERROR")
         return False
 
@@ -227,6 +235,7 @@ def ensure_ready():
             """)
             db._local_conn.commit()
         except Exception:
+            logger.warning("ensure_ready: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
             pass
 
         try:

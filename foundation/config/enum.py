@@ -4,6 +4,11 @@
 此处统一再导出，便于前后端从 foundation 层引用。
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 try:
     from backend.core.data_types.enums import (  # noqa: F401
         ConversationStatus,
@@ -11,6 +16,7 @@ try:
         StepType,
     )
 except Exception:  # pragma: no cover - 领域层不可用时保持 foundation 可导入
+    logger.warning("<module>: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
     ConversationStatus = StepStatus = StepType = None
 
 __all__ = ["ConversationStatus", "StepStatus", "StepType"]

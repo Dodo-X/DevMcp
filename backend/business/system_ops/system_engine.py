@@ -32,6 +32,9 @@ class SystemEngine:
             engine = get_conversation_engine()
             result["conversation_engine"] = engine.get_system_health()
         except Exception as e:
+            logger.warning(
+                "SystemEngine.get_system_health: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             result["conversation_engine"] = {"status": "error", "error": str(e)}
 
         # 任务队列健康
@@ -41,6 +44,9 @@ class SystemEngine:
             queue = get_task_queue()
             result["task_queue"] = queue.get_queue_stats()
         except Exception as e:
+            logger.warning(
+                "SystemEngine.get_system_health: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             result["task_queue"] = {"status": "error", "error": str(e)}
 
         # 知识库统计
@@ -55,6 +61,9 @@ class SystemEngine:
                 "by_domain": {r["domain"]: r["cnt"] for r in kp_by_domain},
             }
         except Exception as e:
+            logger.warning(
+                "SystemEngine.get_system_health: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             result["knowledge_base"] = {"error": str(e)}
 
         return result
@@ -103,6 +112,9 @@ class SystemEngine:
             db = get_db()
             checks["database"] = "healthy"
         except Exception as e:
+            logger.warning(
+                "SystemEngine.system_diagnose: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             checks["database"] = f"unhealthy: {e}"
             issues.append(f"数据库异常: {e}")
 
@@ -123,6 +135,9 @@ class SystemEngine:
                 checks["logs"] = "missing"
                 issues.append("日志目录不存在")
         except Exception as e:
+            logger.warning(
+                "SystemEngine.system_diagnose: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             checks["logs"] = f"error: {e}"
 
         # 数据库表统计
@@ -141,9 +156,16 @@ class SystemEngine:
                     row = db.query_local(f"SELECT COUNT(*) as cnt FROM {t}")
                     table_counts[t] = row[0]["cnt"] if row else 0
                 except Exception:
+                    logger.warning(
+                        "SystemEngine.system_diagnose: 未预期的异常被静默捕获（P-17 收口）",
+                        exc_info=True,
+                    )
                     table_counts[t] = "N/A"
             checks["tables"] = table_counts
         except Exception as e:
+            logger.warning(
+                "SystemEngine.system_diagnose: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             checks["tables"] = f"error: {e}"
 
         return {
@@ -181,9 +203,17 @@ class SystemEngine:
                     row = db.query_local(f"SELECT COUNT(*) as cnt FROM {t}")
                     db_stats[t] = row[0]["cnt"] if row else 0
                 except Exception:
+                    logger.warning(
+                        "SystemEngine.check_data_integrity: 未预期的异常被静默捕获（P-17 收口）",
+                        exc_info=True,
+                    )
                     db_stats[t] = -1
             result["db_stats"] = db_stats
         except Exception:
+            logger.warning(
+                "SystemEngine.check_data_integrity: 未预期的异常被静默捕获（P-17 收口）",
+                exc_info=True,
+            )
             pass
 
         return {"success": True, **result}
@@ -224,6 +254,10 @@ class SystemEngine:
                         "note": "预览模式：展示可归档/清理的会话数量",
                     }
                 except Exception as e:
+                    logger.warning(
+                        "SystemEngine.cleanup_data: 未预期的异常被静默捕获（P-17 收口）",
+                        exc_info=True,
+                    )
                     conv_result = {"dry_run": True, "error": str(e)}
             else:
                 conv_result = scheduler.run_now()

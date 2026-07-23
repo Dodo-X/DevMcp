@@ -159,6 +159,10 @@ class KnowledgeExtractor:
             rows = self.db.query_local("SELECT title FROM knowledge_points ORDER BY id")
             return [row["title"] for row in (rows or [])]
         except Exception:
+            logger.warning(
+                "KnowledgeExtractor._get_all_titles: 未预期的异常被静默捕获（P-17 收口）",
+                exc_info=True,
+            )
             return []
 
     def _save_knowledge(self, item: dict, conversation_id: str, project_name: str) -> str | None:
@@ -268,6 +272,10 @@ class KnowledgeExtractor:
                         ),
                     )
                 except Exception:
+                    logger.warning(
+                        "KnowledgeExtractor._save_knowledge: 未预期的异常被静默捕获（P-17 收口）",
+                        exc_info=True,
+                    )
                     pass
                 logger.info(f"💡 创建知识: {title} ({kp_type}) → {kp_id}")
 
@@ -290,6 +298,10 @@ class KnowledgeExtractor:
                 if row:
                     ids.append(row[0]["knowledge_id"])
             except Exception:
+                logger.warning(
+                    "KnowledgeExtractor._resolve_related_ids: 未预期的异常被静默捕获（P-17 收口）",
+                    exc_info=True,
+                )
                 pass
         return ids
 

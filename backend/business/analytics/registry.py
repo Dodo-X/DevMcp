@@ -1,0 +1,585 @@
+"""
+维度 × 数据源 × 分析模式注册表（Dimension Registry）
+==================================================
+这是 devPartner 分析体系的"总规划表"。当前系统最大的问题就是每个维度
+"数据从哪来、用什么分析模式、怎么算"没有系统化定义——本文件一次性补齐。
+
+每条维度声明：
+  - business_question : 这个维度要回答的业务问题（决定指标是否值得做）
+  - source            : 数据来源（表 / 粒度 / 关键字段 / 采集机制 / 新鲜度 / 负责人）
+  - metrics           : 该维度下的指标清单（id / 名称 / 公式 / 比较基准 / 单位 / 目标方向）
+  - analysis_mode     : 分析方法（descriptive / diagnostic / predictive）+ 统计口径
+  - dq_checks         : 该维度依赖的数据质量校验（在分析前必过）
+  - normalization     : 字段标准化映射（同义词合并、大小写归一），保证指标可信
+
+注意：本注册表是"可执行的规格"，metrics.py 直接消费这里的字段定义。
+"""
+
+# ─────────────────────────────────────────────────────────────
+# 全局标准化映射（跨维度复用的清洗规则）
+# ─────────────────────────────────────────────────────────────
+
+# 1) task_type 同义词归一：原始库里 debug/debugging、refactoring/code_change/coding 并存
+TASK_TYPE_NORMALIZATION = {
+    "debug": "debug",
+    "debugging": "debug",
+    "refactoring": "refactor",
+    "code_change": "implement",
+    "coding": "implement",
+    "design": "design",
+    "learning": "learning",
+}
+
+# 2) system_id 大小写归一：devPartner / devpartner 实为同一系统
+SYSTEM_ID_NORMALIZATION = {
+    "devpartner": "devPartner",
+    "devPartner": "devPartner",
+}
+
+# 3) knowledge domain 同义词合并（基于真实库探查发现的大量别名）
+DOMAIN_NORMALIZATION = {
+    "Python": "Python",
+    "Python 编程": "Python",
+    "Python编程": "Python",
+    "数据库": "数据库",
+    "数据库管理": "数据库",
+    "数据库设计": "数据库",
+    "关系型数据库设计": "数据库",
+    "并发控制": "并发编程",
+    "并发编程": "并发编程",
+    "开发调试": "开发测试",
+    "开发测试": "开发测试",
+    "通用工程": "General",
+    "General": "General",
+    "AI/LLM": "AI/LLM",
+    "DevOps": "DevOps",
+    "架构设计": "架构设计",
+    "对话系统开发": "对话系统开发",
+}
+
+# ─────────────────────────────────────────────────────────────
+# 维度注册表
+# ─────────────────────────────────────────────────────────────
+
+DIMENSIONS = [
+    {
+        "id": "D1_engagement",
+        "name": "参与度与体量",
+        "business_question": "用户与 AI 的交互活跃度与健康度如何？趋势是升是降？是否存在沉默风险？",
+        "source": {
+            "tables": ["conversations"],
+            "grain": "conversation（一次对话 = 一个用户意图单元）",
+            "key_fields": ["conversation_id", "timestamp", "system_id", "client", "status"],
+            "collection": "mcp_server.record_dialogue 落库",
+            "freshness": "实时（对话结束即写入）",
+            "owner": "mcp_service",
+        },
+        "metrics": [
+            {
+                "id": "conv_total",
+                "name": "对话总量",
+                "unit": "次",
+                "formula": "COUNT(conversation_id)",
+                "baseline": "上期",
+                "direction": "up_good",
+            },
+            {
+                "id": "active_days",
+                "name": "活跃天数",
+                "unit": "天",
+                "formula": "COUNT(DISTINCT date(timestamp))",
+                "baseline": "上期",
+                "direction": "up_good",
+            },
+            {
+                "id": "conv_per_active_day",
+                "name": "日均对话量",
+                "unit": "次/天",
+                "formula": "conv_total / active_days",
+                "baseline": "上期",
+                "direction": "up_good",
+            },
+            {
+                "id": "wow_growth",
+                "name": "对话量环比增长",
+                "unit": "%",
+                "formula": "(本期-上期)/上期",
+                "baseline": "0%",
+                "direction": "up_good",
+            },
+        ],
+        "analysis_mode": "descriptive + 时间序列趋势（WoW/MoM）+ 沉默检测（连续 N 天无对话预警）",
+        "dq_checks": ["conversations.timestamp 非空", "system_id 已归一", "status 枚举合法"],
+    },
+    {
+        "id": "D2_task_mix",
+        "name": "任务类型分布",
+        "business_question": "用户在做什么类型的工作？工作构成是否健康（ debug 占比过高 = 不稳定）？",
+        "source": {
+            "tables": ["conversations"],
+            "grain": "conversation",
+            "key_fields": ["task_type", "complexity"],
+            "collection": "record_dialogue 时由 AI 标注 task_type",
+            "freshness": "实时",
+            "owner": "mcp_service + llm_kernel",
+        },
+        "metrics": [
+            {
+                "id": "task_mix",
+                "name": "归一后任务类型占比",
+                "unit": "%",
+                "formula": "按 TASK_TYPE_NORMALIZATION 归一并 COUNT",
+                "baseline": "上期构成",
+                "direction": "balanced",
+            },
+            {
+                "id": "debug_share",
+                "name": "Debug 类占比",
+                "unit": "%",
+                "formula": "debug / conv_total",
+                "baseline": "<30%",
+                "direction": "down_good",
+            },
+            {
+                "id": "complexity_high_share",
+                "name": "高复杂度任务占比",
+                "unit": "%",
+                "formula": "complexity='complex' / conv_total",
+                "baseline": "上期",
+                "direction": "up_good",
+            },
+        ],
+        "analysis_mode": "构成分析（mix shift：组合变化 vs 组内表现）+ 占比健康度阈值",
+        "dq_checks": ["task_type 经 TASK_TYPE_NORMALIZATION 覆盖", "complexity 空值率 < 20%"],
+        "normalization": "TASK_TYPE_NORMALIZATION",
+    },
+    {
+        "id": "D3_reliability",
+        "name": "执行与可靠性",
+        "business_question": "AI 执行任务的成败与效率如何？哪里在出错、卡顿、重试？",
+        "source": {
+            "tables": ["conversation_steps", "task_queue"],
+            "grain": "step / task",
+            "key_fields": ["status", "duration_ms", "error_message", "retry_count"],
+            "collection": "step_analysis / task_queue 执行时写入",
+            "freshness": "实时",
+            "owner": "backend.core.task_queue + step_analysis",
+        },
+        "metrics": [
+            {
+                "id": "step_success_rate",
+                "name": "步骤成功率",
+                "unit": "%",
+                "formula": "completed / (completed+orphaned+failed)",
+                "baseline": ">95%",
+                "direction": "up_good",
+            },
+            {
+                "id": "task_success_rate",
+                "name": "任务成功率（去重后）",
+                "unit": "%",
+                "formula": "(completed) / (completed+pending+dead+failed) 排除 duplicate_discarded",
+                "baseline": ">90%",
+                "direction": "up_good",
+            },
+            {
+                "id": "real_error_rate",
+                "name": "真实错误率",
+                "unit": "%",
+                "formula": "有 error_message 且非'duplicate' / 总任务",
+                "baseline": "<5%",
+                "direction": "down_good",
+            },
+            {
+                "id": "median_step_duration",
+                "name": "步骤耗时中位数",
+                "unit": "ms",
+                "formula": "MEDIAN(duration_ms where >0)",
+                "baseline": "上期",
+                "direction": "down_good",
+            },
+            {
+                "id": "retry_rate",
+                "name": "重试率",
+                "unit": "%",
+                "formula": "retry_count>0 / 总步骤",
+                "baseline": "<10%",
+                "direction": "down_good",
+            },
+        ],
+        "analysis_mode": "diagnostic（失败根因分解：按 step_type / error_message 聚类）+ 耗时分布（中位数抗偏态）",
+        "dq_checks": [
+            "step.status 枚举合法",
+            "orphaned 步骤需归因",
+            "duration_ms 非空率",
+            "duplicate_discarded 与 error 口径分离",
+        ],
+    },
+    {
+        "id": "D4_knowledge",
+        "name": "知识沉淀",
+        "business_question": "系统积累了多少可复用知识？质量与覆盖如何？知识有没有被真正复用？",
+        "source": {
+            "tables": ["knowledge_points"],
+            "grain": "knowledge_point",
+            "key_fields": ["domain", "category", "type", "confidence", "difficulty", "usage_count"],
+            "collection": "step_analysis 提取 → knowledge_graph 写入",
+            "freshness": "准实时（步骤分析后）",
+            "owner": "finalize_knowledge_graph",
+        },
+        "metrics": [
+            {
+                "id": "kp_new",
+                "name": "新增知识点",
+                "unit": "个",
+                "formula": "本期新建 COUNT",
+                "baseline": "上期",
+                "direction": "up_good",
+            },
+            {
+                "id": "kp_total",
+                "name": "知识点存量",
+                "unit": "个",
+                "formula": "CUMULATIVE COUNT",
+                "baseline": "历史",
+                "direction": "up_good",
+            },
+            {
+                "id": "domain_coverage",
+                "name": "领域覆盖数（归一后）",
+                "unit": "个领域",
+                "formula": "COUNT(DISTINCT DOMAIN_NORMALIZATION(domain))",
+                "baseline": "上期",
+                "direction": "up_good",
+            },
+            {
+                "id": "avg_confidence",
+                "name": "平均置信度",
+                "unit": "",
+                "formula": "AVG(confidence)",
+                "baseline": ">0.8",
+                "direction": "up_good",
+            },
+            {
+                "id": "reuse_rate",
+                "name": "知识复用率",
+                "unit": "%",
+                "formula": "usage_count>0 / 总知识点",
+                "baseline": ">10%（埋点补齐后）",
+                "direction": "up_good",
+                "caveat": "当前 usage_count 全为 0 → 埋点缺失，指标暂不可信",
+            },
+        ],
+        "analysis_mode": "构成分析（domain/category/type 分布）+ 质量评估（confidence/difficulty）+ 复用闭环（埋点补齐后）",
+        "dq_checks": [
+            "domain 经 DOMAIN_NORMALIZATION 合并",
+            "usage_count 埋点完整性",
+            "confidence 范围 [0,1]",
+        ],
+        "normalization": "DOMAIN_NORMALIZATION",
+    },
+    {
+        "id": "D5_capability",
+        "name": "用户能力成长",
+        "business_question": "用户技能在哪些领域提升？学习计划执行得怎样？成长是否可量化？",
+        "source": {
+            "tables": ["user_profile", "user_skills", "user_skill_plan"],
+            "grain": "skill / dimension",
+            "key_fields": ["skill_name", "skill_level", "skill_domain", "growth_trend", "status"],
+            "collection": "finalize_user_profile 实时更新",
+            "freshness": "准实时",
+            "owner": "finalize_user_profile",
+        },
+        "metrics": [
+            {
+                "id": "skill_count",
+                "name": "已识别技能数",
+                "unit": "个",
+                "formula": "COUNT(user_skills)",
+                "baseline": "上期",
+                "direction": "up_good",
+            },
+            {
+                "id": "domain_breadth",
+                "name": "技能领域广度",
+                "unit": "个领域",
+                "formula": "COUNT(DISTINCT skill_domain)",
+                "baseline": "上期",
+                "direction": "up_good",
+            },
+            {
+                "id": "plan_adherence",
+                "name": "学习计划完成率",
+                "unit": "%",
+                "formula": "status='done' / 总 plan",
+                "baseline": ">60%",
+                "direction": "up_good",
+            },
+            {
+                "id": "level_up_rate",
+                "name": "技能升级率",
+                "unit": "%",
+                "formula": "growth_trend='up' / 总技能",
+                "baseline": "上期",
+                "direction": "up_good",
+            },
+        ],
+        "analysis_mode": "趋势分析（skill_level / growth_trend 演化）+ 计划执行度（plan status 漏斗）",
+        "dq_checks": ["skill_level 枚举合法", "user_skill_plan.status 枚举合法"],
+    },
+    {
+        "id": "D6_coverage",
+        "name": "系统/项目覆盖",
+        "business_question": "工具覆盖了多少项目/系统？上下文发现是否持续？连接是否健康？",
+        "source": {
+            "tables": ["connected_systems", "system_context_fragments", "conversations"],
+            "grain": "system",
+            "key_fields": [
+                "system_id",
+                "maturity",
+                "last_active",
+                "business_signals",
+                "conversation_count",
+            ],
+            "collection": "系统连接 + 上下文片段采集",
+            "freshness": "连接时 + 对话时",
+            "owner": "mcp_service + system_diagnose",
+        },
+        "metrics": [
+            {
+                "id": "connected_systems",
+                "name": "已连接系统数",
+                "unit": "个",
+                "formula": "COUNT(connected_systems)",
+                "baseline": "历史",
+                "direction": "up_good",
+            },
+            {
+                "id": "conv_share_top",
+                "name": "头部系统对话占比",
+                "unit": "%",
+                "formula": "TOP1 system 对话 / 总对话",
+                "baseline": "均衡<60%",
+                "direction": "balanced",
+            },
+            {
+                "id": "new_discoveries",
+                "name": "新增上下文发现",
+                "unit": "条",
+                "formula": "本期 system_context_fragments",
+                "baseline": "上期",
+                "direction": "up_good",
+            },
+            {
+                "id": "stale_systems",
+                "name": "失活系统数(>30天无活动)",
+                "unit": "个",
+                "formula": "last_active < now-30d",
+                "baseline": "0",
+                "direction": "down_good",
+            },
+        ],
+        "analysis_mode": "覆盖分析（系统数/成熟度/新鲜度）+ 集中度（头部占比）+ 发现速率",
+        "dq_checks": ["system_id 已归一", "last_active 非空", "maturity 枚举合法"],
+        "normalization": "SYSTEM_ID_NORMALIZATION",
+    },
+    {
+        "id": "D7_improvement_loop",
+        "name": "改进闭环",
+        "business_question": "发现的问题/建议有没有被闭环？反馈响应是否及时？体系是否在自我进化？",
+        "source": {
+            "tables": ["improvement_log", "optimization_feedback", "growth_analysis"],
+            "grain": "建议 / 反馈",
+            "key_fields": ["status", "applied_at", "priority", "feedback_type"],
+            "collection": "报告生成 + 用户反馈写入",
+            "freshness": "报告/反馈触发",
+            "owner": "reports + optimization_feedback",
+        },
+        "metrics": [
+            {
+                "id": "il_applied_rate",
+                "name": "改进建议采纳率",
+                "unit": "%",
+                "formula": "status='applied' / 总 improvement_log",
+                "baseline": ">40%",
+                "direction": "up_good",
+            },
+            {
+                "id": "fb_applied_rate",
+                "name": "反馈采纳率",
+                "unit": "%",
+                "formula": "status='applied' / 总 optimization_feedback",
+                "baseline": ">40%",
+                "direction": "up_good",
+            },
+            {
+                "id": "open_backlog",
+                "name": "未闭环积压",
+                "unit": "条",
+                "formula": "status IN ('open','pending')",
+                "baseline": "递减",
+                "direction": "down_good",
+            },
+            {
+                "id": "avg_close_days",
+                "name": "平均闭环时长",
+                "unit": "天",
+                "formula": "AVG(applied_at - created_at)",
+                "baseline": "<14天",
+                "direction": "down_good",
+            },
+        ],
+        "analysis_mode": "漏斗分析（open→applied）+ 响应时效（闭环时长）+ 积压趋势",
+        "dq_checks": ["improvement_log.status 枚举合法", "applied_at >= created_at"],
+    },
+    {
+        "id": "D8_efficiency",
+        "name": "效率与成本",
+        "business_question": "单位时间产出如何？资源（内存/时长）消耗是否合理？",
+        "source": {
+            "tables": ["conversation_steps", "task_queue"],
+            "grain": "step / task",
+            "key_fields": [
+                "duration_ms",
+                "estimated_memory_mb",
+                "actual_memory_mb",
+                "completed_at",
+            ],
+            "collection": "执行时写入",
+            "freshness": "实时",
+            "owner": "task_queue + step_analysis",
+        },
+        "metrics": [
+            {
+                "id": "median_duration",
+                "name": "任务耗时中位数",
+                "unit": "ms",
+                "formula": "MEDIAN(duration_ms)",
+                "baseline": "上期",
+                "direction": "down_good",
+            },
+            {
+                "id": "throughput_day",
+                "name": "日均完成任务",
+                "unit": "个/天",
+                "formula": "completed 任务 / active_days",
+                "baseline": "上期",
+                "direction": "up_good",
+            },
+            {
+                "id": "mem_accuracy",
+                "name": "内存预估偏差",
+                "unit": "%",
+                "formula": "AVG(|actual-estimated|/estimated)",
+                "baseline": "<20%",
+                "direction": "down_good",
+                "caveat": "actual_memory_mb 当前多空，需补齐采集",
+            },
+        ],
+        "analysis_mode": "分布分析（耗时/内存，用中位数与分位抗偏态）+ 吞吐趋势",
+        "dq_checks": ["duration_ms 非空率", "actual_memory_mb 采集完整性"],
+    },
+    {
+        "id": "D9_user_psychology",
+        "name": "用户心理与画像",
+        "business_question": "用户的思维方式、协作偏好、成长轨迹与心理状态如何？哪些信号表明受挫/进入心流/在系统性进阶？对话内容里藏着什么可行动的洞察？",
+        "source": {
+            "tables": [
+                "conversations",
+                "user_profile",
+                "user_skills",
+                "user_skill_plan",
+                "knowledge_points",
+            ],
+            "grain": "conversation（内容信号）/ user（画像快照）",
+            "key_fields": [
+                "topic",
+                "user_intent",
+                "self_reflection",
+                "complexity",
+                "user_profile.dimension/value/trend/confidence",
+                "user_skills.skill_level/growth_trend",
+                "user_skill_plan.status/current_progress",
+            ],
+            "collection": "record_dialogue 落 topic/intent/reflection；finalize_user_profile 写画像；技能树/计划由分析提取",
+            "freshness": "对话结束即写；画像/技能为累积快照",
+            "owner": "mcp_service + finalize_user_profile + 内容分析",
+        },
+        "metrics": [
+            {
+                "id": "reflection_rate",
+                "name": "复盘率",
+                "unit": "%",
+                "formula": "self_reflection 非空 / 总对话",
+                "baseline": "上期",
+                "direction": "up_good",
+            },
+            {
+                "id": "intent_clarity",
+                "name": "意图清晰度",
+                "unit": "%",
+                "formula": "user_intent 非空 / 总对话",
+                "baseline": "上期",
+                "direction": "up_good",
+            },
+            {
+                "id": "psych_risk_signal",
+                "name": "受挫/风险信号占比",
+                "unit": "%",
+                "formula": "含风险词典的复盘 / 有复盘对话",
+                "baseline": "<30%",
+                "direction": "down_good",
+            },
+            {
+                "id": "psych_progress_signal",
+                "name": "进展/心流信号占比",
+                "unit": "%",
+                "formula": "含进展词典的复盘 / 有复盘对话",
+                "baseline": "上期",
+                "direction": "up_good",
+            },
+            {
+                "id": "portrait_confidence",
+                "name": "画像置信度",
+                "unit": "",
+                "formula": "AVG(user_profile.confidence)",
+                "baseline": ">0.7",
+                "direction": "up_good",
+            },
+            {
+                "id": "growth_momentum",
+                "name": "成长势能",
+                "unit": "%",
+                "formula": "trend='rising' 维度 / 总维度",
+                "baseline": "上期",
+                "direction": "up_good",
+            },
+            {
+                "id": "skill_tree_size",
+                "name": "技能树规模",
+                "unit": "个",
+                "formula": "COUNT(user_skills)",
+                "baseline": "上期",
+                "direction": "up_good",
+            },
+            {
+                "id": "plan_adherence",
+                "name": "学习计划完成率",
+                "unit": "%",
+                "formula": "status='done' / 总 plan",
+                "baseline": ">60%",
+                "direction": "up_good",
+            },
+        ],
+        "analysis_mode": "定性内容分析：主题聚类 + 心理信号词典（risk/progress lexicon，透明可审计）+ 画像聚合（trend/confidence）+ 成长势能；LLM 在指标之上做定性叙述，不替代计算。",
+        "dq_checks": [
+            "self_reflection 非空率（内容分析可用性）",
+            "user_profile.evidence 完整性",
+            "skill_level / growth_trend 枚举合法",
+            "user_skill_plan.status 枚举合法",
+        ],
+    },
+]
+
+# 维度索引，便于按 id 取用
+DIMENSION_BY_ID = {d["id"]: d for d in DIMENSIONS}

@@ -95,6 +95,9 @@ def check_and_log_integrity(db) -> dict:
 
         return {**integrity, "write_stats": write_stats}
     except Exception as e:
+        logger.warning(
+            "check_and_log_integrity: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+        )
         return {"status": "error", "issues": [f"完整性检查异常: {e}"], "write_stats": {}}
 
 
@@ -307,6 +310,10 @@ class CleanupScheduler:
             try:
                 self._do_cleanup()
             except Exception:
+                logger.warning(
+                    "CleanupScheduler._cleanup_loop: 未预期的异常被静默捕获（P-17 收口）",
+                    exc_info=True,
+                )
                 pass
 
             sleep_chunks = self._interval_seconds

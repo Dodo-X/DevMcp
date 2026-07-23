@@ -80,6 +80,10 @@ def handle_finalize_business_tech(engine, payload: dict) -> dict:
                                 now=now,
                             )
             except Exception:
+                logger.warning(
+                    "handle_finalize_business_tech: 未预期的异常被静默捕获（P-17 收口）",
+                    exc_info=True,
+                )
                 pass
 
         # ── 构造信号 ──
@@ -121,6 +125,9 @@ def handle_finalize_business_tech(engine, payload: dict) -> dict:
                 now=now,
             )
         except Exception:
+            logger.warning(
+                "handle_finalize_business_tech: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
             pass
 
         results["success"] = True

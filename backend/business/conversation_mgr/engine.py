@@ -259,6 +259,10 @@ class ConversationEngine:
                     "Task queue submit returned empty task_id",
                 )
             except Exception:
+                logger.warning(
+                    "ConversationEngine.record_step: 未预期的异常被静默捕获（P-17 收口）",
+                    exc_info=True,
+                )
                 pass
 
         return {
@@ -412,12 +416,20 @@ class ConversationEngine:
             if domains:
                 return domains
         except Exception:
+            logger.warning(
+                "ConversationEngine.get_known_domains: 未预期的异常被静默捕获（P-17 收口）",
+                exc_info=True,
+            )
             pass
         try:
             domains = self.dao.get_known_domains_from_skills()
             if domains:
                 return domains
         except Exception:
+            logger.warning(
+                "ConversationEngine.get_known_domains: 未预期的异常被静默捕获（P-17 收口）",
+                exc_info=True,
+            )
             pass
         return {}
 

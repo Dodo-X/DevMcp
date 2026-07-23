@@ -230,6 +230,9 @@ def _scan_unfinished_tasks(db) -> list[dict[str, Any]]:
             try:
                 payload = json.loads(payload)
             except Exception:
+                logger.warning(
+                    "_scan_unfinished_tasks: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+                )
                 payload = {}
         tasks.append(
             {
@@ -702,6 +705,7 @@ def _enqueue_single(tq, task_id: str, task_type: str, payload: dict, task_meta: 
             (task_id,),
         )
     except Exception:
+        logger.warning("_enqueue_single: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
         pass
 
     meta = {
@@ -768,4 +772,5 @@ def get_pipeline_stats() -> dict[str, Any]:
             "dependency_levels": DEPENDENCY_LEVEL,
         }
     except Exception as e:
+        logger.warning("get_pipeline_stats: 未预期的异常被静默捕获（P-17 收口）", exc_info=True)
         return {"error": str(e)}

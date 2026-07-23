@@ -172,6 +172,10 @@ class TaskTimeoutScheduler:
                         else (row["input_data"] or {})
                     )
                 except Exception:
+                    logger.warning(
+                        "TaskTimeoutScheduler._scan_pending_retry_steps: 未预期的异常被静默捕获（P-17 收口）",
+                        exc_info=True,
+                    )
                     input_data = {}
 
                 task_payload = {
