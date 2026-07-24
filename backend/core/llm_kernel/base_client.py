@@ -831,9 +831,16 @@ class LLMEngine:
         return run_analysis(TASK_CONV_USER_PROFILE, on_progress=on_progress, **kwargs)
 
     def review_project_description(
-        self, current_description: str, topic: str = "", summary: str = "", ai_summary: str = ""
+        self,
+        current_description: str,
+        topic: str = "",
+        summary: str = "",
+        ai_summary: str = "",
+        business_knowledge: str = "",
     ) -> dict | None:
         """v9.8.4: LLM 评审当前 project_description 是否需要优化。
+        v10(T5): 新增 business_knowledge 入参（本次对话产生的业务知识 Efforts），
+                作为「系统能做什么」的评审上下文，与设计 §6.4 对齐。
         返回 {{"need_update": bool, "new_description": str}} 或 None。"""
         from backend.templates.llm_prompt import TASK_REVIEW_PROJECT_DESC, run_analysis
 
@@ -851,6 +858,7 @@ class LLMEngine:
             topic=topic[:200] if topic else "（无）",
             summary=(summary or "")[:1500],
             ai_summary=(ai_summary or "")[:1000],
+            business_knowledge=(business_knowledge or "（无业务知识）")[:3000],
         )
 
     # ═══════════════════════════════════════════════════════════

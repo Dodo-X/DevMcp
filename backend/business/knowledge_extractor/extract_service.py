@@ -44,12 +44,16 @@ class KnowledgeExtractor:
         self, conversation_id: str, conversation_text: str = "", key_decisions: list = None
     ) -> dict[str, Any]:
         """
-        统一提取技能 + 业务知识（v9.5.7 精简参数）。
+        统一提取技能 + 业务知识（facade，T3 拆分后的对外入口）。
+
+        v10(T3): 内部改为先调 extract_skill_knowledge（TASK_SKILL_EXTRACTION），
+        再调 extract_business_knowledge（TASK_BUSINESS_EXTRACTION），两者结果聚合为
+        原返回结构。conv_finalize 仍调本方法，调用方无需改动。
 
         Args:
             conversation_id: 对话 ID
             conversation_text: 完整对话文本
-            key_decisions: 关键决策列表（LLM 不可用时的降级方案）
+            key_decisions: 关键决策列表（LLM 不可用 / 业务抽取 0 条时的降级方案）
 
         Returns:
             {
@@ -68,58 +72,29 @@ class KnowledgeExtractor:
 
         project_name = self._derive_project_name()
 
-        # 尝试 LLM 统一提取
+        # 仅当 LLM 可用且存在对话文本时才发起两个聚焦子请求
+        # （mock 模式 / is_available() False 时安全跳过，不抛）
         try:
             from backend.core.llm_kernel.base_client import get_llm_engine
 
             llm = get_llm_engine()
             if llm and llm.is_available() and conversation_text:
                 result["llm_used"] = True
-
-                existing_titles = self._get_all_titles()
-
-                # v9.11: 限制 existing_titles_list 最多 200 条，防止 token bomb
-                titles_for_prompt = existing_titles[:200]
-                existing_titles_str = "\n".join(f"- {t}" for t in titles_for_prompt)
-                if len(existing_titles) > 200:
-                    existing_titles_str += f"\n... (共 {len(existing_titles)} 条，仅展示前 200 条)"
-
-                from backend.templates.llm_prompt import TASK_KNOWLEDGE_EXTRACTION, run_analysis
-
-                parsed = run_analysis(
-                    TASK_KNOWLEDGE_EXTRACTION,
-                    project_name=project_name,
-                    existing_titles_list=existing_titles_str
-                    if existing_titles_str
-                    else "（暂无已有知识）",
-                    conversation_text=conversation_text,
+                skill_res = self.extract_skill_knowledge(
+                    conversation_id, conversation_text, project_name
                 )
-                if parsed and isinstance(parsed, list):
-                    for item in parsed:
-                        if not isinstance(item, dict):
-                            continue
-                        kp_id = self._save_knowledge(
-                            item=item,
-                            conversation_id=conversation_id,
-                            project_name=project_name,
-                        )
-                        if kp_id:
-                            result["knowledge_ids"].append(kp_id)
-                            kp_type = item.get("type", "skill")
-                            if kp_type == "business":
-                                result["business_extracted"] += 1
-                            else:
-                                result["skill_extracted"] += 1
-
-                    logger.info(
-                        f"📚 知识提取: 技能={result['skill_extracted']}条, "
-                        f"业务={result['business_extracted']}条 "
-                        f"（项目: {project_name}，对话: {conversation_id}）"
-                    )
+                biz_res = self.extract_business_knowledge(
+                    conversation_id, conversation_text, project_name
+                )
+                result["skill_extracted"] = skill_res.get("skill_extracted", 0)
+                result["business_extracted"] = biz_res.get("business_extracted", 0)
+                result["knowledge_ids"] = (
+                    skill_res.get("knowledge_ids", []) + biz_res.get("knowledge_ids", [])
+                )
         except Exception as e:
-            logger.warning(f"知识提取 LLM 调用失败（非致命）: {e}")
+            logger.warning(f"知识提取 LLM 编排失败（非致命）: {e}")
 
-        # 降级：从 key_decisions 中提取基础业务知识
+        # 降级：从 key_decisions 中提取基础业务知识（仅当业务抽取 0 条时）
         if result["business_extracted"] == 0 and key_decisions:
             try:
                 for decision in key_decisions:
@@ -136,7 +111,7 @@ class KnowledgeExtractor:
                         "tags": ["decision", "from_finalize"],
                         "difficulty": "medium",
                         "aliases": [],
-                        "related_titles": [],
+                        "module": "",
                     }
                     kp_id = self._save_knowledge(
                         item=item,
@@ -150,6 +125,197 @@ class KnowledgeExtractor:
                 logger.warning(f"业务知识降级提取失败: {e}")
 
         return result
+
+    def extract_skill_knowledge(
+        self, conversation_id: str, conversation_text: str, project_name: str
+    ) -> dict[str, Any]:
+        """
+        T3 聚焦子请求——只抽通用技能知识点（Cards）。
+
+        使用 TASK_SKILL_EXTRACTION；LLM 不可用（mock / is_available() False）时安全跳过、不抛。
+        每个 LLM 返回元素构造为 type='skill'、module='' 后由 _save_knowledge 落库（含单 tag 约束）。
+
+        Returns:
+            {"skill_extracted": int, "knowledge_ids": [str]}
+        """
+        result: dict[str, Any] = {"skill_extracted": 0, "knowledge_ids": []}
+        try:
+            from backend.core.llm_kernel.base_client import get_llm_engine
+            from backend.templates.llm_prompt import TASK_SKILL_EXTRACTION, run_analysis
+
+            llm = get_llm_engine()
+            if not (llm and llm.is_available() and conversation_text):
+                return result
+
+            existing_titles = self._get_all_titles()
+            titles_for_prompt = existing_titles[:200]
+            existing_titles_str = "\n".join(f"- {t}" for t in titles_for_prompt)
+            if len(existing_titles) > 200:
+                existing_titles_str += f"\n... (共 {len(existing_titles)} 条，仅展示前 200 条)"
+            if not existing_titles_str:
+                existing_titles_str = "（暂无已有知识）"
+
+            parsed = run_analysis(
+                TASK_SKILL_EXTRACTION,
+                project_name=project_name,
+                existing_titles_list=existing_titles_str,
+                conversation_text=conversation_text,
+            )
+            if not isinstance(parsed, list):
+                return result
+
+            for item in parsed:
+                if not isinstance(item, dict):
+                    continue
+                title = (item.get("title") or "").strip()
+                content = (item.get("content") or "").strip()
+                if not title or not content:
+                    continue
+                tag = item.get("tag") or ""
+                if isinstance(tag, list):
+                    tag = tag[0] if tag else ""
+                if not isinstance(tag, str):
+                    tag = str(tag) if tag is not None else ""
+                kp_item = {
+                    "type": "skill",
+                    "title": title,
+                    "content": content,
+                    "domain": item.get("domain") or "通用工程",
+                    "tags": [tag] if tag else [],
+                    "difficulty": item.get("difficulty", "medium"),
+                    "module": "",
+                }
+                kp_id = self._save_knowledge(
+                    item=kp_item,
+                    conversation_id=conversation_id,
+                    project_name=project_name,
+                )
+                if kp_id:
+                    result["knowledge_ids"].append(kp_id)
+                    result["skill_extracted"] += 1
+
+            logger.info(
+                f"📚 技能知识抽取: {result['skill_extracted']}条 "
+                f"（项目: {project_name}，对话: {conversation_id}）"
+            )
+        except Exception as e:
+            logger.warning(f"技能知识 LLM 抽取失败（非致命）: {e}")
+        return result
+
+    def extract_business_knowledge(
+        self,
+        conversation_id: str,
+        conversation_text: str,
+        project_name: str,
+        modules_hint: list = None,
+    ) -> dict[str, Any]:
+        """
+        T3 聚焦子请求——只抽项目业务知识（Efforts）。
+
+        使用 TASK_BUSINESS_EXTRACTION；modules_hint 默认来自 connected_systems.business_modules
+        （经 dao.get_system_row 读取，设计 §4.2）。LLM 不可用（mock / is_available() False）
+        时安全跳过、不抛。每个元素构造为 type='business'、domain=project_name 后落库。
+
+        Returns:
+            {"business_extracted": int, "knowledge_ids": [str]}
+        """
+        result: dict[str, Any] = {"business_extracted": 0, "knowledge_ids": []}
+        try:
+            from backend.core.llm_kernel.base_client import get_llm_engine
+            from backend.templates.llm_prompt import TASK_BUSINESS_EXTRACTION, run_analysis
+
+            llm = get_llm_engine()
+            if not (llm and llm.is_available() and conversation_text):
+                return result
+
+            # modules_hint 默认从 connected_systems.business_modules 读取
+            if modules_hint is None:
+                modules_hint = self._read_modules_hint(project_name)
+            modules_hint_str = (
+                "\n".join(f"- {m}" for m in modules_hint)
+                if modules_hint
+                else "（暂无已知模块）"
+            )
+
+            existing_titles = self._get_all_titles()
+            titles_for_prompt = existing_titles[:200]
+            existing_titles_str = "\n".join(f"- {t}" for t in titles_for_prompt)
+            if len(existing_titles) > 200:
+                existing_titles_str += f"\n... (共 {len(existing_titles)} 条，仅展示前 200 条)"
+            if not existing_titles_str:
+                existing_titles_str = "（暂无已有知识）"
+
+            parsed = run_analysis(
+                TASK_BUSINESS_EXTRACTION,
+                project_name=project_name,
+                modules_hint=modules_hint_str,
+                existing_titles_list=existing_titles_str,
+                conversation_text=conversation_text,
+            )
+            if not isinstance(parsed, list):
+                return result
+
+            for item in parsed:
+                if not isinstance(item, dict):
+                    continue
+                title = (item.get("title") or "").strip()
+                content = (item.get("content") or "").strip()
+                if not title or not content:
+                    continue
+                tag = item.get("tag") or ""
+                if isinstance(tag, list):
+                    tag = tag[0] if tag else ""
+                if not isinstance(tag, str):
+                    tag = str(tag) if tag is not None else ""
+                module = (item.get("module") or "").strip()
+                kp_item = {
+                    "type": "business",
+                    "title": title,
+                    "content": content,
+                    "domain": project_name,
+                    "tags": [tag] if tag else [],
+                    "difficulty": item.get("difficulty", "medium"),
+                    "module": module,
+                }
+                kp_id = self._save_knowledge(
+                    item=kp_item,
+                    conversation_id=conversation_id,
+                    project_name=project_name,
+                )
+                if kp_id:
+                    result["knowledge_ids"].append(kp_id)
+                    result["business_extracted"] += 1
+
+            logger.info(
+                f"📚 业务知识抽取: {result['business_extracted']}条 "
+                f"（项目: {project_name}，对话: {conversation_id}）"
+            )
+        except Exception as e:
+            logger.warning(f"业务知识 LLM 抽取失败（非致命）: {e}")
+        return result
+
+    def _read_modules_hint(self, system_id: str) -> list:
+        """从 connected_systems.business_modules 读取模块清单（JSON 列表）。
+
+        设计 §4.2：business 子请求以 modules_hint 提示 LLM 归类模块。
+        system_id 与业务知识 domain(=project_name) 在实践中一致（均为项目目录名）。
+        """
+        try:
+            from backend.business.conversation_mgr.dao import ConversationDAO
+
+            dao = ConversationDAO(self.db)
+            row = dao.get_system_row(system_id)
+            if row:
+                raw = row.get("business_modules") or "[]"
+                mods = json.loads(raw) if isinstance(raw, str) else raw
+                if isinstance(mods, list):
+                    return [str(m) for m in mods if m]
+        except Exception:
+            logger.warning(
+                "KnowledgeExtractor._read_modules_hint: 未预期的异常被静默捕获（P-17 收口）",
+                exc_info=True,
+            )
+        return []
 
     def extract_step_knowledge(self, points: list, conversation_id: str) -> list[str]:
         """

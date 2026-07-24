@@ -418,7 +418,14 @@ class ConversationDAO:
     # ══════════════════════════════════════════════════════════
 
     def ensure_system_registered(self, system_id: str, client: str, timestamp: str) -> None:
-        """确保对接系统已注册到 connected_systems 表"""
+        """确保对接系统已注册到 connected_systems 表
+
+        v10(T4): 新注册时一并写入
+          - client_name：承接原 client/IDE 名（入参 client 为空时取 'unknown'）
+          - system_type：启发式默认 'backend_service'（企业软件大类枚举，待确认）
+          - system_type_confirmed：0（标记未确认，待人工/LLM 复核）
+        不再写入已删除的 project_path。
+        """
         try:
             existing = self.db.query_local(
                 f"SELECT system_id, display_name FROM {TABLE_CONNECTED_SYSTEMS} "
@@ -443,11 +450,14 @@ class ConversationDAO:
                         (timestamp, system_id),
                     )
             else:
+                # client_name 承接原 client/IDE 名；system_type 启发式默认 backend_service
+                client_name = client or "unknown"
                 self.db.query_local(
                     f"INSERT INTO {TABLE_CONNECTED_SYSTEMS} "
-                    "(system_id, system_type, display_name, first_connected, last_active, conversation_count) "
-                    "VALUES (?, ?, ?, ?, ?, 1)",
-                    (system_id, client, system_id, timestamp, timestamp),
+                    "(system_id, client_name, system_type, system_type_confirmed, "
+                    "display_name, first_connected, last_active, conversation_count) "
+                    "VALUES (?, ?, 'backend_service', 0, ?, ?, ?, 1)",
+                    (system_id, client_name, system_id, timestamp, timestamp),
                 )
         except Exception as e:
             logger.warning(f"系统注册失败（非致命）: {e}")
@@ -457,13 +467,17 @@ class ConversationDAO:
     # ══════════════════════════════════════════════════════════
 
     def get_system_context(self, system_id: str) -> str:
-        """从 connected_systems 读取项目上下文（自然语言描述）"""
+        """从 connected_systems 读取项目上下文（自然语言描述）
+
+        v10(T4): 已移除对删除列 project_path 的 SELECT 与派生逻辑，
+        改用 system_id / display_name 作为项目标识。
+        """
         if system_id == DEFAULT_SYSTEM_ID:
             return ""
         try:
             rows = self.db.query_local(
                 f"SELECT project_description, tech_stack, architecture, "
-                f"business_domains, project_path, maturity "
+                f"business_domains, maturity, display_name "
                 f"FROM {TABLE_CONNECTED_SYSTEMS} WHERE system_id = ?",
                 (system_id,),
             )
@@ -474,9 +488,9 @@ class ConversationDAO:
             pd = (row.get("project_description") or "").strip()
             if pd:
                 parts.append(f"项目描述: {pd}")
-            pp = (row.get("project_path") or "").strip()
-            if pp:
-                parts.append(f"项目路径: {pp}")
+            disp = (row.get("display_name") or "").strip()
+            if disp and disp != system_id:
+                parts.append(f"项目名: {disp}")
             mat = (row.get("maturity") or "").strip()
             if mat and mat != "unknown":
                 parts.append(f"项目成熟度: {mat}")
@@ -546,26 +560,90 @@ class ConversationDAO:
             ),
         )
 
+    def _connected_system_columns(self) -> set:
+        """返回 connected_systems 当前列名集合（容错缺失列）。
+
+        注意：query_local 仅以 SELECT 前缀判定读操作，PRAGMA 会被误判为写，
+        故此处使用原始连接（与 fk_repair_* 一致）。
+        """
+        try:
+            cur = self.db._local_conn.cursor()
+            cur.execute(f"PRAGMA table_info({TABLE_CONNECTED_SYSTEMS})")
+            return {row[1] for row in cur.fetchall()}
+        except Exception:
+            logger.warning(
+                "ConversationDAO._connected_system_columns: 未预期的异常被静默捕获（P-17 收口）",
+                exc_info=True,
+            )
+            return set()
+
     def update_connected_system(
         self,
         system_id: str,
         architecture: str = "",
         tech_stack: list = None,
         business_domains: list = None,
+        business_modules: list = None,
+        client_name: str = "",
+        system_type: str = "",
+        system_type_confirmed: int = None,
         now: str = "",
     ) -> None:
-        """更新 connected_systems 表"""
+        """更新 connected_systems 表
+
+        v10(T4): 扩展支持 business_modules / client_name / system_type /
+        system_type_confirmed。对缺失列容错（仅更新存在的列），避免旧库报错。
+        仅当对应参数非空 / 非 None 时才写入该字段，避免误覆盖已有值。
+        """
         ts = tech_stack or []
         bd = business_domains or []
         ts_json = json.dumps(ts, ensure_ascii=False) if ts else ""
         bd_json = json.dumps(bd, ensure_ascii=False) if bd else ""
+        bm_json = ""
+        if business_modules is not None:
+            bm_json = (
+                json.dumps(business_modules, ensure_ascii=False)
+                if business_modules
+                else "[]"
+            )
+
+        cols = self._connected_system_columns()
+        set_clauses: list = []
+        params: list = []
+
+        if "architecture" in cols and architecture:
+            set_clauses.append("architecture = COALESCE(NULLIF(?, ''), architecture)")
+            params.append(architecture)
+        if "tech_stack" in cols and ts_json:
+            set_clauses.append("tech_stack = ?")
+            params.append(ts_json)
+        if "business_domains" in cols and bd_json:
+            set_clauses.append("business_domains = ?")
+            params.append(bd_json)
+        if "business_modules" in cols and bm_json:
+            set_clauses.append("business_modules = ?")
+            params.append(bm_json)
+        if "client_name" in cols and client_name:
+            set_clauses.append("client_name = COALESCE(NULLIF(?, ''), client_name)")
+            params.append(client_name)
+        if "system_type" in cols and system_type:
+            set_clauses.append("system_type = COALESCE(NULLIF(?, ''), system_type)")
+            params.append(system_type)
+        if "system_type_confirmed" in cols and system_type_confirmed is not None:
+            set_clauses.append("system_type_confirmed = ?")
+            params.append(int(system_type_confirmed))
+        if "last_seen_at" in cols and now:
+            set_clauses.append("last_seen_at = ?")
+            params.append(now)
+
+        if not set_clauses:
+            return
+
+        params.append(system_id)
         self.db.query_local(
-            f"UPDATE {TABLE_CONNECTED_SYSTEMS} SET "
-            "architecture = COALESCE(NULLIF(?, ''), architecture), "
-            "tech_stack = CASE WHEN ? != '' THEN ? ELSE tech_stack END, "
-            "business_domains = CASE WHEN ? != '' THEN ? ELSE business_domains END, "
-            "last_seen_at = ? WHERE system_id = ?",
-            (architecture, ts_json, ts_json, bd_json, bd_json, now, system_id),
+            f"UPDATE {TABLE_CONNECTED_SYSTEMS} SET {', '.join(set_clauses)} "
+            f"WHERE system_id = ?",
+            tuple(params),
         )
 
     # ══════════════════════════════════════════════════════════

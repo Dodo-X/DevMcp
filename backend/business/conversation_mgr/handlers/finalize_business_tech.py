@@ -66,19 +66,34 @@ def handle_finalize_business_tech(engine, payload: dict) -> dict:
         system_id = payload.get("system_id", DEFAULT_SYSTEM_ID)
         if system_id != DEFAULT_SYSTEM_ID and business_knowledge.get("connected_systems"):
             try:
+                # v10(T4): 累计模块名（供业务抽取 / Efforts 导出分模块）
+                modules_hint: list = []
                 for cs in business_knowledge["connected_systems"]:
-                    if isinstance(cs, dict):
-                        arch = cs.get("architecture", "") or ""
-                        ts = cs.get("tech_stack", [])
-                        bd = cs.get("business_rules", [])
-                        if arch or ts or bd:
-                            dao.update_connected_system(
-                                system_id=system_id,
-                                architecture=arch,
-                                tech_stack=ts,
-                                business_domains=bd,
-                                now=now,
-                            )
+                    if not isinstance(cs, dict):
+                        continue
+                    arch = cs.get("architecture", "") or ""
+                    ts = cs.get("tech_stack", [])
+                    bd = cs.get("business_rules", [])
+                    for m in cs.get("modules", []) or []:
+                        mname = m.get("module_name", "") if isinstance(m, dict) else str(m)
+                        mname = (mname or "").strip()
+                        if mname and mname not in modules_hint:
+                            modules_hint.append(mname)
+                    if arch or ts or bd:
+                        dao.update_connected_system(
+                            system_id=system_id,
+                            architecture=arch,
+                            tech_stack=ts,
+                            business_domains=bd,
+                            now=now,
+                        )
+                # 模块清单单独持久化（与 architecture/tech_stack 解耦，避免被 COALESCE 覆盖）
+                if modules_hint:
+                    dao.update_connected_system(
+                        system_id=system_id,
+                        business_modules=modules_hint,
+                        now=now,
+                    )
             except Exception:
                 logger.warning(
                     "handle_finalize_business_tech: 未预期的异常被静默捕获（P-17 收口）",

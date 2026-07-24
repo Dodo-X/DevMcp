@@ -405,7 +405,7 @@ def register_rest_routes(mcp):
             for k, v in body.items():
                 if k not in allowed:
                     continue
-                db.execute(
+                db.query_local(
                     "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))",
                     (k, str(v)),
                 )
@@ -723,7 +723,8 @@ def register_rest_routes(mcp):
     async def api_projects_list(request: Request) -> JSONResponse:
         """
         v8.5.8: 项目列表 = 通过 MCP 对接的 CodeBuddy/Trae 等客户端的项目名
-        数据源: connected_systems 表（project_path → 取目录名作为项目名）
+        数据源: connected_systems 表（display_name / system_id 作为项目名；
+                project_path 已在 v10 整改中删除，不再引用）
         回退: 如无数据，取当前工作目录名
         """
         try:
@@ -737,19 +738,17 @@ def register_rest_routes(mcp):
             # 主数据源: connected_systems 表 — 对接的真实项目
             try:
                 rows = db.query_local(
-                    """SELECT system_id, project_path, display_name, system_type
+                    """SELECT system_id, display_name, system_type
                        FROM connected_systems ORDER BY last_active DESC"""
                 )
                 for r in rows or []:
-                    proj_path = r.get("project_path", "")
-                    proj_name = r.get("display_name", "") or (
-                        _os.path.basename(proj_path.rstrip("/\\")) if proj_path else ""
-                    )
+                    # 项目名优先用 display_name，否则回退 system_id（已删除 project_path）
+                    proj_name = r.get("display_name", "") or r.get("system_id", "")
                     if proj_name and proj_name not in [p["name"] for p in projects]:
                         projects.append(
                             {
                                 "name": proj_name,
-                                "path": proj_path,
+                                "path": r.get("system_id", ""),
                                 "system_id": r.get("system_id", ""),
                                 "system_type": r.get("system_type", ""),
                             }

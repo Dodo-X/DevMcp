@@ -25,6 +25,28 @@ from backend.business.conversation_mgr.tracker import (
 logger = logging.getLogger(__name__)
 
 
+def _gather_business_knowledge(dao, conversation_id: str) -> str:
+    """汇总本次对话产生的业务知识（type='business'）content，用于 project_description 评审。
+
+    设计 §6.4：将本次 Efforts 作为「系统能做什么」的上下文透传给 review_project_description。
+    """
+    try:
+        rows = dao.db.query_local(
+            "SELECT content FROM knowledge_points "
+            "WHERE source_id = ? AND type = 'business'",
+            (conversation_id,),
+        )
+        parts = [(row.get("content") or "").strip() for row in (rows or [])]
+        parts = [p for p in parts if p]
+        return "\n".join(f"- {p}" for p in parts) if parts else ""
+    except Exception:
+        logger.warning(
+            "conv_finalize._gather_business_knowledge: 未预期的异常被静默捕获（P-17 收口）",
+            exc_info=True,
+        )
+        return ""
+
+
 def handle_conversation_finalize(engine, payload: dict) -> dict:
     """v9.8.0 重构: 编排器模式 — 从 DB 读数据 → 提交三个独立子任务 → 立即返回。
     v9.10.1: 从 Engine 移出，通过 engine 参数获取依赖。
@@ -195,11 +217,14 @@ def handle_conversation_finalize(engine, payload: dict) -> dict:
             llm = engine._get_llm()
             if llm and llm.is_available():
                 current_desc = dao.get_project_description(system_id)
+                # v10(T5): 汇总本次对话产生的业务知识（Efforts）作为评审上下文
+                efforts_text = _gather_business_knowledge(dao, conversation_id)
                 review_result = llm.review_project_description(
                     current_description=current_desc,
                     topic=topic,
                     summary=summary,
                     ai_summary=ai_summary,
+                    business_knowledge=efforts_text,
                 )
                 if review_result and review_result.get("need_update"):
                     new_desc = (review_result.get("new_description") or "").strip()

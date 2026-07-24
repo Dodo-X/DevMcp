@@ -22,7 +22,9 @@ from backend.templates.llm_prompt.deep_analysis import (
 from backend.templates.llm_prompt.file_parse import TASK_FILE_PARSE
 from backend.templates.llm_prompt.knowledge_extraction import (
     TASK_BATCH_STEP_ANALYSIS,
+    TASK_BUSINESS_EXTRACTION,
     TASK_KNOWLEDGE_EXTRACTION,
+    TASK_SKILL_EXTRACTION,
 )
 
 # v9.10.1: 长周期报告 prompt（周/月/年/成长）— 此前在架构迁移时被误删，现补回
@@ -59,6 +61,9 @@ TASK_REGISTRY = {
     "user_profile_analysis": TASK_USER_PROFILE_ANALYSIS,
     "knowledge_extraction": TASK_KNOWLEDGE_EXTRACTION,
     "batch_step_analysis": TASK_BATCH_STEP_ANALYSIS,
+    # v10 (T3): 拆分后的聚焦子请求
+    "skill_extraction": TASK_SKILL_EXTRACTION,
+    "business_extraction": TASK_BUSINESS_EXTRACTION,
     # v9.8.4: 辅助 prompt
     "review_project_description": TASK_REVIEW_PROJECT_DESC,
     "user_traits_enrich": TASK_USER_TRAITS_ENRICH,
