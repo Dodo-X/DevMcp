@@ -151,6 +151,63 @@ class KnowledgeExtractor:
 
         return result
 
+    def extract_step_knowledge(self, points: list, conversation_id: str) -> list[str]:
+        """
+        将步骤阶段 LLM 产出的通用知识点（Cards）落地到 knowledge_points。
+
+        修复旧 step_analysis 直接 insert_knowledge_point(source_id=step_id) 的死链：
+        统一以 source_id=conversation_id 回查，并强制 type='skill'、module=''（设计 §4.1）。
+        复用 _save_knowledge 的去重 + 单 tag 约束逻辑。
+
+        Args:
+            points: 步骤知识点字典列表（字段形如 title/content/domain/tag 或
+                    tags/category/difficulty；content 亦可来自 desc）
+            conversation_id: 对话 ID（作为 source_id）
+
+        Returns:
+            生成的 knowledge_id 列表
+        """
+        if not points:
+            return []
+        project_name = self._derive_project_name()
+        generated_ids: list[str] = []
+        for point in points:
+            if not isinstance(point, dict):
+                continue
+            # 兼容 content / desc 两种字段名（LLM 输出来源）
+            content = (point.get("content") or point.get("desc") or "").strip()
+            title = (point.get("title") or "").strip()
+            if not title or not content:
+                # 跳过空 title/content（设计 §4.1：避免脏数据）
+                continue
+            # 兼容 tag（单值）/ tags（列表）
+            raw_tags = point.get("tags", point.get("tag", []))
+            if not isinstance(raw_tags, list):
+                raw_tags = [raw_tags]
+            item = {
+                "type": "skill",
+                "title": title,
+                "content": content,
+                "domain": point.get("domain", "General"),
+                "tags": raw_tags,
+                "difficulty": point.get("difficulty", "medium"),
+                "category": point.get("category", "step_extracted"),
+                "aliases": point.get("aliases", []),
+                "module": "",
+            }
+            # 强制 type='skill'、source_id=conversation_id、module=''
+            kp_id = self._save_knowledge(
+                item=item,
+                conversation_id=conversation_id,
+                project_name=project_name,
+            )
+            if kp_id:
+                generated_ids.append(kp_id)
+        logger.info(
+            f"📇 步骤知识点落库: {len(generated_ids)} 条（对话: {conversation_id}）"
+        )
+        return generated_ids
+
     def get_all_titles(self) -> list[str]:
         """获取所有已有知识标题列表"""
         return self._get_all_titles()
@@ -195,7 +252,22 @@ class KnowledgeExtractor:
                 domain = normalize_domain(domain)
 
         category = item.get("category", "concept")
-        tags = item.get("tags", [])
+        # v10: 强制单 tag —— 写入列仍叫 tags，长度恒为 1（兼容读取方 tags[0]）
+        raw_tags = item.get("tags", [])
+        if isinstance(raw_tags, list):
+            if len(raw_tags) > 1:
+                logger.debug(
+                    f"🔖 知识点多标签收敛: {title} → 仅保留首个标签 {raw_tags[0]!r}"
+                )
+            single_tag = raw_tags[0] if raw_tags else ""
+        else:
+            # 非 list（如单个字符串）→ 用 [tags] 包裹
+            single_tag = raw_tags
+            raw_tags = [raw_tags]
+        if not isinstance(single_tag, str):
+            single_tag = str(single_tag)
+        single_tags = [single_tag]
+        module = item.get("module", "")
         difficulty = item.get("difficulty", "medium")
         aliases = item.get("aliases", [])
         related_titles = item.get("related_titles", [])
@@ -227,16 +299,17 @@ class KnowledgeExtractor:
                         """UPDATE knowledge_points SET
                                content = ?, tags = ?, aliases = ?,
                                difficulty = ?, category = ?,
-                               related_knowledge_ids = ?,
+                               related_knowledge_ids = ?, module = ?,
                                usage_count = usage_count + 1
                            WHERE knowledge_id = ?""",
                         (
                             content,
-                            json.dumps(tags, ensure_ascii=False),
+                            json.dumps(single_tags, ensure_ascii=False),
                             json.dumps(aliases, ensure_ascii=False),
                             difficulty,
                             category,
                             json.dumps(related_ids, ensure_ascii=False) if related_ids else "",
+                            module,
                             existing_id,
                         ),
                     )
@@ -258,10 +331,11 @@ class KnowledgeExtractor:
                 content=content,
                 category=category,
                 domain=domain,
-                tags=tags,
+                tags=single_tags,
                 source_id=conversation_id,
                 kp_type=kp_type,
                 aliases=aliases,
+                module=module,
             )
 
             if kp_id:

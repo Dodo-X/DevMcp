@@ -508,7 +508,7 @@ class Database:
         #   category              TEXT     分类（step_extracted/manual）
         #   domain                TEXT     技术领域（Python/SQL/...）
         #   tags                  JSON     标签列表
-        #   source_id             TEXT     来源ID（step_id）
+        #   source_id             TEXT     来源ID（conversation_id，步骤/结束阶段统一归属对话）
         #   confidence            REAL     置信度（0~1）
         #   difficulty            TEXT     难度（easy/medium/hard）
         #   usage_count           INTEGER  被引用次数（知识点复用统计）
@@ -516,6 +516,7 @@ class Database:
         #   created_at            TEXT     创建时间
         #   type                  TEXT     类型：skill/business（用于去重+导出区分）
         #   aliases               JSON     别名列表
+        #   module                TEXT     业务模块名（仅 type='business' 使用，skill 恒为 ''）
         # ════════════════════════════════════════════════════════════════
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS knowledge_points (
@@ -533,7 +534,8 @@ class Database:
                 related_knowledge_ids TEXT,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 type TEXT NOT NULL DEFAULT 'skill' CHECK(type IN ('skill','business')),
-                aliases JSON DEFAULT '[]'
+                aliases JSON DEFAULT '[]',
+                module TEXT NOT NULL DEFAULT ''
             )
         """)
         cursor.execute("""
@@ -677,9 +679,11 @@ class Database:
         # 用途: 记录通过 MCP 对接的不同系统（Trae/Cursor/VSCode/CLI等）
         # 字段:
         #   system_id          TEXT     系统唯一标识（主键，如 'trae_main'）
-        #   system_type        TEXT     系统类型（trae/cursor/vscode/cli）
+        #   system_type        TEXT     系统类型（企业软件大类枚举：mcp_service/backend_service/...）
         #   display_name       TEXT     显示名称
-        #   project_path       TEXT     项目根路径（v9.5.3 补充）
+        #   client_name        TEXT     客户端名（trae/cursor/vscode/cli 等，承接原 system_type 语义）
+        #   business_modules   JSON     项目业务模块清单（供 Efforts 导出分模块）
+        #   system_type_confirmed INTEGER system_type 是否经人工/LLM 确认（0/1）
         #   tech_stack         JSON     技术栈信息
         #   architecture       JSON     架构信息
         #   business_domains   JSON     业务领域信息
@@ -696,7 +700,9 @@ class Database:
                 system_id TEXT PRIMARY KEY,
                 system_type TEXT NOT NULL,
                 display_name TEXT,
-                project_path TEXT DEFAULT '',
+                client_name TEXT NOT NULL DEFAULT '',
+                business_modules TEXT NOT NULL DEFAULT '[]',
+                system_type_confirmed INTEGER NOT NULL DEFAULT 0,
                 tech_stack JSON DEFAULT '[]',
                 architecture JSON DEFAULT '{}',
                 business_domains JSON DEFAULT '[]',
@@ -715,6 +721,112 @@ class Database:
         if "project_description" not in cols:
             cursor.execute(
                 "ALTER TABLE connected_systems ADD COLUMN project_description TEXT DEFAULT ''"
+            )
+
+        # ═══════════════════════════════════════════════════
+        # v10 整改迁移（KB 数据架构整改 T1）
+        #   connected_systems: DROP project_path；ADD client_name /
+        #     business_modules / system_type_confirmed
+        #   knowledge_points: ADD module；重建新索引；tags 单值收敛
+        # 顺序铁律：CREATE 已先于本块；每个 ALTER 先 PRAGMA 检查列存在再执行；
+        #   不 DROP 不存在的列；异常 logger.warning(exc_info=True) 后跳过该步（P-17）。
+        # ═══════════════════════════════════════════════════
+        try:
+            # ── connected_systems 迁移 ──
+            _cs_cols = {
+                row[1] for row in cursor.execute("PRAGMA table_info(connected_systems)").fetchall()
+            }
+            # 删除 project_path（存在才删，避免 DROP 不存在的列）
+            if "project_path" in _cs_cols:
+                try:
+                    cursor.execute("ALTER TABLE connected_systems DROP COLUMN project_path")
+                except Exception:
+                    logger.warning(
+                        "Database._create_local_tables: 迁移删除 connected_systems.project_path 失败（P-17 收口）",
+                        exc_info=True,
+                    )
+            # 缺失才 ADD（兼容已含部分新列的库）
+            for _col, _ddl in (
+                ("client_name", "ALTER TABLE connected_systems ADD COLUMN client_name TEXT NOT NULL DEFAULT ''"),
+                ("business_modules", "ALTER TABLE connected_systems ADD COLUMN business_modules TEXT NOT NULL DEFAULT '[]'"),
+                ("system_type_confirmed", "ALTER TABLE connected_systems ADD COLUMN system_type_confirmed INTEGER NOT NULL DEFAULT 0"),
+            ):
+                if _col not in _cs_cols:
+                    try:
+                        cursor.execute(_ddl)
+                    except Exception:
+                        logger.warning(
+                            f"Database._create_local_tables: 迁移新增 connected_systems.{_col} 失败（P-17 收口）",
+                            exc_info=True,
+                        )
+
+            # ── knowledge_points 迁移 ──
+            _kp_cols = {
+                row[1] for row in cursor.execute("PRAGMA table_info(knowledge_points)").fetchall()
+            }
+            # 缺失才 ADD module（兼容已含新列的库）
+            if "module" not in _kp_cols:
+                try:
+                    cursor.execute(
+                        "ALTER TABLE knowledge_points ADD COLUMN module TEXT NOT NULL DEFAULT ''"
+                    )
+                except Exception:
+                    logger.warning(
+                        "Database._create_local_tables: 迁移新增 knowledge_points.module 失败（P-17 收口）",
+                        exc_info=True,
+                    )
+            # 建立两个新索引（IF NOT EXISTS 幂等；此时 module 必已存在）
+            try:
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_kp_type_domain_module "
+                    "ON knowledge_points(type, domain, module)"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_kp_source_created "
+                    "ON knowledge_points(source_id, created_at)"
+                )
+            except Exception:
+                logger.warning(
+                    "Database._create_local_tables: 迁移创建 knowledge_points 新索引失败（P-17 收口）",
+                    exc_info=True,
+                )
+
+            # ── tags 单值收敛：多元素 JSON 数组合并取首个有效标签 ──
+            try:
+                _tag_rows = cursor.execute(
+                    "SELECT knowledge_id, tags FROM knowledge_points"
+                ).fetchall()
+                for _row in _tag_rows:
+                    _kid = _row[0]
+                    _raw = _row[1]
+                    try:
+                        _tags = json.loads(_raw) if _raw else []
+                    except (json.JSONDecodeError, TypeError):
+                        _tags = []
+                    if isinstance(_tags, list) and len(_tags) > 1:
+                        _single = next(
+                            (t for t in _tags if isinstance(t, str) and t.strip()),
+                            _tags[0] if _tags else "",
+                        )
+                        try:
+                            cursor.execute(
+                                "UPDATE knowledge_points SET tags = ? WHERE knowledge_id = ?",
+                                (json.dumps([_single], ensure_ascii=False), _kid),
+                            )
+                        except Exception:
+                            logger.warning(
+                                f"Database._create_local_tables: tags 收敛失败 kid={_kid}（P-17 收口）",
+                                exc_info=True,
+                            )
+            except Exception:
+                logger.warning(
+                    "Database._create_local_tables: tags 单值收敛迁移失败（P-17 收口）",
+                    exc_info=True,
+                )
+        except Exception:
+            logger.warning(
+                "Database._create_local_tables: v10 整改迁移未预期的异常（P-17 收口）",
+                exc_info=True,
             )
 
         # ════════════════════════════════════════════════════════════════
@@ -1553,6 +1665,7 @@ class Database:
         source_id: str = "",
         kp_type: str = "skill",
         aliases: list = None,
+        module: str = "",
     ) -> str | None:
         """创建知识点记录，返回 knowledge_id 或 None（v9.5.7 精简参数）
 
@@ -1566,6 +1679,12 @@ class Database:
 
             domain = normalize_domain(domain)
 
+            # v10: 强制单 tag（写入列仍叫 tags，长度恒为 1，兼容读取方 tags[0]）
+            _single_tag = (tags[0] if tags else "") if isinstance(tags, list) else tags
+            if not isinstance(_single_tag, str):
+                _single_tag = str(_single_tag) if _single_tag is not None else ""
+            tags = [_single_tag]
+
             kp_id = f"kp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
             now = datetime.now().isoformat()
             self.query_local(
@@ -1573,8 +1692,8 @@ class Database:
                 INSERT INTO knowledge_points (
                     knowledge_id, title, content, category, domain,
                     tags, source_id, type, difficulty,
-                    aliases, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'medium', ?, ?)
+                    aliases, module, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'medium', ?, ?, ?)
             """,
                 (
                     kp_id,
@@ -1586,6 +1705,7 @@ class Database:
                     source_id,
                     kp_type,
                     json.dumps(aliases or [], ensure_ascii=False),
+                    module,
                     now,
                 ),
             )

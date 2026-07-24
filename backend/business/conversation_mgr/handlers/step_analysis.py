@@ -43,6 +43,7 @@ def handle_step_analysis(engine, payload: dict) -> dict:
         "llm_analyzed": False,
     }
 
+    extracted_kp: list[dict] = []
     try:
         llm = engine._get_llm()
         if llm and llm.is_available():
@@ -70,38 +71,28 @@ def handle_step_analysis(engine, payload: dict) -> dict:
                 results["commands_used"] = llm_result.get("commands_used", [])
                 results["key_insights"] = llm_result.get("key_insights", [])
                 results["improvement_suggestions"] = llm_result.get("improvement_suggestions", [])
-
-                extracted_kp = llm_result.get("knowledge_points", [])
-                if extracted_kp:
-                    for kp in extracted_kp:
-                        dao.insert_knowledge_point(
-                            title=kp.get("title", "LLM提取知识点"),
-                            content=kp.get("desc", ""),
-                            category="llm_extracted",
-                            domain=kp.get("domain", "General"),
-                            tags=kp.get("tags", [step_type]),
-                            source_id=step_id,
-                        )
-                    results["llm_knowledge_points"] = len(extracted_kp)
-                else:
-                    results["llm_knowledge_points"] = 0
+                extracted_kp = llm_result.get("knowledge_points", []) or []
+                results["llm_knowledge_points"] = len(extracted_kp)
     except Exception as e:
         logger.warning(f"LLM 步骤分析失败（非致命）: {e}")
 
-    # 写入 AI 传的 knowledge_points
-    kp_ids = []
-    if knowledge_points:
-        for kp in knowledge_points:
-            kp_id = dao.insert_knowledge_point(
-                title=kp.get("title", "未命名知识点"),
-                content=kp.get("desc", ""),
-                category="step_extracted",
-                domain=kp.get("domain", "General"),
-                tags=kp.get("tags", [step_type]),
-                source_id=step_id,
+    # 收集步骤级通用知识点（来自 LLM 分析与 AI 透传），统一委托 KnowledgeExtractor 落库。
+    # 修复旧 source_id=step_id 死链：统一以 source_id=conversation_id 回查（设计 §4.1）。
+    step_kps: list[dict] = []
+    step_kps.extend([k for k in extracted_kp if isinstance(k, dict)])
+    step_kps.extend([k for k in (knowledge_points or []) if isinstance(k, dict)])
+
+    kp_ids: list[str] = []
+    if step_kps:
+        try:
+            from backend.business.knowledge_extractor.extract_service import (
+                get_knowledge_extractor,
             )
-            if kp_id:
-                kp_ids.append(kp_id)
+
+            extractor = get_knowledge_extractor()
+            kp_ids = extractor.extract_step_knowledge(step_kps, conversation_id)
+        except Exception as e:
+            logger.warning(f"步骤知识点落库失败（非致命）: {e}")
 
     actual_duration_ms = calc_duration_ms(step_start)
     dao.update_step_status(
