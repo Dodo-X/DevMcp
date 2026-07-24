@@ -229,6 +229,41 @@ def normalize_card_data(kp_row: dict) -> dict:
     }
 
 
+def load_knowledge_grouped() -> dict:
+    """
+    按 domain+单 tag（skill）与 project+module（business）聚合装载全部知识点。
+
+    T7 聚合导出数据源：替代旧的逐点 _export_card。
+
+    Returns:
+        {
+          'skill':    {domain: {tag: [point_dict, ...]}},
+          'business': {project: {module: [point_dict, ...]}},   # project = domain（= system_id）
+        }
+        point_dict 已 dict 化；tags 已解析为 [tag]（取首个有效标签）。
+        business 的 module 为空时归入 "未分类模块"。
+    """
+    db = _get_db()
+    out: dict = {"skill": {}, "business": {}}
+    try:
+        rows = db.query_local(
+            "SELECT knowledge_id,title,content,domain,tags,module,type,source_id,created_at "
+            "FROM knowledge_points ORDER BY created_at"
+        ) or []
+        for row in rows:
+            r = dict(row)
+            tag = (normalize_json(r["tags"], []) or [""])[0] or ""
+            if r["type"] == "skill":
+                out["skill"].setdefault(r["domain"], {}).setdefault(tag, []).append(r)
+            else:
+                out["business"].setdefault(r["domain"], {}).setdefault(
+                    r["module"] or "未分类模块", []
+                ).append(r)
+    except Exception as e:
+        logger.warning("load_knowledge_grouped 查询失败（P-17 收口）: %s", e, exc_info=True)
+    return out
+
+
 # ══════════════════════════════════════════════════════════
 # 项目仪表盘（文件系统扫描 + 预处理）
 # ══════════════════════════════════════════════════════════
@@ -249,7 +284,7 @@ def scan_dashboard_data(vault_root: Path, project: str) -> dict:
     safe_project = re.sub(r'[<>:"/\\|?*]', "-", project).strip()
     calendar_dir = vault_root / "Calendar"
     cards_dir = vault_root / "Cards"
-    efforts_dir = vault_root / "Efforts" / safe_project / "业务知识"
+    efforts_dir = vault_root / "Efforts" / safe_project
 
     daily_reports: list[str] = []
     if calendar_dir.exists():
@@ -262,7 +297,15 @@ def scan_dashboard_data(vault_root: Path, project: str) -> dict:
             except Exception as e:
                 logger.warning("扫描日报失败 [%s]: %s", md_file, e)
 
-    business_count = len(list(efforts_dir.glob("*.md"))) if efforts_dir.exists() else 0
+    # T7：新布局 Efforts/{project}/{module}.md，兼容旧 业务知识/ 子目录
+    business_count = 0
+    if efforts_dir.exists():
+        for md_file in efforts_dir.glob("*.md"):
+            if md_file.name not in ("项目仪表盘.md", "项目画像.md"):
+                business_count += 1
+        legacy = efforts_dir / "业务知识"
+        if legacy.exists():
+            business_count += len(list(legacy.glob("*.md")))
 
     skill_count = 0
     skill_links: list[str] = []

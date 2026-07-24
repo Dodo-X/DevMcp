@@ -127,6 +127,107 @@ def _cleanup_old_growth_analysis(db, current_period: str):
         logger.error(f"清理 growth_analysis 失败: {e}")
 
 
+def query_period_data(start: str, end: str) -> dict:
+    """
+    直接查 DB 真实数据，聚合某周期内的对话与知识点（T6：根绝假数据流）。
+
+    不再读取 Calendar/*.md 日报文件，改为查询 conversations + knowledge_points
+    的真实记录。source_id=conversation_id，故按 created_at 落在周期内筛选。
+    created_at 为 ISO（含 'T'）或 SQLite 默认（空格）两种格式，结束边界统一
+    补 ``T23:59:59.999999`` 以保证当日数据被包含（两种格式下均正确）。
+
+    Returns:
+        {
+            "conversation_count": int,
+            "knowledge_count": int,
+            "conversations": [{"id", "topic", "created_at"}, ...],
+            "by_domain": {domain: [title, ...]},     # 全部知识点按 domain 分组
+            "by_module": {module: [title, ...]},      # 仅 business 知识点按 module 分组
+            "topics": [topic, ...],                  # 对话 topic 摘要
+        }
+    """
+    empty = {
+        "conversation_count": 0,
+        "knowledge_count": 0,
+        "conversations": [],
+        "by_domain": {},
+        "by_module": {},
+        "topics": [],
+    }
+    try:
+        from backend.core.database.base_conn import get_db
+
+        db = get_db()
+        start_bound = start
+        end_bound = end + "T23:59:59.999999"
+
+        convs = db.query_local(
+            "SELECT id, topic, created_at FROM conversations "
+            "WHERE created_at BETWEEN ? AND ? ORDER BY created_at",
+            (start_bound, end_bound),
+        ) or []
+        kps = db.query_local(
+            "SELECT knowledge_id, title, domain, tags, module, type, content "
+            "FROM knowledge_points WHERE created_at BETWEEN ? AND ? ORDER BY created_at",
+            (start_bound, end_bound),
+        ) or []
+
+        by_domain: dict[str, list[str]] = {}
+        by_module: dict[str, list[str]] = {}
+        for kp in kps:
+            k = dict(kp)
+            domain = k.get("domain") or "General"
+            title = k.get("title", "")
+            by_domain.setdefault(domain, []).append(title)
+            if k.get("type") == "business":
+                module = k.get("module") or "未分类模块"
+                by_module.setdefault(module, []).append(title)
+
+        empty.update(
+            {
+                "conversation_count": len(convs),
+                "knowledge_count": len(kps),
+                "conversations": [dict(c) for c in convs],
+                "by_domain": by_domain,
+                "by_module": by_module,
+                "topics": [c.get("topic") or "" for c in convs if c.get("topic")],
+            }
+        )
+    except Exception as e:
+        logger.warning("query_period_data 查询失败（P-17 收口）: %s", e, exc_info=True)
+    return empty
+
+
+def build_period_summary_text(period_data: dict) -> str:
+    """
+    将 query_period_data 的聚合结果拼成自然语言文本，作为 LLM 报告输入。
+
+    替换旧逻辑中读取 Calendar/*.md 日报的 daily_summaries_text。
+    """
+    conv_n = period_data.get("conversation_count", 0)
+    kp_n = period_data.get("knowledge_count", 0)
+    by_domain = period_data.get("by_domain", {}) or {}
+    by_module = period_data.get("by_module", {}) or {}
+    topics = period_data.get("topics", []) or []
+
+    lines = [f"本周期共 {conv_n} 场对话、{kp_n} 条知识点。"]
+    if topics:
+        lines.append("对话主题：" + "；".join(topics[:20]))
+    if by_domain:
+        domain_parts = [
+            f"{domain}: [{', '.join(titles[:10])}]" for domain, titles in by_domain.items()
+        ]
+        lines.append("按领域：" + "；".join(domain_parts))
+    if by_module:
+        module_parts = [
+            f"{module}: [{', '.join(titles[:10])}]" for module, titles in by_module.items()
+        ]
+        lines.append("业务模块：" + "；".join(module_parts))
+    if conv_n == 0 and kp_n == 0:
+        lines.append("（该周期无真实对话/知识数据）")
+    return "\n".join(lines)
+
+
 def generate_weekly_report(
     trigger_time: datetime = None, target_date: str = None, force_overwrite: bool = False,
     on_progress=None,
@@ -156,7 +257,6 @@ def generate_weekly_report(
             _check_llm_available,
             _get_project_profile_snapshot,
             _get_user_profile_snapshot,
-            _read_md_reports,
             _write_pending_analysis,
         )
         from backend.business.vault_export.vault_exporter import get_vault_exporter
@@ -191,22 +291,20 @@ def generate_weekly_report(
             result["period_end"] = period_end
             return result
 
-        daily_summaries = _read_md_reports(
-            exporter._calendar_dir,
-            limit=7,
-            date_from=period_start,
-            date_to=period_end,
-        )
-        daily_summaries_text = ""
-        for ds in daily_summaries:
-            daily_summaries_text += f"### {ds['file']}\n{ds['content']}\n\n"
-
-        if not daily_summaries_text.strip():
-            if on_progress: on_progress(1.0, "", "本周无日报数据")
-            result["success"] = True
-            result["method"] = "none"
-            result["note"] = "本周无日报数据"
-            return result
+        # T6：直接查 DB 真实数据（conversations + knowledge_points），
+        # 缺失则显式失败——根绝「日报文件缺失却静默 success=True」的假数据流。
+        period_data = query_period_data(period_start, period_end)
+        if period_data["conversation_count"] == 0 and period_data["knowledge_count"] == 0:
+            if on_progress:
+                on_progress(1.0, "", "本周无对话/知识数据")
+            return {
+                "success": False,
+                "method": "failed",
+                "error": "该周期无对话/知识数据，无法生成周报",
+                "period_start": period_start,
+                "period_end": period_end,
+            }
+        daily_summaries_text = build_period_summary_text(period_data)
 
         user_snapshot = _get_user_profile_snapshot(db)
         project_snapshot = _get_project_profile_snapshot(db)
@@ -218,7 +316,7 @@ def generate_weekly_report(
                 analysis_type="weekly_report",
                 source_date=period_start,
                 raw_data={
-                    "daily_summaries": daily_summaries,
+                    "daily_summaries": daily_summaries_text,
                     "user_profile_snapshot": user_snapshot,
                     "project_profile_snapshot": project_snapshot,
                     "period_start": period_start,
@@ -259,7 +357,8 @@ def generate_weekly_report(
         )
 
         if llm_result and isinstance(llm_result, dict) and "summary" in llm_result:
-            if on_progress: on_progress(0.80, "", "正在导出周报文件...")
+            if on_progress:
+                on_progress(0.80, "", "正在导出周报文件...")
             file_path = exporter.export_weekly_report(period_start, period_end, llm_result)
             result["success"] = True
             result["method"] = "llm"
@@ -270,7 +369,7 @@ def generate_weekly_report(
                 analysis_type="weekly_report",
                 source_date=period_start,
                 raw_data={
-                    "daily_summaries": daily_summaries,
+                    "daily_summaries": daily_summaries_text,
                     "user_profile_snapshot": user_snapshot,
                     "project_profile_snapshot": project_snapshot,
                     "period_start": period_start,
@@ -324,7 +423,6 @@ def generate_monthly_report(
             _check_llm_available,
             _get_project_profile_snapshot,
             _get_user_profile_snapshot,
-            _read_md_reports,
             _write_pending_analysis,
         )
         from backend.business.vault_export.vault_exporter import get_vault_exporter
@@ -363,21 +461,17 @@ def generate_monthly_report(
             result["period_end"] = period_end
             return result
 
-        weekly_summaries = _read_md_reports(
-            exporter._reports_dir / "Weekly",
-            limit=5,
-            date_from=period_start,
-            date_to=period_end,
-        )
-        weekly_summaries_text = ""
-        for ws in weekly_summaries:
-            weekly_summaries_text += f"### {ws['file']}\n{ws['content']}\n\n"
-
-        if not weekly_summaries_text.strip():
-            result["success"] = True
-            result["method"] = "none"
-            result["note"] = "本月无周报数据"
-            return result
+        # T6：直接查 DB 真实数据，缺失则显式失败。
+        period_data = query_period_data(period_start, period_end)
+        if period_data["conversation_count"] == 0 and period_data["knowledge_count"] == 0:
+            return {
+                "success": False,
+                "method": "failed",
+                "error": "该周期无对话/知识数据，无法生成月报",
+                "period_start": period_start,
+                "period_end": period_end,
+            }
+        weekly_summaries_text = build_period_summary_text(period_data)
 
         user_snapshot = _get_user_profile_snapshot(db)
         project_snapshot = _get_project_profile_snapshot(db)
@@ -389,7 +483,7 @@ def generate_monthly_report(
                 analysis_type="monthly_report",
                 source_date=period_start,
                 raw_data={
-                    "weekly_summaries": weekly_summaries,
+                    "weekly_summaries": weekly_summaries_text,
                     "user_profile_snapshot": user_snapshot,
                     "project_profile_snapshot": project_snapshot,
                     "period_start": period_start,
@@ -429,7 +523,8 @@ def generate_monthly_report(
         )
 
         if llm_result and isinstance(llm_result, dict) and "summary" in llm_result:
-            if on_progress: on_progress(0.80, "", "正在导出月报文件...")
+            if on_progress:
+                on_progress(0.80, "", "正在导出月报文件...")
             file_path = exporter.export_monthly_report(period_start, period_end, llm_result)
             result["success"] = True
             result["method"] = "llm"
@@ -449,7 +544,7 @@ def generate_monthly_report(
                 analysis_type="monthly_report",
                 source_date=period_start,
                 raw_data={
-                    "weekly_summaries": weekly_summaries,
+                    "weekly_summaries": weekly_summaries_text,
                     "user_profile_snapshot": user_snapshot,
                     "project_profile_snapshot": project_snapshot,
                     "period_start": period_start,
@@ -503,7 +598,6 @@ def generate_annual_report(
             _check_llm_available,
             _get_project_profile_snapshot,
             _get_user_profile_snapshot,
-            _read_md_reports,
             _write_pending_analysis,
         )
         from backend.business.vault_export.vault_exporter import get_vault_exporter
@@ -530,21 +624,17 @@ def generate_annual_report(
             result["period_end"] = period_end
             return result
 
-        monthly_summaries = _read_md_reports(
-            exporter._reports_dir / "Monthly",
-            limit=12,
-            date_from=period_start,
-            date_to=period_end,
-        )
-        monthly_summaries_text = ""
-        for ms in monthly_summaries:
-            monthly_summaries_text += f"### {ms['file']}\n{ms['content']}\n\n"
-
-        if not monthly_summaries_text.strip():
-            result["success"] = True
-            result["method"] = "none"
-            result["note"] = "本年无月报数据"
-            return result
+        # T6：直接查 DB 真实数据，缺失则显式失败。
+        period_data = query_period_data(period_start, period_end)
+        if period_data["conversation_count"] == 0 and period_data["knowledge_count"] == 0:
+            return {
+                "success": False,
+                "method": "failed",
+                "error": "该周期无对话/知识数据，无法生成年报",
+                "period_start": period_start,
+                "period_end": period_end,
+            }
+        monthly_summaries_text = build_period_summary_text(period_data)
 
         user_snapshot = _get_user_profile_snapshot(db)
         project_snapshot = _get_project_profile_snapshot(db)
@@ -556,7 +646,7 @@ def generate_annual_report(
                 analysis_type="annual_report",
                 source_date=period_start,
                 raw_data={
-                    "monthly_summaries": monthly_summaries,
+                    "monthly_summaries": monthly_summaries_text,
                     "user_profile_snapshot": user_snapshot,
                     "project_profile_snapshot": project_snapshot,
                     "year": year_str,
@@ -595,7 +685,8 @@ def generate_annual_report(
         )
 
         if llm_result and isinstance(llm_result, dict) and "summary" in llm_result:
-            if on_progress: on_progress(0.80, "", "正在导出年报文件...")
+            if on_progress:
+                on_progress(0.80, "", "正在导出年报文件...")
             file_path = exporter.export_annual_report(year_str, llm_result)
             result["success"] = True
             result["method"] = "llm"
@@ -606,7 +697,7 @@ def generate_annual_report(
                 analysis_type="annual_report",
                 source_date=period_start,
                 raw_data={
-                    "monthly_summaries": monthly_summaries,
+                    "monthly_summaries": monthly_summaries_text,
                     "user_profile_snapshot": user_snapshot,
                     "project_profile_snapshot": project_snapshot,
                     "year": year_str,

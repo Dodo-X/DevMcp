@@ -499,12 +499,13 @@ class ConversationEngine:
             end_time = datetime.now()
             duration_ms = calc_duration_ms(start_time)
 
-            knowledge_ids = result.get("knowledge_point_ids", [])
+            output = result.get("output", {}) or {}
+            knowledge_generated = output.get("knowledge_generated", 0)
 
             dao.update_step_status(
                 step_id=step_id,
                 status="completed",
-                output_data=result.get("output", {}),
+                output_data=output,
                 error_message=None,
                 completed_at=end_time.isoformat(),
                 duration_ms=duration_ms,
@@ -518,8 +519,8 @@ class ConversationEngine:
                 "status": "success",
                 "step_id": step_id,
                 "duration_ms": duration_ms,
-                "output": result.get("output", {}),
-                "knowledge_points_created": len(knowledge_ids),
+                "output": output,
+                "knowledge_points_created": knowledge_generated,
             }
 
         except Exception as e:
@@ -582,7 +583,7 @@ class ConversationEngine:
         analysis_result = llm.analyze_conversation(content, source, client)
 
         if analysis_result:
-            return {"output": analysis_result, "knowledge_point_ids": []}
+            return {"output": analysis_result}
         else:
             raise RuntimeError("LLM analysis failed or returned empty result")
 
@@ -611,7 +612,6 @@ class ConversationEngine:
 
         return {
             "output": {"knowledge_generated": len(knowledge_ids)},
-            "knowledge_point_ids": knowledge_ids,
         }
 
     def _execute_user_profile_step(self, step: dict, input_data: dict) -> dict[str, Any]:
@@ -624,7 +624,7 @@ class ConversationEngine:
         llm = get_llm_engine()
         result = llm.apply_user_traits(user_traits, source="profile_step")
 
-        return {"output": {"traits_extracted": result.get("skills", 0)}, "knowledge_point_ids": []}
+        return {"output": {"traits_extracted": result.get("skills", 0)}}
 
     def _execute_system_optimize_step(self, step: dict, input_data: dict) -> dict[str, Any]:
         """执行系统优化建议步骤"""
@@ -651,10 +651,9 @@ class ConversationEngine:
 
             return {
                 "output": {"suggestions_generated": len(suggestions)},
-                "knowledge_point_ids": [],
             }
         else:
-            return {"output": {"suggestions_generated": 0}, "knowledge_point_ids": []}
+            return {"output": {"suggestions_generated": 0}}
 
     # ══════════════════════════════════════════════════════════
     # 工具方法

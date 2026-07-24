@@ -82,24 +82,40 @@ def srv():
 
 
 def test_reports_generate_weekly_returns_200(srv):
-    """[回归-缺陷A已修复] POST /api/reports/generate {type:weekly} 应返回 200。"""
+    """[回归-缺陷A已修复] POST /api/reports/generate {type:weekly} 应返回 200。
+
+    T6：空库（无对话/知识点）周期应显式失败 method='failed'，不再静默 success=True。
+    端点仍返回 HTTP 200（结果由 JSON 体描述）。
+    """
     r = httpx.Client().post(srv + "/api/reports/generate", json={"type": "weekly"})
     assert r.status_code == 200, f"实际 {r.status_code}: {r.text}"
-    assert r.json().get("success") is True
+    body = r.json()
+    assert body.get("success") is False
+    assert body.get("method") == "failed"
 
 
 def test_reports_generate_monthly_returns_200(srv):
-    """[回归-缺陷A已修复] POST /api/reports/generate {type:monthly} 应返回 200。"""
+    """[回归-缺陷A已修复] POST /api/reports/generate {type:monthly} 应返回 200。
+
+    T6：空库周期显式失败 method='failed'。
+    """
     r = httpx.Client().post(srv + "/api/reports/generate", json={"type": "monthly"})
     assert r.status_code == 200, f"实际 {r.status_code}: {r.text}"
-    assert r.json().get("success") is True
+    body = r.json()
+    assert body.get("success") is False
+    assert body.get("method") == "failed"
 
 
 def test_reports_generate_annual_returns_200(srv):
-    """[回归-缺陷A已修复] POST /api/reports/generate {type:annual} 应返回 200。"""
+    """[回归-缺陷A已修复] POST /api/reports/generate {type:annual} 应返回 200。
+
+    T6：空库周期显式失败 method='failed'。
+    """
     r = httpx.Client().post(srv + "/api/reports/generate", json={"type": "annual"})
     assert r.status_code == 200, f"实际 {r.status_code}: {r.text}"
-    assert r.json().get("success") is True
+    body = r.json()
+    assert body.get("success") is False
+    assert body.get("method") == "failed"
 
 
 def test_reports_generate_daily_works(srv):

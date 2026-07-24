@@ -33,6 +33,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .md_data_loader import load_knowledge_grouped
 from .md_engine import get_assembler
 
 logger = logging.getLogger(__name__)
@@ -139,6 +140,8 @@ class VaultExporter:
         批量导出知识卡片（仅导出知识卡片，对话/统计走 SQLite DB 插件）。
 
         v2.1：不再导出对话 MD 文件，对话列表和统计由 Obsidian SQLite DB 插件直连查询。
+        T7：改为按 domain+tag / project+module 聚合导出（Cards / Efforts），
+            每个 (domain,tag) / (project,module) 一个聚合文件，不再逐点写文件。
         """
         result = {
             "skills_exported": 0,
@@ -147,27 +150,17 @@ class VaultExporter:
         }
         project = project or self._derive_project_name()
 
-        # 按 knowledge_ids 逐一导出知识卡片
-        for kid in knowledge_ids or []:
-            try:
-                kp_row = self._get_knowledge_by_id(kid)
-                if not kp_row:
-                    continue
-
-                kp_type = kp_row.get("type", "skill")
-                if kp_type == "business":
-                    path = self.export_business_card(kid, kp_row, project=project)
-                    if path:
-                        result["business_exported"] += 1
-                else:
-                    path = self.export_skill_card(kid, kp_row, project=project)
-                    if path:
-                        result["skills_exported"] += 1
-            except Exception as e:
-                logger.warning(
-                    "VaultExporter.export_batch: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
-                )
-                result["errors"].append(f"知识导出失败 [{kid}]: {e}")
+        # T7：直接全量聚合导出（单一事实源 knowledge_points），避免逐点碎片文件。
+        try:
+            grouped = load_knowledge_grouped()
+            skills, business = self._export_grouped(grouped, result)
+            result["skills_exported"] = skills
+            result["business_exported"] = business
+        except Exception as e:
+            logger.warning(
+                "VaultExporter.export_batch: 未预期的异常被静默捕获（P-17 收口）", exc_info=True
+            )
+            result["errors"].append(f"聚合导出失败: {e}")
 
         # 生成/更新项目仪表盘（SQL 驱动）
         try:
@@ -180,7 +173,7 @@ class VaultExporter:
             result["errors"].append(f"仪表盘生成失败: {e}")
 
         logger.info(
-            f"📤 Vault 批量导出完成: "
+            f"📤 Vault 聚合批量导出完成: "
             f"业务={result['business_exported']}, "
             f"技能={result['skills_exported']}, "
             f"错误={len(result['errors'])}"
@@ -191,36 +184,23 @@ class VaultExporter:
         """
         全量重导所有知识点到 MD 文件（v8.0：移除 auto_synced_to_md 过滤，始终全量导出）
 
+        T7：按 domain+tag / project+module 聚合导出（Cards / Efforts）。
+
         Returns:
             {"total": N, "exported": N, "skipped": N, "errors": [...]}
         """
         result = {"total": 0, "exported": 0, "skipped": 0, "errors": []}
         try:
-            rows = self.db.query_local(
-                "SELECT knowledge_id, type FROM knowledge_points ORDER BY id"
+            grouped = load_knowledge_grouped()
+            skill_total = sum(
+                len(rows) for tm in grouped.get("skill", {}).values() for rows in tm.values()
             )
-            result["total"] = len(rows or [])
-            for row in rows or []:
-                try:
-                    kp_row = self._get_knowledge_by_id(row["knowledge_id"])
-                    if not kp_row:
-                        result["skipped"] += 1
-                        continue
-                    kp_type = row.get("type", "skill")
-                    if kp_type == "business":
-                        path = self.export_business_card(row["knowledge_id"], kp_row)
-                    else:
-                        path = self.export_skill_card(row["knowledge_id"], kp_row)
-                    if path:
-                        result["exported"] += 1
-                    else:
-                        result["skipped"] += 1
-                except Exception as e:
-                    logger.warning(
-                        "VaultExporter.export_all_knowledge: 未预期的异常被静默捕获（P-17 收口）",
-                        exc_info=True,
-                    )
-                    result["errors"].append(f"导出失败 [{row['knowledge_id']}]: {e}")
+            business_total = sum(
+                len(rows) for pm in grouped.get("business", {}).values() for rows in pm.values()
+            )
+            result["total"] = skill_total + business_total
+            skills, business = self._export_grouped(grouped, result)
+            result["exported"] = skills + business
         except Exception as e:
             logger.warning(
                 "VaultExporter.export_all_knowledge: 未预期的异常被静默捕获（P-17 收口）",
@@ -228,6 +208,119 @@ class VaultExporter:
             )
             result["errors"].append(f"全量导出失败: {e}")
         return result
+
+    # ══════════════════════════════════════════════════════════
+    # T7 聚合导出（Cards / Efforts）
+    # ══════════════════════════════════════════════════════════
+
+    def _export_grouped(self, grouped: dict, result: dict) -> tuple[int, int]:
+        """
+        按 domain+tag（skill）/ project+module（business）聚合写出 Cards / Efforts 文件。
+
+        Returns:
+            (skills_files, business_files) 已写出的聚合文件数。
+        """
+        skills = 0
+        business = 0
+        # skill: out['skill'] = {domain: {tag: [rows]}}
+        for domain, tag_map in (grouped.get("skill") or {}).items():
+            for tag, rows in tag_map.items():
+                try:
+                    self._write_grouped_file("skill", domain, tag, None, rows)
+                    skills += 1
+                except Exception as e:
+                    logger.warning(
+                        "VaultExporter._export_grouped: skill 聚合失败（P-17 收口）", exc_info=True
+                    )
+                    result["errors"].append(f"skill 聚合失败 [{domain}/{tag}]: {e}")
+        # business: out['business'] = {project: {module: [rows]}}
+        for project, module_map in (grouped.get("business") or {}).items():
+            for module, rows in module_map.items():
+                try:
+                    self._write_grouped_file("business", project, None, module, rows)
+                    business += 1
+                except Exception as e:
+                    logger.warning(
+                        "VaultExporter._export_grouped: business 聚合失败（P-17 收口）", exc_info=True
+                    )
+                    result["errors"].append(f"business 聚合失败 [{project}/{module}]: {e}")
+        return skills, business
+
+    def _write_grouped_file(
+        self,
+        card_type: str,
+        domain: str,
+        tag: str | None,
+        module: str | None,
+        rows: list[dict],
+    ) -> str | None:
+        """
+        写出一个聚合知识文件（Cards 或 Efforts）。
+
+        - skill    → Cards/{sanitize(domain)}/{sanitize(tag)}.md
+        - business → Efforts/{sanitize(project=domain)}/{sanitize(module)}.md
+          （module 为空时文件名取 "未分类模块"）
+
+        frontmatter 含 type/domain/(tag|module)/count/updated；正文为知识点清单。
+        """
+        if not rows:
+            return None
+
+        if card_type == "skill":
+            safe_domain = self._sanitize_path(domain or "General")
+            safe_tag = self._sanitize_path(tag or "未分类标签")
+            dir_path = self._vault_root / "Cards" / safe_domain
+            file_path = dir_path / f"{safe_tag}.md"
+            fm = [
+                "---",
+                "type: skill",
+                f"domain: {self._escape_yaml(domain or 'General')}",
+                f"tag: {self._escape_yaml(tag or '')}",
+                f"count: {len(rows)}",
+                f"updated: {self._escape_yaml(self._latest_created(rows))}",
+                "---",
+            ]
+            heading = f"# {domain or 'General'} · {tag or '未分类标签'}"
+        else:
+            project = domain or self._derive_project_name()
+            mod = module or "未分类模块"
+            safe_project = self._sanitize_path(project)
+            safe_module = self._sanitize_path(mod)
+            dir_path = self._vault_root / "Efforts" / safe_project
+            file_path = dir_path / f"{safe_module}.md"
+            fm = [
+                "---",
+                "type: business",
+                f"domain: {self._escape_yaml(project)}",
+                f"module: {self._escape_yaml(mod)}",
+                f"count: {len(rows)}",
+                f"updated: {self._escape_yaml(self._latest_created(rows))}",
+                "---",
+            ]
+            heading = f"# {project} · {mod}"
+
+        dir_path.mkdir(parents=True, exist_ok=True)
+        parts = [heading, "", "## 📇 知识点清单", ""]
+        for r in rows:
+            title = r.get("title", "未命名")
+            content = (r.get("content", "") or "")[:200]
+            source_id = r.get("source_id", "")
+            src_ref = f"（[[来源]]({source_id})）" if source_id else ""
+            parts.append(f"- **{title}** — {content} {src_ref}".rstrip())
+        body = "\n".join(parts)
+        self._write_markdown(file_path, "\n".join(fm), body)
+        logger.info(f"📝 聚合{card_type}知识: {file_path}（{len(rows)} 条）")
+        return str(file_path)
+
+    @staticmethod
+    def _latest_created(rows: list[dict]) -> str:
+        """取分组内最新 created_at（ISO 字符串直接比较即可）"""
+        latest = ""
+        for r in rows:
+            c = r.get("created_at", "") or ""
+            if c > latest:
+                latest = c
+        return latest or datetime.now().isoformat()
 
     def export_profile_to_vault(self, profile_data: dict, date_str: str) -> str | None:
         """导出用户画像到 Atlas/用户画像.md（v2.3: 委托 MdAssembler）"""
@@ -486,9 +579,16 @@ class VaultExporter:
                     )
                     continue
 
-        # 统计知识卡片
-        business_dir = self._vault_root / "Efforts" / safe_project / "业务知识"
-        business_count = len(list(business_dir.glob("*.md"))) if business_dir.exists() else 0
+        # 统计知识卡片（T7：新布局 Efforts/{project}/{module}.md，兼容旧 业务知识/ 子目录）
+        business_dir = self._vault_root / "Efforts" / safe_project
+        business_count = 0
+        if business_dir.exists():
+            for _f in business_dir.glob("*.md"):
+                if _f.name not in ("项目仪表盘.md", "项目画像.md"):
+                    business_count += 1
+            legacy = business_dir / "业务知识"
+            if legacy.exists():
+                business_count += len(list(legacy.glob("*.md")))
 
         skill_count = 0
         skill_links = []

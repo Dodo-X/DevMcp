@@ -170,13 +170,20 @@ def _register_prompts():
 
 
 def _register_task_handlers():
-    """注册各模块的任务处理器到 task_queue（v8.1 全模块 handler 注册）"""
+    """注册各模块的任务处理器到 task_queue（v8.1 全模块 handler 注册）
+
+    v9.13: 注册失败不再静默吞 — 改为 logger.error + exc_info，
+    并在全部注册后做一次完整性校验，缺失关键 handler 时明确告警。
+    """
+    _registration_errors = []
+
     try:
         from backend.business.conversation_mgr import register_task_handlers
 
         register_task_handlers()
     except Exception as e:
-        logger.warning(f"注册对话任务处理器失败: {e}")
+        logger.error(f"注册对话任务处理器失败: {e}", exc_info=True)
+        _registration_errors.append(("conversation_mgr", e))
 
     try:
         from backend.business.vault_export.vault_exporter import (
@@ -185,7 +192,8 @@ def _register_task_handlers():
 
         register_vault()
     except Exception as e:
-        logger.warning(f"注册 Vault 导出任务处理器失败: {e}")
+        logger.error(f"注册 Vault 导出任务处理器失败: {e}", exc_info=True)
+        _registration_errors.append(("vault_export", e))
 
     try:
         from backend.business.data_cleanup.cleanup_service import (
@@ -194,7 +202,8 @@ def _register_task_handlers():
 
         register_cleanup()
     except Exception as e:
-        logger.warning(f"注册清理任务处理器失败: {e}")
+        logger.error(f"注册清理任务处理器失败: {e}", exc_info=True)
+        _registration_errors.append(("cleanup", e))
 
     try:
         from backend.business.task_handlers.daily_engine import (
@@ -203,7 +212,37 @@ def _register_task_handlers():
 
         register_daily()
     except Exception as e:
-        logger.warning(f"注册日报任务处理器失败: {e}")
+        logger.error(f"注册日报任务处理器失败: {e}", exc_info=True)
+        _registration_errors.append(("daily_engine", e))
+
+    # ── 注册���完整性校验 ──
+    _REQUIRED_HANDLERS = {
+        "step_analysis": "conversation_mgr",
+        "conversation_finalize": "conversation_mgr",
+        "finalize_business_tech": "conversation_mgr",
+        "finalize_user_profile": "conversation_mgr",
+        "finalize_knowledge_graph": "conversation_mgr",
+        "daily_summary": "daily_engine",
+        "weekly_report": "daily_engine",
+        "monthly_report": "daily_engine",
+        "annual_report": "daily_engine",
+        "vault_export_daily": "vault_export",
+    }
+    try:
+        from backend.core.task_queue_kernel.queue_client import get_task_queue
+
+        registered = set(get_task_queue().get_registered_types())
+        missing = [h for h in _REQUIRED_HANDLERS if h not in registered]
+        if missing:
+            logger.error(
+                f"⚠️ 启动后 handler 校验失败 — 缺失 {len(missing)} 个关键 handler: {missing}。"
+                f"已注册 {len(registered)} 个: {sorted(registered)}。"
+                f"注册异常模块: {[m for m, _ in _registration_errors] or '无（可能是导入链问题）'}"
+            )
+        else:
+            logger.info(f"✅ handler 校验通过 — {len(registered)} 个 handler 已注册")
+    except Exception:
+        logger.error("handler 校验过程本身异常", exc_info=True)
 
 
 @mcp.tool()
