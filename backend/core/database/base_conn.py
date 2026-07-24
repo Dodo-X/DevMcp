@@ -1674,10 +1674,13 @@ class Database:
         import uuid
 
         try:
-            # v9.11: domain 归一化
+            # v9.11: domain 归一化（仅 skill 类）
+            # business 的 domain = 项目名（如 devPartner = system_id），不应归一
+            # 为标准技能领域，否则会落到 '通用工程' 破坏 T7 按项目聚合。
             from backend.business.data_governance.normalizer import normalize_domain
 
-            domain = normalize_domain(domain)
+            if kp_type != "business":
+                domain = normalize_domain(domain)
 
             # v10: 强制单 tag（写入列仍叫 tags，长度恒为 1，兼容读取方 tags[0]）
             _single_tag = (tags[0] if tags else "") if isinstance(tags, list) else tags
